@@ -1,0 +1,890 @@
+# 标签体系系统管理 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 建设标签体系一期管理能力，支持人/货/场标签维度、标签值、虚拟标签和结构化 Excel 导入。
+
+**Architecture:** 在 `yudao-module-business` 新增独立 `tag` 领域，使用三张元数据表承载 L1-L3 维度、L4 标签值和虚拟标签定义。前端在 `ytsh-ui-vue3` 新增业务标签页面，通过 Yudao 后台动态菜单挂载，不改静态路由。
+
+**Tech Stack:** Java 17, Spring Boot 3, MyBatis Plus, Yudao BaseDbUnitTest, Vue 3, TypeScript, Element Plus, pnpm.
+
+---
+
+## File Structure
+
+### Backend schema and tests
+
+- Modify: `yudao-module-business/src/test/resources/sql/create_tables.sql` — 给 H2 单测环境增加 `tag_dimension`、`tag_value`、`tag_virtual` 表。
+- Modify: `yudao-module-business/src/test/resources/sql/clean.sql` — 单测后清理三张标签表。
+- Create: `sql/tag_system_management.sql` — MySQL 建表脚本，供真实环境执行。
+
+### Backend Java
+
+- Modify: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/enums/ErrorCodeConstants.java` — 新增标签错误码。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/enums/tag/TagConstants.java` — 统一对象域、层级、状态、打标方式常量。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/dal/dataobject/tag/TagDimensionDO.java` — 标签维度 DO。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/dal/dataobject/tag/TagValueDO.java` — 标签值 DO。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/dal/dataobject/tag/TagVirtualDO.java` — 虚拟标签 DO。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/dal/mysql/tag/TagDimensionMapper.java` — 标签维度 Mapper。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/dal/mysql/tag/TagValueMapper.java` — 标签值 Mapper。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/dal/mysql/tag/TagVirtualMapper.java` — 虚拟标签 Mapper。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/controller/admin/tag/vo/*.java` — 维度、标签值、虚拟标签、导入相关 VO。
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/service/tag/TagDimensionService.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/service/tag/TagValueService.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/service/tag/TagVirtualService.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/service/tag/TagDimensionServiceImpl.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/service/tag/TagValueServiceImpl.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/service/tag/TagVirtualServiceImpl.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/controller/admin/tag/TagDimensionController.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/controller/admin/tag/TagValueController.java`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/controller/admin/tag/TagVirtualController.java`
+
+### Backend tests
+
+- Create: `yudao-module-business/src/test/java/cn/iocoder/yudao/module/business/service/tag/TagDimensionServiceImplTest.java`
+- Create: `yudao-module-business/src/test/java/cn/iocoder/yudao/module/business/service/tag/TagValueServiceImplTest.java`
+- Create: `yudao-module-business/src/test/java/cn/iocoder/yudao/module/business/service/tag/TagVirtualServiceImplTest.java`
+
+### Frontend
+
+- Create: `ytsh-ui-vue3/src/api/business/tag/dimension/index.ts`
+- Create: `ytsh-ui-vue3/src/api/business/tag/value/index.ts`
+- Create: `ytsh-ui-vue3/src/api/business/tag/virtual/index.ts`
+- Create: `ytsh-ui-vue3/src/views/business/tag/dimension/index.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/dimension/TagDimensionForm.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/value/index.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/value/TagValueForm.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/value/TagValueImportForm.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/virtual/index.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/virtual/TagVirtualForm.vue`
+
+---
+
+## Task 1: Backend schema and constants
+
+**Files:**
+- Modify: `yudao-module-business/src/test/resources/sql/create_tables.sql`
+- Modify: `yudao-module-business/src/test/resources/sql/clean.sql`
+- Create: `sql/tag_system_management.sql`
+- Create: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/enums/tag/TagConstants.java`
+- Modify: `yudao-module-business/src/main/java/cn/iocoder/yudao/module/business/enums/ErrorCodeConstants.java`
+
+- [ ] **Step 1: Add H2 test tables**
+
+Append this to `yudao-module-business/src/test/resources/sql/create_tables.sql`:
+
+```sql
+CREATE TABLE IF NOT EXISTS `tag_dimension` (
+    `id` bigint NOT NULL GENERATED BY DEFAULT AS IDENTITY,
+    `domain_type` varchar(32) NOT NULL,
+    `parent_id` bigint NOT NULL DEFAULT 0,
+    `level` tinyint NOT NULL,
+    `name` varchar(100) NOT NULL,
+    `code` varchar(100) NOT NULL,
+    `sort` int NOT NULL DEFAULT 0,
+    `status` tinyint NOT NULL DEFAULT 1,
+    `description` varchar(500) DEFAULT NULL,
+    `creator` varchar(64) DEFAULT '',
+    `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updater` varchar(64) DEFAULT '',
+    `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `deleted` bit NOT NULL DEFAULT FALSE,
+    `tenant_id` bigint NOT NULL DEFAULT 1,
+    PRIMARY KEY (`id`)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_tag_dimension_parent_code` ON `tag_dimension` (`tenant_id`, `domain_type`, `parent_id`, `code`, `deleted`);
+CREATE INDEX IF NOT EXISTS `idx_tag_dimension_parent` ON `tag_dimension` (`parent_id`);
+
+CREATE TABLE IF NOT EXISTS `tag_value` (
+    `id` bigint NOT NULL GENERATED BY DEFAULT AS IDENTITY,
+    `dimension_id` bigint NOT NULL,
+    `name` varchar(100) NOT NULL,
+    `code` varchar(100) NOT NULL,
+    `tag_method` varchar(32) NOT NULL,
+    `data_source` varchar(200) DEFAULT NULL,
+    `update_frequency` varchar(100) DEFAULT NULL,
+    `logic_description` varchar(1000) DEFAULT NULL,
+    `sort` int NOT NULL DEFAULT 0,
+    `status` tinyint NOT NULL DEFAULT 1,
+    `creator` varchar(64) DEFAULT '',
+    `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updater` varchar(64) DEFAULT '',
+    `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `deleted` bit NOT NULL DEFAULT FALSE,
+    `tenant_id` bigint NOT NULL DEFAULT 1,
+    PRIMARY KEY (`id`)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_tag_value_dimension_code` ON `tag_value` (`tenant_id`, `dimension_id`, `code`, `deleted`);
+CREATE INDEX IF NOT EXISTS `idx_tag_value_dimension` ON `tag_value` (`dimension_id`);
+
+CREATE TABLE IF NOT EXISTS `tag_virtual` (
+    `id` bigint NOT NULL GENERATED BY DEFAULT AS IDENTITY,
+    `domain_type` varchar(32) NOT NULL,
+    `name` varchar(100) NOT NULL,
+    `code` varchar(100) NOT NULL,
+    `expression_json` clob NOT NULL,
+    `expression_summary` varchar(1000) DEFAULT NULL,
+    `usage_scenario` varchar(500) DEFAULT NULL,
+    `status` tinyint NOT NULL DEFAULT 1,
+    `creator` varchar(64) DEFAULT '',
+    `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updater` varchar(64) DEFAULT '',
+    `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `deleted` bit NOT NULL DEFAULT FALSE,
+    `tenant_id` bigint NOT NULL DEFAULT 1,
+    PRIMARY KEY (`id`)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_tag_virtual_domain_code` ON `tag_virtual` (`tenant_id`, `domain_type`, `code`, `deleted`);
+```
+
+- [ ] **Step 2: Add cleanup SQL**
+
+Change `yudao-module-business/src/test/resources/sql/clean.sql` to:
+
+```sql
+DELETE FROM `tag_virtual`;
+DELETE FROM `tag_value`;
+DELETE FROM `tag_dimension`;
+DELETE FROM `biz_external_api_call_log`;
+```
+
+- [ ] **Step 3: Add MySQL DDL**
+
+Create `sql/tag_system_management.sql` with MySQL equivalents:
+
+```sql
+CREATE TABLE IF NOT EXISTS `tag_dimension` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `domain_type` varchar(32) NOT NULL COMMENT '对象域 PRODUCT/STORE/MEMBER',
+  `parent_id` bigint NOT NULL DEFAULT 0 COMMENT '父级维度 ID',
+  `level` tinyint NOT NULL COMMENT '层级 1/2/3',
+  `name` varchar(100) NOT NULL COMMENT '维度名称',
+  `code` varchar(100) NOT NULL COMMENT '维度编码',
+  `sort` int NOT NULL DEFAULT 0 COMMENT '排序',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态 0停用 1启用',
+  `description` varchar(500) DEFAULT NULL COMMENT '说明',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否删除',
+  `tenant_id` bigint NOT NULL DEFAULT 1 COMMENT '租户编号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tag_dimension_parent_code` (`tenant_id`, `domain_type`, `parent_id`, `code`, `deleted`),
+  KEY `idx_tag_dimension_parent` (`parent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='标签维度表';
+
+CREATE TABLE IF NOT EXISTS `tag_value` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `dimension_id` bigint NOT NULL COMMENT '所属 L3 维度 ID',
+  `name` varchar(100) NOT NULL COMMENT '标签值名称',
+  `code` varchar(100) NOT NULL COMMENT '标签值编码',
+  `tag_method` varchar(32) NOT NULL COMMENT '打标方式',
+  `data_source` varchar(200) DEFAULT NULL COMMENT '数据源',
+  `update_frequency` varchar(100) DEFAULT NULL COMMENT '更新频率',
+  `logic_description` varchar(1000) DEFAULT NULL COMMENT '打标逻辑说明',
+  `sort` int NOT NULL DEFAULT 0 COMMENT '排序',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态 0停用 1启用',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否删除',
+  `tenant_id` bigint NOT NULL DEFAULT 1 COMMENT '租户编号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tag_value_dimension_code` (`tenant_id`, `dimension_id`, `code`, `deleted`),
+  KEY `idx_tag_value_dimension` (`dimension_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='标签值表';
+
+CREATE TABLE IF NOT EXISTS `tag_virtual` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `domain_type` varchar(32) NOT NULL COMMENT '对象域 PRODUCT/STORE/MEMBER',
+  `name` varchar(100) NOT NULL COMMENT '虚拟标签名称',
+  `code` varchar(100) NOT NULL COMMENT '虚拟标签编码',
+  `expression_json` longtext NOT NULL COMMENT '表达式 JSON',
+  `expression_summary` varchar(1000) DEFAULT NULL COMMENT '表达式摘要',
+  `usage_scenario` varchar(500) DEFAULT NULL COMMENT '使用场景',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态 0停用 1启用',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否删除',
+  `tenant_id` bigint NOT NULL DEFAULT 1 COMMENT '租户编号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tag_virtual_domain_code` (`tenant_id`, `domain_type`, `code`, `deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='虚拟标签表';
+```
+
+- [ ] **Step 4: Add constants**
+
+Create `TagConstants.java`:
+
+```java
+package cn.iocoder.yudao.module.business.enums.tag;
+
+import java.util.Set;
+
+public interface TagConstants {
+
+    Long ROOT_PARENT_ID = 0L;
+    Integer LEVEL_L1 = 1;
+    Integer LEVEL_L2 = 2;
+    Integer LEVEL_L3 = 3;
+    Integer STATUS_DISABLED = 0;
+    Integer STATUS_ENABLED = 1;
+
+    Set<String> DOMAIN_TYPES = Set.of("PRODUCT", "STORE", "MEMBER");
+    Set<String> TAG_METHODS = Set.of("MANUAL", "RULE", "ALGORITHM", "INHERIT");
+
+}
+```
+
+- [ ] **Step 5: Add error codes**
+
+Append to `ErrorCodeConstants.java` before the closing brace:
+
+```java
+    // ========== 标签体系 1-030-000-000 ==========
+    ErrorCode TAG_DIMENSION_NOT_EXISTS = new ErrorCode(1_030_000_000, "标签维度不存在");
+    ErrorCode TAG_DIMENSION_PARENT_NOT_EXISTS = new ErrorCode(1_030_000_001, "父级标签维度不存在");
+    ErrorCode TAG_DIMENSION_LEVEL_ERROR = new ErrorCode(1_030_000_002, "标签维度层级不正确");
+    ErrorCode TAG_DIMENSION_CODE_EXISTS = new ErrorCode(1_030_000_003, "同级下已存在该标签维度编码");
+    ErrorCode TAG_DIMENSION_HAS_CHILDREN = new ErrorCode(1_030_000_004, "标签维度存在子维度，无法删除");
+    ErrorCode TAG_DIMENSION_HAS_VALUE = new ErrorCode(1_030_000_005, "标签维度存在标签值，无法删除");
+    ErrorCode TAG_DOMAIN_TYPE_INVALID = new ErrorCode(1_030_000_006, "标签对象域不合法");
+    ErrorCode TAG_VALUE_NOT_EXISTS = new ErrorCode(1_030_001_000, "标签值不存在");
+    ErrorCode TAG_VALUE_CODE_EXISTS = new ErrorCode(1_030_001_001, "当前维度下已存在该标签值编码");
+    ErrorCode TAG_VALUE_DIMENSION_LEVEL_ERROR = new ErrorCode(1_030_001_002, "标签值只能挂在 L3 原子维度下");
+    ErrorCode TAG_METHOD_INVALID = new ErrorCode(1_030_001_003, "打标方式不合法");
+    ErrorCode TAG_VALUE_IMPORT_LIST_IS_EMPTY = new ErrorCode(1_030_001_004, "导入标签列表不能为空");
+    ErrorCode TAG_VIRTUAL_NOT_EXISTS = new ErrorCode(1_030_002_000, "虚拟标签不存在");
+    ErrorCode TAG_VIRTUAL_CODE_EXISTS = new ErrorCode(1_030_002_001, "当前对象域下已存在该虚拟标签编码");
+    ErrorCode TAG_VIRTUAL_EXPRESSION_INVALID = new ErrorCode(1_030_002_002, "虚拟标签表达式不是合法 JSON");
+```
+
+- [ ] **Step 6: Run existing business tests to verify schema still loads**
+
+Run: `mvn -pl yudao-module-business -Dtest=ExternalApiCallLogServiceImplTest test`
+
+Expected: build succeeds and existing test passes.
+
+---
+
+## Task 2: Tag dimension backend with TDD
+
+**Files:**
+- Create: `TagDimensionDO.java`, `TagDimensionMapper.java`, `TagDimensionService.java`, `TagDimensionServiceImpl.java`
+- Create: `TagDimensionSaveReqVO.java`, `TagDimensionListReqVO.java`, `TagDimensionRespVO.java`
+- Create: `TagDimensionServiceImplTest.java`
+
+- [ ] **Step 1: Write failing service tests**
+
+Create `TagDimensionServiceImplTest.java` with tests for create tree, reject wrong parent level, duplicate code, delete with children.
+
+```java
+package cn.iocoder.yudao.module.business.service.tag;
+
+import cn.iocoder.yudao.framework.test.core.ut.BaseDbUnitTest;
+import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagDimensionSaveReqVO;
+import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagDimensionDO;
+import cn.iocoder.yudao.module.business.dal.mysql.tag.TagDimensionMapper;
+import jakarta.annotation.Resource;
+import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.Import;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+@Import(TagDimensionServiceImpl.class)
+class TagDimensionServiceImplTest extends BaseDbUnitTest {
+
+    @Resource
+    private TagDimensionService tagDimensionService;
+    @Resource
+    private TagDimensionMapper tagDimensionMapper;
+
+    @Test
+    void createTagDimension_shouldCreateThreeLevelTree() {
+        Long l1 = tagDimensionService.createTagDimension(buildReq("PRODUCT", 0L, 1, "运营管理领域", "operation"));
+        Long l2 = tagDimensionService.createTagDimension(buildReq("PRODUCT", l1, 2, "商品角色", "product_role"));
+        Long l3 = tagDimensionService.createTagDimension(buildReq("PRODUCT", l2, 3, "功能角色", "function_role"));
+
+        List<TagDimensionDO> list = tagDimensionService.getTagDimensionList("PRODUCT", null, null);
+
+        assertEquals(3, list.size());
+        assertNotNull(tagDimensionMapper.selectById(l3));
+    }
+
+    @Test
+    void createTagDimension_shouldRejectL3UnderL1() {
+        Long l1 = tagDimensionService.createTagDimension(buildReq("PRODUCT", 0L, 1, "运营管理领域", "operation"));
+
+        assertThrows(RuntimeException.class, () ->
+                tagDimensionService.createTagDimension(buildReq("PRODUCT", l1, 3, "功能角色", "function_role")));
+    }
+
+    @Test
+    void createTagDimension_shouldRejectDuplicateCodeUnderSameParent() {
+        tagDimensionService.createTagDimension(buildReq("PRODUCT", 0L, 1, "运营管理领域", "operation"));
+
+        assertThrows(RuntimeException.class, () ->
+                tagDimensionService.createTagDimension(buildReq("PRODUCT", 0L, 1, "运营管理领域2", "operation")));
+    }
+
+    @Test
+    void deleteTagDimension_shouldRejectWhenHasChildren() {
+        Long l1 = tagDimensionService.createTagDimension(buildReq("PRODUCT", 0L, 1, "运营管理领域", "operation"));
+        tagDimensionService.createTagDimension(buildReq("PRODUCT", l1, 2, "商品角色", "product_role"));
+
+        assertThrows(RuntimeException.class, () -> tagDimensionService.deleteTagDimension(l1));
+    }
+
+    private static TagDimensionSaveReqVO buildReq(String domainType, Long parentId, Integer level, String name, String code) {
+        TagDimensionSaveReqVO reqVO = new TagDimensionSaveReqVO();
+        reqVO.setDomainType(domainType);
+        reqVO.setParentId(parentId);
+        reqVO.setLevel(level);
+        reqVO.setName(name);
+        reqVO.setCode(code);
+        reqVO.setSort(0);
+        reqVO.setStatus(1);
+        return reqVO;
+    }
+}
+```
+
+- [ ] **Step 2: Run failing test**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagDimensionServiceImplTest test`
+
+Expected: compile fails because tag classes do not exist.
+
+- [ ] **Step 3: Implement DO and mapper**
+
+Create `TagDimensionDO.java`:
+
+```java
+package cn.iocoder.yudao.module.business.dal.dataobject.tag;
+
+import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
+import com.baomidou.mybatisplus.annotation.KeySequence;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.*;
+
+@TableName("tag_dimension")
+@KeySequence("tag_dimension_seq")
+@Data
+@EqualsAndHashCode(callSuper = true)
+@ToString(callSuper = true)
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class TagDimensionDO extends BaseDO {
+    @TableId
+    private Long id;
+    private String domainType;
+    private Long parentId;
+    private Integer level;
+    private String name;
+    private String code;
+    private Integer sort;
+    private Integer status;
+    private String description;
+    private Long tenantId;
+}
+```
+
+Create `TagDimensionMapper.java`:
+
+```java
+package cn.iocoder.yudao.module.business.dal.mysql.tag;
+
+import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
+import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
+import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagDimensionDO;
+import org.apache.ibatis.annotations.Mapper;
+
+import java.util.List;
+
+@Mapper
+public interface TagDimensionMapper extends BaseMapperX<TagDimensionDO> {
+
+    default TagDimensionDO selectByParentAndCode(String domainType, Long parentId, String code) {
+        return selectOne(new LambdaQueryWrapperX<TagDimensionDO>()
+                .eq(TagDimensionDO::getDomainType, domainType)
+                .eq(TagDimensionDO::getParentId, parentId)
+                .eq(TagDimensionDO::getCode, code));
+    }
+
+    default List<TagDimensionDO> selectList(String domainType, Long parentId, Integer level) {
+        return selectList(new LambdaQueryWrapperX<TagDimensionDO>()
+                .eqIfPresent(TagDimensionDO::getDomainType, domainType)
+                .eqIfPresent(TagDimensionDO::getParentId, parentId)
+                .eqIfPresent(TagDimensionDO::getLevel, level)
+                .orderByAsc(TagDimensionDO::getSort)
+                .orderByAsc(TagDimensionDO::getId));
+    }
+
+    default Long selectCountByParentId(Long parentId) {
+        return selectCount(TagDimensionDO::getParentId, parentId);
+    }
+}
+```
+
+- [ ] **Step 4: Implement VO and service**
+
+Create `TagDimensionSaveReqVO.java`, `TagDimensionListReqVO.java`, `TagDimensionRespVO.java` with fields matching `TagDimensionDO` and Jakarta validation: `domainType`, `parentId`, `level`, `name`, `code` required.
+
+Create `TagDimensionService.java`:
+
+```java
+package cn.iocoder.yudao.module.business.service.tag;
+
+import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagDimensionSaveReqVO;
+import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagDimensionDO;
+import jakarta.validation.Valid;
+
+import java.util.List;
+
+public interface TagDimensionService {
+    Long createTagDimension(@Valid TagDimensionSaveReqVO createReqVO);
+    void updateTagDimension(@Valid TagDimensionSaveReqVO updateReqVO);
+    void deleteTagDimension(Long id);
+    TagDimensionDO getTagDimension(Long id);
+    List<TagDimensionDO> getTagDimensionList(String domainType, Long parentId, Integer level);
+}
+```
+
+Create `TagDimensionServiceImpl.java` implementing validations from the spec: legal domain, level 1-3, L1 parent=0, L2 parent level=1, L3 parent level=2, duplicate same-parent code, no delete with children.
+
+- [ ] **Step 5: Run dimension tests**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagDimensionServiceImplTest test`
+
+Expected: PASS.
+
+---
+
+## Task 3: Tag value backend, import, and tests
+
+**Files:**
+- Create: `TagValueDO.java`, `TagValueMapper.java`, `TagValueService.java`, `TagValueServiceImpl.java`
+- Create: `TagValueSaveReqVO.java`, `TagValuePageReqVO.java`, `TagValueRespVO.java`, `TagValueImportReqVO.java`, `TagValueImportRespVO.java`
+- Create: `TagValueServiceImplTest.java`
+
+- [ ] **Step 1: Write failing tests**
+
+Create tests for: create value under L3, reject value under L2, reject duplicate code, import creates hierarchy and values idempotently.
+
+- [ ] **Step 2: Run failing test**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagValueServiceImplTest test`
+
+Expected: compile fails because tag value classes do not exist.
+
+- [ ] **Step 3: Implement DO and mapper**
+
+Create `TagValueDO.java` with fields from `tag_value` and `@TableName("tag_value")`.
+
+Create `TagValueMapper.java` with methods:
+
+```java
+default TagValueDO selectByDimensionIdAndCode(Long dimensionId, String code)
+default List<TagValueDO> selectListByDimensionId(Long dimensionId)
+default Long selectCountByDimensionId(Long dimensionId)
+default PageResult<TagValueDO> selectPage(TagValuePageReqVO reqVO)
+```
+
+- [ ] **Step 4: Implement import VO**
+
+`TagValueImportReqVO` should use Excel annotations for:
+
+```java
+private String domainType;
+private String l1Name;
+private String l1Code;
+private String l2Name;
+private String l2Code;
+private String l3Name;
+private String l3Code;
+private String tagValueName;
+private String tagValueCode;
+private String tagMethod;
+private String dataSource;
+private String updateFrequency;
+private String logicDescription;
+private Integer sort;
+```
+
+`TagValueImportRespVO` should contain:
+
+```java
+private List<String> createNames;
+private List<String> updateNames;
+private Map<String, String> failureNames;
+```
+
+- [ ] **Step 5: Implement service**
+
+`TagValueServiceImpl` depends on `TagDimensionMapper` and `TagValueMapper`.
+
+Required behavior:
+
+- `createTagValue` validates tag method, dimension exists, dimension level is 3, duplicate code absent.
+- `updateTagValue` validates existing value, target dimension still L3, duplicate code absent excluding self.
+- `deleteTagValue` deletes by id after existence check.
+- `importTagValueList(list, updateSupport)` creates/updates L1/L2/L3 dimensions by `domainType + parent + code`, then creates/updates value by `dimensionId + tagValueCode`.
+- Empty import list throws `TAG_VALUE_IMPORT_LIST_IS_EMPTY`.
+- Row-level failures are captured in `failureNames` and do not abort the whole import.
+
+- [ ] **Step 6: Run value tests**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagValueServiceImplTest test`
+
+Expected: PASS.
+
+---
+
+## Task 4: Virtual tag backend and tests
+
+**Files:**
+- Create: `TagVirtualDO.java`, `TagVirtualMapper.java`, `TagVirtualService.java`, `TagVirtualServiceImpl.java`
+- Create: `TagVirtualSaveReqVO.java`, `TagVirtualPageReqVO.java`, `TagVirtualRespVO.java`
+- Create: `TagVirtualServiceImplTest.java`
+
+- [ ] **Step 1: Write failing tests**
+
+Test cases:
+
+```java
+@Test void createTagVirtual_shouldPersistValidJson()
+@Test void createTagVirtual_shouldRejectInvalidJson()
+@Test void createTagVirtual_shouldRejectDuplicateCodeInDomain()
+```
+
+- [ ] **Step 2: Run failing test**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagVirtualServiceImplTest test`
+
+Expected: compile fails because virtual tag classes do not exist.
+
+- [ ] **Step 3: Implement DO, mapper, service**
+
+`TagVirtualServiceImpl` should use Jackson `ObjectMapper.readTree(expressionJson)` for JSON validation. It should validate domain type and duplicate `domainType + code`.
+
+- [ ] **Step 4: Run virtual tests**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagVirtualServiceImplTest test`
+
+Expected: PASS.
+
+---
+
+## Task 5: Backend controllers and Excel endpoints
+
+**Files:**
+- Create: `TagDimensionController.java`
+- Create: `TagValueController.java`
+- Create: `TagVirtualController.java`
+
+- [ ] **Step 1: Implement dimension controller**
+
+Expose:
+
+```text
+POST   /admin-api/business/tag-dimension/create
+PUT    /admin-api/business/tag-dimension/update
+DELETE /admin-api/business/tag-dimension/delete?id=
+GET    /admin-api/business/tag-dimension/get?id=
+GET    /admin-api/business/tag-dimension/list?domainType=&parentId=&level=
+```
+
+Controller request mapping should be `/business/tag-dimension`; Yudao automatically prefixes `/admin-api`.
+
+Permissions:
+
+```text
+business:tag-dimension:create
+business:tag-dimension:update
+business:tag-dimension:delete
+business:tag-dimension:query
+```
+
+- [ ] **Step 2: Implement value controller**
+
+Expose:
+
+```text
+POST   /business/tag-value/create
+PUT    /business/tag-value/update
+DELETE /business/tag-value/delete?id=
+GET    /business/tag-value/get?id=
+GET    /business/tag-value/page
+GET    /business/tag-value/list-by-dimension?dimensionId=
+GET    /business/tag-value/get-import-template
+POST   /business/tag-value/import
+```
+
+Use `ExcelUtils.write` and `ExcelUtils.read` matching the existing category import pattern.
+
+- [ ] **Step 3: Implement virtual controller**
+
+Expose CRUD/page endpoints under `/business/tag-virtual` with permissions:
+
+```text
+business:tag-virtual:create
+business:tag-virtual:update
+business:tag-virtual:delete
+business:tag-virtual:query
+```
+
+- [ ] **Step 4: Run all tag service tests**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagDimensionServiceImplTest,TagValueServiceImplTest,TagVirtualServiceImplTest test`
+
+Expected: PASS.
+
+---
+
+## Task 6: Frontend API modules
+
+**Files:**
+- Create: `ytsh-ui-vue3/src/api/business/tag/dimension/index.ts`
+- Create: `ytsh-ui-vue3/src/api/business/tag/value/index.ts`
+- Create: `ytsh-ui-vue3/src/api/business/tag/virtual/index.ts`
+
+- [ ] **Step 1: Add dimension API**
+
+```ts
+import request from '@/config/axios'
+
+export interface TagDimension {
+  id?: number
+  domainType: string
+  parentId: number
+  level: number
+  name: string
+  code: string
+  sort?: number
+  status?: number
+  description?: string
+  children?: TagDimension[]
+}
+
+export const TagDimensionApi = {
+  getTagDimensionList: async (params) => request.get({ url: '/business/tag-dimension/list', params }),
+  getTagDimension: async (id: number) => request.get({ url: `/business/tag-dimension/get?id=${id}` }),
+  createTagDimension: async (data: TagDimension) => request.post({ url: '/business/tag-dimension/create', data }),
+  updateTagDimension: async (data: TagDimension) => request.put({ url: '/business/tag-dimension/update', data }),
+  deleteTagDimension: async (id: number) => request.delete({ url: `/business/tag-dimension/delete?id=${id}` })
+}
+```
+
+- [ ] **Step 2: Add value API**
+
+Include CRUD, page, list-by-dimension, template download, and import FormData endpoints under `/business/tag-value`.
+
+- [ ] **Step 3: Add virtual API**
+
+Include CRUD and page endpoints under `/business/tag-virtual`.
+
+- [ ] **Step 4: Type-check API modules**
+
+Run: `cd ytsh-ui-vue3 && pnpm ts:check`
+
+Expected: no new TypeScript errors from these files. If the repo has pre-existing type errors, record them and verify none point to `src/api/business/tag/**`.
+
+---
+
+## Task 7: Frontend dimension page
+
+**Files:**
+- Create: `ytsh-ui-vue3/src/views/business/tag/dimension/index.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/dimension/TagDimensionForm.vue`
+
+- [ ] **Step 1: Implement page**
+
+Build a `ContentWrap` page with:
+
+- domain filter: `PRODUCT` / `STORE` / `MEMBER`
+- tree table using `handleTree(list, 'id', 'parentId')`
+- columns: name, code, level, sort, status, description, operations
+- operations: create child, edit, delete
+
+- [ ] **Step 2: Implement form**
+
+Fields:
+
+```text
+domainType, parentId, level, name, code, sort, status, description
+```
+
+Rules:
+
+- create root defaults `parentId=0`, `level=1`
+- create child sets `parentId=row.id`, `level=row.level + 1`
+- prevent creating child when row.level is 3 in UI
+
+- [ ] **Step 3: Run frontend checks**
+
+Run: `cd ytsh-ui-vue3 && pnpm ts:check`
+
+Expected: no errors in tag dimension page files.
+
+---
+
+## Task 8: Frontend tag value page and import
+
+**Files:**
+- Create: `ytsh-ui-vue3/src/views/business/tag/value/index.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/value/TagValueForm.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/value/TagValueImportForm.vue`
+
+- [ ] **Step 1: Implement value list page**
+
+Filters:
+
+```text
+domainType, dimensionId, name, code, tagMethod, status
+```
+
+Columns:
+
+```text
+name, code, dimensionName if available, tagMethod, dataSource, updateFrequency, status, createTime, operations
+```
+
+- [ ] **Step 2: Implement value form**
+
+Fields:
+
+```text
+dimensionId, name, code, tagMethod, dataSource, updateFrequency, logicDescription, sort, status
+```
+
+Dimension selector should load dimensions and only allow choosing `level === 3`.
+
+- [ ] **Step 3: Implement import form**
+
+Follow existing `CategoryTableImportForm.vue` pattern:
+
+- upload Excel file
+- `updateSupport` switch
+- download template
+- call `TagValueApi.importTagValue(file, updateSupport)`
+- show created, updated, failed rows after import
+
+- [ ] **Step 4: Run frontend checks**
+
+Run: `cd ytsh-ui-vue3 && pnpm ts:check`
+
+Expected: no errors in tag value files.
+
+---
+
+## Task 9: Frontend virtual tag page
+
+**Files:**
+- Create: `ytsh-ui-vue3/src/views/business/tag/virtual/index.vue`
+- Create: `ytsh-ui-vue3/src/views/business/tag/virtual/TagVirtualForm.vue`
+
+- [ ] **Step 1: Implement virtual tag list**
+
+Filters:
+
+```text
+domainType, name, code, status
+```
+
+Columns:
+
+```text
+name, code, domainType, expressionSummary, usageScenario, status, operations
+```
+
+- [ ] **Step 2: Implement virtual tag form**
+
+Fields:
+
+```text
+domainType, name, code, expressionJson, expressionSummary, usageScenario, status
+```
+
+Before submit, run `JSON.parse(expressionJson)` and show message if invalid.
+
+- [ ] **Step 3: Run frontend checks**
+
+Run: `cd ytsh-ui-vue3 && pnpm ts:check`
+
+Expected: no errors in virtual tag files.
+
+---
+
+## Task 10: Menu SQL and verification
+
+**Files:**
+- Create: `sql/tag_system_menu.sql`
+
+- [ ] **Step 1: Create menu SQL reference**
+
+Create `sql/tag_system_menu.sql` with insert statements for a parent menu “标签体系” and children paths:
+
+```text
+business/tag/dimension/index
+business/tag/value/index
+business/tag/virtual/index
+```
+
+Do not execute this SQL automatically. It is a deployment/reference script for the user to import through DB tooling after reviewing parent IDs and sort order.
+
+- [ ] **Step 2: Run backend tag tests**
+
+Run: `mvn -pl yudao-module-business -Dtest=TagDimensionServiceImplTest,TagValueServiceImplTest,TagVirtualServiceImplTest test`
+
+Expected: PASS.
+
+- [ ] **Step 3: Run backend module package**
+
+Run: `mvn -pl yudao-module-business test`
+
+Expected: PASS.
+
+- [ ] **Step 4: Run frontend type check**
+
+Run: `cd ytsh-ui-vue3 && pnpm ts:check`
+
+Expected: no errors in tag API/page files.
+
+- [ ] **Step 5: Manual UI verification**
+
+Run: `cd ytsh-ui-vue3 && pnpm dev`
+
+Open the backend menu pages after the menu is configured. Verify:
+
+- 标签维度管理 can create PRODUCT L1/L2/L3.
+- 标签值管理 can create a value under L3 only.
+- 标签值导入 accepts the template and returns success/failure details.
+- 虚拟标签管理 rejects invalid JSON and accepts valid JSON.
+
+---
+
+## Self-Review
+
+Spec coverage:
+
+- 人/货/场对象域: Task 1 constants, Task 2/3/4 validation, frontend filters.
+- L1/L2/L3 维度树: Task 2 backend, Task 7 frontend.
+- L4 标签值: Task 3 backend, Task 8 frontend.
+- 打标方式/数据源/更新频率/逻辑说明: Task 3 backend, Task 8 frontend.
+- 标签启停/排序: all three metadata models and pages include `status` and `sort` where applicable.
+- Excel 导入: Task 3 backend, Task 5 controller, Task 8 frontend.
+- 虚拟标签定义: Task 4 backend, Task 9 frontend.
+- Yudao 菜单挂载: Task 10 SQL reference.
+- 自动打标/圈选/看板 deliberately excluded.
+
+Placeholder scan: no `TBD`, no deferred implementation steps, no unspecified test commands.
+
+Type consistency: field names use camelCase in Java/TS and snake_case in SQL, matching MyBatis Plus conventions.

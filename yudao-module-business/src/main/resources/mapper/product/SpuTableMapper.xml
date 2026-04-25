@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.iocoder.yudao.module.business.dal.mysql.product.SpuTableMapper">
+
+    <select id="selectPage" resultType="cn.iocoder.yudao.module.business.dal.dataobject.product.SpuTableDO">
+        SELECT DISTINCT s.*
+        FROM product_spu_table s
+        LEFT JOIN product_sku_table sku ON s.product_spu_id = sku.product_spu_id
+        <where>
+            <if test="reqVO.productSpuCode != null and reqVO.productSpuCode != ''">
+                AND s.product_spu_code = #{reqVO.productSpuCode}
+            </if>
+            <if test="reqVO.productSpuName != null and reqVO.productSpuName != ''">
+                AND s.product_spu_name LIKE CONCAT('%', #{reqVO.productSpuName}, '%')
+            </if>
+            <if test="reqVO.productBrand != null and reqVO.productBrand != ''">
+                AND s.product_brand = #{reqVO.productBrand}
+            </if>
+            <if test="reqVO.categoryId != null">
+                AND s.category_id = #{reqVO.categoryId}
+            </if>
+            <if test="reqVO.productOrigin != null and reqVO.productOrigin != ''">
+                AND s.product_origin LIKE CONCAT('%', #{reqVO.productOrigin}, '%')
+            </if>
+            <if test="reqVO.productManufacturer != null and reqVO.productManufacturer != ''">
+                AND s.product_manufacturer LIKE CONCAT('%', #{reqVO.productManufacturer}, '%')
+            </if>
+            <if test="reqVO.productSpecTemplate != null and reqVO.productSpecTemplate != ''">
+                AND s.product_spec_template LIKE CONCAT('%', #{reqVO.productSpecTemplate}, '%')
+            </if>
+            <if test="reqVO.productSpuStatus != null">
+                AND s.product_spu_status = #{reqVO.productSpuStatus}
+            </if>
+            <if test="reqVO.createTime != null and reqVO.createTime.length == 2">
+                AND s.create_time BETWEEN #{reqVO.createTime[0]} AND #{reqVO.createTime[1]}
+            </if>
+            <if test="reqVO.productSkuCode != null and reqVO.productSkuCode != ''">
+                AND sku.product_sku_code LIKE CONCAT('%', #{reqVO.productSkuCode}, '%')
+            </if>
+            <if test="reqVO.productSkuName != null and reqVO.productSkuName != ''">
+                AND sku.product_sku_name LIKE CONCAT('%', #{reqVO.productSkuName}, '%')
+            </if>
+        </where>
+        ORDER BY s.product_spu_id DESC
+    </select>
+
+</mapper>

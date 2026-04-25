@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>门店管理日期组件调试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .instructions {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .instructions h2 {
+            color: #1565c0;
+            margin-top: 0;
+        }
+        .instructions ol {
+            line-height: 2;
+        }
+        .warning {
+            background: #fff3e0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border-left: 4px solid #ff9800;
+        }
+        .warning h3 {
+            color: #e65100;
+            margin-top: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 门店管理日期组件调试工具</h1>
+        
+        <div class="instructions">
+            <h2>📋 使用步骤：</h2>
+            <ol>
+                <li><strong>打开门店管理页面</strong>：访问 <a href="http://localhost:8082/#/business/store" target="_blank">http://localhost:8082/#/business/store</a></li>
+                <li><strong>登录系统</strong>（如果需要）</li>
+                <li><strong>打开浏览器开发者工具</strong>：按 <code>F12</code> 或 <code>Ctrl+Shift+I</code> (Windows) / <code>Cmd+Option+I</code> (Mac)</li>
+                <li><strong>切换到 Console 标签</strong></li>
+                <li><strong>点击任意门店的"编辑"按钮</strong></li>
+                <li><strong>切换到"门店经营状态"标签</strong></li>
+                <li><strong>查看控制台输出</strong>：应该看到带有 <code>[StatusTableForm]</code> 标签的日志</li>
+                <li><strong>复制控制台输出</strong>并粘贴到下面的文本框中</li>
+            </ol>
+        </div>
+        
+        <div class="warning">
+            <h3>⚠️ 重要提示：</h3>
+            <p>请确保前端开发服务器正在运行（应该已经在端口 8082 上运行）。</p>
+            <p>如果端口不是 8082，请修改上面的链接。</p>
+        </div>
+        
+        <div style="margin-top: 30px;">
+            <h2>📊 收集调试信息：</h2>
+            <textarea 
+                id="debugOutput" 
+                rows="15" 
+                style="width: 100%; font-family: monospace; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
+                placeholder="请粘贴控制台中的 [StatusTableForm] 相关日志..."
+            ></textarea>
+            <button 
+                onclick="analyzeDebugOutput()"
+                style="margin-top: 10px; padding: 10px 20px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;"
+            >
+                🔍 分析日志
+            </button>
+        </div>
+        
+        <div id="analysisResult" style="margin-top: 20px;"></div>
+    </div>
+    
+    <script>
+        function analyzeDebugOutput() {
+            const output = document.getElementById('debugOutput').value;
+            const resultDiv = document.getElementById('analysisResult');
+            
+            if (!output.trim()) {
+                resultDiv.innerHTML = '<p style="color: red;">❌ 请先粘贴控制台日志</p>';
+                return;
+            }
+            
+            // 解析日志
+            const lines = output.split('\n');
+            let analysis = '<h2 style="color: #2e7d32;">📊 分析结果：</h2>';
+            
+            const hasRawData = output.includes('后端返回原始数据');
+            const hasNormalized = output.includes('标准化');
+            const hasFormData = output.includes('formData 赋值后');
+            
+            if (hasRawData) {
+                analysis += '<p style="color: green;">✅ 检测到后端返回数据</p>';
+            } else {
+                analysis += '<p style="color: red;">❌ 未检测到后端返回数据，请确保已触发编辑功能</p>';
+            }
+            
+            if (hasNormalized) {
+                analysis += '<p style="color: green;">✅ 检测到日期标准化处理</p>';
+            } else {
+                analysis += '<p style="color: orange;">⚠️ 未检测到日期标准化，可能日期为空或格式正确</p>';
+            }
+            
+            if (hasFormData) {
+                analysis += '<p style="color: green;">✅ 检测到 formData 赋值</p>';
+            } else {
+                analysis += '<p style="color: red;">❌ 未检测到 formData 赋值，数据可能未加载</p>';
+            }
+            
+            // 提取关键信息
+            const openDateMatch = output.match(/openDate[^:]*:?\s*["']?([^"',\s}]+)/g);
+            const signDateMatch = output.match(/signDate[^:]*:?\s*["']?([^"',\s}]+)/g);
+            
+            if (openDateMatch) {
+                analysis += '<h3>📅 openDate 相关信息：</h3><ul>';
+                openDateMatch.forEach(match => {
+                    analysis += `<li>${match}</li>`;
+                });
+                analysis += '</ul>';
+            }
+            
+            if (signDateMatch) {
+                analysis += '<h3>📅 signDate 相关信息：</h3><ul>';
+                signDateMatch.forEach(match => {
+                    analysis += `<li>${match}</li>`;
+                });
+                analysis += '</ul>';
+            }
+            
+            analysis += '<div class="warning">';
+            analysis += '<h3>💡 诊断建议：</h3>';
+            
+            if (output.includes('openDate原始: undefined') || output.includes('openDate原始: null')) {
+                analysis += '<p>🔴 数据库中 openDate 字段为空</p>';
+            }
+            
+            if (output.includes('openDate原始:') && output.includes('T')) {
+                analysis += '<p>🟡 openDate 包含时间部分，可能需要标准化处理</p>';
+            }
+            
+            if (output.includes('openDate标准化:') && output.includes('undefined')) {
+                analysis += '<p>🔴 normalizeDate 函数无法解析日期格式</p>';
+            }
+            
+            analysis += '</div>';
+            
+            resultDiv.innerHTML = analysis;
+        }
+    </script>
+</body>
+</html>

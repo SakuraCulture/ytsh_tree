@@ -1,0 +1,49 @@
+# Claude / worktrees
+.worktrees/
+.claude/
+
+# Local tool state
+.playwright/
+.playwright-cli/
+.trae/
+.svn/
+.image/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Java / Maven
+target/
+**/target/
+.mvn/wrapper/maven-wrapper.jar
+
+# Frontend build outputs
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+/dist*
+
+# Logs
+*.log
+logs/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.history/
+
+# Local env / credentials
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Generated / temp
+*.tmp
+*.temp
+pnpm-debug.log*
+auto-*.d.ts

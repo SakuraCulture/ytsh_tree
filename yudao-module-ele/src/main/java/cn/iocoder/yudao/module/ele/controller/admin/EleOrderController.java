@@ -1,0 +1,429 @@
+package cn.iocoder.yudao.module.ele.controller.admin;
+
+import cn.iocoder.yudao.framework.common.pojo.CommonResult;
+import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
+import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderFailRecordRespVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderStatusLogRespVO;
+import cn.iocoder.yudao.module.ele.exception.EleOrderSyncException;
+import cn.iocoder.yudao.module.ele.service.EleOrderService;
+import cn.iocoder.yudao.module.ele.service.ShutdownStateManager;
+import cn.iocoder.yudao.module.ele.service.dto.EleCompensateProgressDTO;
+import cn.iocoder.yudao.module.ele.service.dto.EleSyncSubmitRespDTO;
+import cn.iocoder.yudao.module.ele.service.dto.OrderDetailRespDTO;
+import cn.iocoder.yudao.module.ele.service.dto.OrderListReqDTO;
+import cn.iocoder.yudao.module.ele.service.dto.OrderListRespDTO;
+import cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobSaveReqVO;
+import cn.iocoder.yudao.module.infra.dal.dataobject.job.JobDO;
+import cn.iocoder.yudao.module.infra.enums.job.JobStatusEnum;
+import cn.iocoder.yudao.module.infra.service.job.JobService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+
+import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.Resource;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * 翱象订单管理接口
+ * 1. 订单列表查询（本地数据库）
+ * 2. 订单列表查询（远程API）
+ * 3. 订单详情查询
+ * 4. 订单状态日志查询
+ * 5. 订单补偿进度查询
+ * 6. 订单补偿提交
+ * 7. 订单失败记录查询
+ * 8. 订单补偿提交
+ * 
+ * @description 订单补偿提交接口
+ * @return 订单补偿提交结果
+ * @author SMK
+ * @date 2023-08-10
+ * 
+ */
+
+@Tag(name = "管理后台 - 翱象订单")
+@RestController
+@RequestMapping("/ele/order")
+@Validated
+@TenantIgnore
+public class EleOrderController {
+
+    @Resource
+    private EleOrderService eleOrderService;
+
+    @Resource
+    private ShutdownStateManager shutdownStateManager;
+
+    @Resource
+    private JobService jobService;
+
+    private static final String SYNC_JOB_HANDLER_NAME = "eleOrderSyncJob";
+
+    private static final Pattern CRON_INTERVAL_PATTERN = Pattern.compile("\\*/(\\d+)|0/(\\d+)");
+
+    @GetMapping("/list")
+    @Operation(summary = "翱象订单列表查询（本地数据库）")
+    @PermitAll
+    public CommonResult<PageResult<OrderListRespDTO.OrderDetail>> getOrderList(
+            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
+            @Parameter(description = "订单状态") @RequestParam(required = false) Integer status,
+            @Parameter(description = "起始时间(unix秒)") @RequestParam(required = false) Long startTime,
+            @Parameter(description = "结束时间(unix秒)") @RequestParam(required = false) Long endTime,
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNo,
+            @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") Integer pageSize) {
+
+        PageResult<OrderListRespDTO.OrderDetail> result = eleOrderService.getOrdersFromLocal(
+                platformStoreId, status, startTime, endTime, pageNo, pageSize);
+        return CommonResult.success(result);
+    }
+
+    @GetMapping("/list/remote")
+    @Operation(summary = "翱象订单列表查询（远程API）")
+    @PermitAll
+    public CommonResult<OrderListRespDTO> getOrderListRemote(
+            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
+            @Parameter(description = "saas商家编码") @RequestParam(required = false) String merchantCode,
+            @Parameter(description = "外部门店编码") @RequestParam(required = false) String erpStoreCode,
+            @Parameter(description = "订单状态") @RequestParam(required = false) Integer status,
+            @Parameter(description = "起始时间(unix秒)") @RequestParam(required = false) Long startTime,
+            @Parameter(description = "结束时间(unix秒)") @RequestParam(required = false) Long endTime) {
+
+        List<OrderListRespDTO.OrderDetail> allOrders = new ArrayList<>();
+        Set<String> fetchedScrollIds = new HashSet<>();
+        String scrollId = null;
+        long upstreamTotal = 0L;
+        int pageNo = 1;
+        final int pageSize = 100;
+
+        while (true) {
+            OrderListReqDTO req = new OrderListReqDTO();
+            req.setPlatformStoreId(platformStoreId);
+            req.setMerchantCode(merchantCode);
+            req.setErpStoreCode(erpStoreCode);
+            req.setStatus(status);
+            req.setStartTime(startTime);
+            req.setEndTime(endTime);
+            req.setPageSize(pageSize);
+            req.setScrollId(scrollId);
+
+            OrderListRespDTO pageResult = eleOrderService.getOrderList(req);
+            if (pageResult == null) {
+                break;
+            }
+
+            if (pageNo == 1) {
+                upstreamTotal = pageResult.getTotal() == null ? 0L : pageResult.getTotal();
+            }
+
+            List<OrderListRespDTO.OrderDetail> currentList = pageResult.getOrderList();
+            if (currentList != null && !currentList.isEmpty()) {
+                allOrders.addAll(currentList);
+            }
+
+            String nextScrollId = pageResult.getScrollId();
+
+            if (nextScrollId == null || nextScrollId.isEmpty() || fetchedScrollIds.contains(nextScrollId)) {
+                break;
+            }
+
+            fetchedScrollIds.add(nextScrollId);
+            scrollId = nextScrollId;
+            pageNo++;
+        }
+
+        OrderListRespDTO result = new OrderListRespDTO();
+        result.setTotal((long) allOrders.size());
+        result.setScrollId(null);
+        result.setOrderList(allOrders);
+
+        return CommonResult.success(result);
+    }
+
+    @GetMapping("/detail")
+    @Operation(summary = "翱象订单详情查询（本地+远程）")
+    @PermitAll
+    public CommonResult<OrderDetailRespDTO> getOrderDetail(
+            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
+            @Parameter(description = "saas商家编码") @RequestParam(required = false) String merchantCode,
+            @Parameter(description = "外部门店编码") @RequestParam(required = false) String erpStoreCode,
+            @Parameter(description = "订单ID", required = true) @RequestParam String orderId) {
+
+        OrderDetailRespDTO result = eleOrderService.getOrderDetail(platformStoreId, merchantCode, erpStoreCode,
+                orderId);
+        return CommonResult.success(result);
+    }
+
+    @GetMapping("/sync/status")
+    @Operation(summary = "查询当前同步任务状态")
+    @PermitAll
+    public CommonResult<java.util.Map<String, Object>> getSyncStatus() {
+        java.util.Map<String, Object> status = new java.util.LinkedHashMap<>();
+        status.put("isSyncing", shutdownStateManager.isBatchSyncing());
+        status.put("shuttingDown", shutdownStateManager.isShuttingDown());
+        status.put("activeTasks", shutdownStateManager.getActiveTaskCount());
+        status.put("currentOrderId", shutdownStateManager.getCurrentProcessingOrderId());
+        status.put("currentSyncingStoreCount", shutdownStateManager.getCurrentSyncingStoreCount());
+        status.put("currentSyncingStores", shutdownStateManager.getCurrentSyncingStores());
+        status.put("batchSyncStartTime", shutdownStateManager.getBatchSyncStartTime());
+        status.put("statusInfo", shutdownStateManager.getStatusInfo());
+        return CommonResult.success(status);
+    }
+
+    @PostMapping("/sync/reset-status")
+    @Operation(summary = "重置同步状态（用于状态卡死时手动恢复）")
+    @PermitAll
+    public CommonResult<Boolean> resetSyncStatus() {
+        shutdownStateManager.finishBatchSync();
+        return CommonResult.success(true);
+    }
+
+    @PostMapping("/sync")
+    @Operation(summary = "订单增量同步")
+    @PermitAll
+    public CommonResult<Boolean> syncOrders(
+            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
+            @Parameter(description = "saas商家编码") @RequestParam(required = false) String merchantCode,
+            @Parameter(description = "外部门店编码") @RequestParam(required = false) String erpStoreCode) {
+
+        eleOrderService.syncOrders(platformStoreId, merchantCode, erpStoreCode);
+        return CommonResult.success(true);
+    }
+
+    @PostMapping("/sync/all")
+    @Operation(summary = "手动触发全部门店订单同步")
+    @PermitAll
+    public CommonResult<Boolean> syncAllStoresOrders(
+            @Parameter(description = "起始时间(秒级时间戳)") @RequestParam(required = false) Long startTime,
+            @Parameter(description = "结束时间(秒级时间戳)") @RequestParam(required = false) Long endTime) {
+        eleOrderService.syncAllStores(startTime, endTime);
+        return CommonResult.success(true);
+    }
+
+    @PostMapping("/sync/submit")
+    @Operation(summary = "提交同步/补偿任务")
+    @PermitAll
+    public CommonResult<EleSyncSubmitRespDTO> submitSyncTask(
+            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
+            @Parameter(description = "saas商家编码") @RequestParam(required = false) String merchantCode,
+            @Parameter(description = "外部门店编码") @RequestParam(required = false) String erpStoreCode,
+            @Parameter(description = "起始时间") @RequestParam(required = false) Long startTime,
+            @Parameter(description = "结束时间") @RequestParam(required = false) Long endTime,
+            @Parameter(description = "是否补偿") @RequestParam(defaultValue = "false") boolean compensate) {
+        return CommonResult.success(eleOrderService.submitSyncTask(platformStoreId, merchantCode, erpStoreCode,
+                startTime, endTime, compensate));
+    }
+
+    @GetMapping("/sync/progress")
+    @Operation(summary = "查询同步/补偿进度")
+    @PreAuthorize("@ss.hasPermission('ele:order:query')")
+    public CommonResult<EleCompensateProgressDTO> getSyncProgress(
+            @Parameter(description = "任务ID", required = true) @RequestParam String taskId) {
+        return CommonResult.success(eleOrderService.getSyncProgress(taskId));
+    }
+
+    @GetMapping("/fail-record/list")
+    @Operation(summary = "查询失败记录")
+    @PreAuthorize("@ss.hasPermission('ele:order:query')")
+    public CommonResult<List<EleOrderFailRecordRespVO>> getFailRecords() {
+        return CommonResult.success(BeanUtils.toBean(eleOrderService.getFailRecords(), EleOrderFailRecordRespVO.class));
+    }
+
+    @PostMapping("/fail-record/retry")
+    @Operation(summary = "重试失败记录")
+    @PreAuthorize("@ss.hasPermission('ele:order:retry')")
+    public CommonResult<Boolean> retryFailRecord(
+            @Parameter(description = "失败记录ID", required = true) @RequestParam Long id) {
+        eleOrderService.retryFailRecord(id);
+        return CommonResult.success(true);
+    }
+
+    @PostMapping("/fail-record/retry-with-overwrite")
+    @Operation(summary = "重试失败记录（覆盖已存在订单）")
+    @PreAuthorize("@ss.hasPermission('ele:order:retry')")
+    public CommonResult<Boolean> retryFailRecordWithOverwrite(
+            @Parameter(description = "失败记录ID", required = true) @RequestParam Long id) {
+        eleOrderService.retryFailRecord(id, true);
+        return CommonResult.success(true);
+    }
+
+    @GetMapping("/fail-record/page")
+    @Operation(summary = "分页查询失败记录")
+    @PreAuthorize("@ss.hasPermission('ele:order:query')")
+    public CommonResult<PageResult<EleOrderFailRecordRespVO>> getFailRecordPage(
+            @Parameter(description = "门店ID") @RequestParam(required = false) Long storeId,
+            @Parameter(description = "内部订单号") @RequestParam(required = false) String orderId,
+            @Parameter(description = "平台订单号") @RequestParam(required = false) String channelOrderId,
+            @Parameter(description = "业务类型") @RequestParam(required = false) String bizType,
+            @Parameter(description = "失败阶段") @RequestParam(required = false) String failStage,
+            @Parameter(description = "处理状态") @RequestParam(required = false) String processStatus,
+            @Parameter(description = "起始时间(秒级时间戳)") @RequestParam(required = false) Long startTime,
+            @Parameter(description = "结束时间(秒级时间戳)") @RequestParam(required = false) Long endTime,
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNo,
+            @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") Integer pageSize) {
+
+        PageResult<EleOrderFailRecordRespVO> result = eleOrderService.getFailRecordPage(
+                storeId, orderId, channelOrderId, bizType, failStage, processStatus, startTime, endTime, pageNo,
+                pageSize);
+        return CommonResult.success(result);
+    }
+
+    @PostMapping("/fail-record/batch-retry")
+    @Operation(summary = "批量重试失败记录")
+    @PreAuthorize("@ss.hasPermission('ele:order:retry')")
+    public CommonResult<Boolean> batchRetryFailRecord(
+            @Parameter(description = "失败记录ID列表") @RequestParam List<Long> ids) {
+        eleOrderService.batchRetryFailRecord(ids);
+        return CommonResult.success(true);
+    }
+
+    @GetMapping("/fail-record/unhandled-count")
+    @Operation(summary = "获取未处理失败记录统计")
+    @PreAuthorize("@ss.hasPermission('ele:order:query')")
+    public CommonResult<Map<String, Integer>> getUnhandledFailCount() {
+        return CommonResult.success(eleOrderService.getUnhandledFailCount());
+    }
+
+    @GetMapping("/fail-record/all-failed-ids")
+    @Operation(summary = "获取所有FAILED状态的失败记录ID")
+    @PreAuthorize("@ss.hasPermission('ele:order:query')")
+    public CommonResult<List<Long>> getAllFailedIds() {
+        return CommonResult.success(eleOrderService.getAllFailedIds());
+    }
+
+    @PostMapping("/fail-record/retry-by-specified-time")
+    @Operation(summary = "按指定时间点批量重试失败记录")
+    @PreAuthorize("@ss.hasPermission('ele:order:retry')")
+    public CommonResult<Integer> retryFailRecordsBySpecifiedTime(
+            @Parameter(description = "指定时间点(毫秒级时间戳)", required = true) @RequestParam Long specifiedTime,
+            @Parameter(description = "是否覆盖已存在订单") @RequestParam(defaultValue = "false") Boolean overwrite) {
+        int count = eleOrderService.retryAllFailedRecordsBySpecifiedTime(specifiedTime, overwrite);
+        return CommonResult.success(count);
+    }
+
+    @GetMapping("/status-log/list")
+    @Operation(summary = "查询订单状态日志")
+    @PermitAll
+    public CommonResult<List<EleOrderStatusLogRespVO>> getStatusLogs(
+            @Parameter(description = "订单ID", required = true) @RequestParam String orderId) {
+        return CommonResult
+                .success(BeanUtils.toBean(eleOrderService.getStatusLogs(orderId), EleOrderStatusLogRespVO.class));
+    }
+
+    @GetMapping("/sync/config")
+    @Operation(summary = "获取订单同步配置信息")
+    @PreAuthorize("@ss.hasPermission('ele:order:query')")
+    public CommonResult<Map<String, Object>> getSyncConfig() {
+        return CommonResult.success(eleOrderService.getSyncConfig());
+    }
+
+    @GetMapping("/sync/schedule-config")
+    @Operation(summary = "查询定时同步配置")
+    @PermitAll
+    public CommonResult<Map<String, Object>> getSyncScheduleConfig() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        JobDO job = findSyncJob();
+        if (job == null) {
+            result.put("exists", false);
+            return CommonResult.success(result);
+        }
+        result.put("exists", true);
+        result.put("enabled", JobStatusEnum.NORMAL.getStatus().equals(job.getStatus()));
+        result.put("intervalMinutes", parseIntervalFromCron(job.getCronExpression()));
+        result.put("cronExpression", job.getCronExpression());
+        result.put("jobId", job.getId());
+        result.put("jobStatus", job.getStatus());
+        return CommonResult.success(result);
+    }
+
+    @PutMapping("/sync/schedule-config")
+    @Operation(summary = "更新定时同步配置")
+    @PermitAll
+    public CommonResult<Boolean> updateSyncScheduleConfig(
+            @Parameter(description = "间隔分钟数(1-1440)", required = true) @RequestParam Integer intervalMinutes,
+            @Parameter(description = "是否开启", required = true) @RequestParam Boolean enabled) {
+        if (intervalMinutes < 1 || intervalMinutes > 1440) {
+            return CommonResult.error(400, "间隔分钟数必须在1-1440之间");
+        }
+        JobDO job = findSyncJob();
+        if (job == null) {
+            return CommonResult.error(404, "定时任务不存在，请先在基础设施管理中创建eleOrderSyncJob任务");
+        }
+        String newCron = buildCronFromInterval(intervalMinutes);
+        try {
+            if (JobStatusEnum.STOP.getStatus().equals(job.getStatus())) {
+                jobService.updateJobStatus(job.getId(), JobStatusEnum.NORMAL.getStatus());
+                job.setStatus(JobStatusEnum.NORMAL.getStatus());
+            }
+            if (JobStatusEnum.NORMAL.getStatus().equals(job.getStatus())) {
+                JobSaveReqVO updateReqVO = new JobSaveReqVO();
+                updateReqVO.setId(job.getId());
+                updateReqVO.setName(job.getName());
+                updateReqVO.setHandlerName(job.getHandlerName());
+                updateReqVO.setHandlerParam(job.getHandlerParam());
+                updateReqVO.setCronExpression(newCron);
+                updateReqVO.setRetryCount(job.getRetryCount());
+                updateReqVO.setRetryInterval(job.getRetryInterval());
+                updateReqVO.setMonitorTimeout(job.getMonitorTimeout());
+                jobService.updateJob(updateReqVO);
+            }
+            if (!enabled) {
+                jobService.updateJobStatus(job.getId(), JobStatusEnum.STOP.getStatus());
+            }
+            return CommonResult.success(true);
+        } catch (Exception e) {
+            return CommonResult.error(500, "更新定时同步配置失败: " + e.getMessage());
+        }
+    }
+
+    private JobDO findSyncJob() {
+        cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO pageReq =
+                new cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO();
+        pageReq.setHandlerName(SYNC_JOB_HANDLER_NAME);
+        pageReq.setPageNo(1);
+        pageReq.setPageSize(1);
+        PageResult<JobDO> pageResult = jobService.getJobPage(pageReq);
+        List<JobDO> list = pageResult.getList();
+        return (list != null && !list.isEmpty()) ? list.get(0) : null;
+    }
+
+    private Integer parseIntervalFromCron(String cronExpression) {
+        if (cronExpression == null) return null;
+        Matcher matcher = CRON_INTERVAL_PATTERN.matcher(cronExpression);
+        if (matcher.find()) {
+            String group = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+            return Integer.parseInt(group);
+        }
+        return null;
+    }
+
+    private String buildCronFromInterval(int intervalMinutes) {
+        return "0 */" + intervalMinutes + " * * * ?";
+    }
+
+    @GetMapping("/list/all")
+    @Operation(summary = "查询所有门店的订单列表及详情")
+    @PermitAll
+    public CommonResult<List<OrderListRespDTO.OrderDetail>> getAllStoreOrdersWithDetails() {
+        return CommonResult.success(eleOrderService.getAllStoreOrdersWithDetails());
+    }
+
+    @ExceptionHandler(EleOrderSyncException.class)
+    public CommonResult<Boolean> handleEleOrderSyncException(EleOrderSyncException e) {
+        return CommonResult.error(EleOrderSyncException.ERROR_CODE, e.getMessage());
+    }
+
+}
