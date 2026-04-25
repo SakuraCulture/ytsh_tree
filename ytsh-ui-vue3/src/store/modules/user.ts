@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { getAccessToken, removeToken } from '@/utils/auth'
 import { CACHE_KEY, useCache, deleteUserCache } from '@/hooks/web/useCache'
 import { getInfo, loginOut } from '@/api/login'
+import { normalizeUserSession } from './userSessionLogic'
 
 const { wsCache } = useCache()
 
@@ -62,12 +63,20 @@ export const useUserStore = defineStore('admin-user', {
           userInfo = await getInfo()
         } catch (error) {}
       }
-      this.permissions = new Set(userInfo.permissions || []) // 兜底为 [] https://t.zsxq.com/xCJew
-      this.roles = userInfo.roles
-      this.user = userInfo.user
+      const normalizedUserInfo = normalizeUserSession(userInfo)
+      if (!normalizedUserInfo) {
+        removeToken()
+        this.resetState()
+        deleteUserCache()
+        return null
+      }
+      this.permissions = new Set(normalizedUserInfo.permissions)
+      this.roles = normalizedUserInfo.roles
+      this.user = normalizedUserInfo.user
       this.isSetUser = true
-      wsCache.set(CACHE_KEY.USER, userInfo)
-      wsCache.set(CACHE_KEY.ROLE_ROUTERS, userInfo.menus)
+      wsCache.set(CACHE_KEY.USER, normalizedUserInfo)
+      wsCache.set(CACHE_KEY.ROLE_ROUTERS, normalizedUserInfo.menus)
+      return normalizedUserInfo
     },
     async setUserAvatarAction(avatar: string) {
       const userInfo = wsCache.get(CACHE_KEY.USER)

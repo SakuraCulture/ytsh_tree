@@ -66,4 +66,22 @@ public interface ErrorCodeConstants {
     ErrorCode CATEGORY_TABLE_CATEGORY_NAME_DUPLICATE = new ErrorCode(1-023-004-000, "已经存在该类目名称的商品类目表（三级树形结构）");
     ErrorCode CATEGORY_TABLE_PARENT_IS_CHILD = new ErrorCode(1-023-005-000, "不能设置自己的子CategoryTable为父CategoryTable");
     ErrorCode CATEGORY_TABLE_IMPORT_LIST_IS_EMPTY = new ErrorCode(1-023-006-000, "导入类目列表不能为空");
+
+    // ========== 标签体系 1-030-000-000 ==========
+    ErrorCode TAG_DIMENSION_NOT_EXISTS = new ErrorCode(1_030_000_000, "标签维度不存在");
+    ErrorCode TAG_DIMENSION_PARENT_NOT_EXISTS = new ErrorCode(1_030_000_001, "父级标签维度不存在");
+    ErrorCode TAG_DIMENSION_LEVEL_ERROR = new ErrorCode(1_030_000_002, "标签维度层级不正确");
+    ErrorCode TAG_DIMENSION_CODE_EXISTS = new ErrorCode(1_030_000_003, "同级下已存在该标签维度编码");
+    ErrorCode TAG_DIMENSION_HAS_CHILDREN = new ErrorCode(1_030_000_004, "标签维度存在子维度，无法删除");
+    ErrorCode TAG_DIMENSION_HAS_VALUE = new ErrorCode(1_030_000_005, "标签维度存在标签值，无法删除");
+    ErrorCode TAG_DOMAIN_TYPE_INVALID = new ErrorCode(1_030_000_006, "标签对象域不合法");
+    ErrorCode TAG_VALUE_NOT_EXISTS = new ErrorCode(1_030_001_000, "标签值不存在");
+    ErrorCode TAG_VALUE_CODE_EXISTS = new ErrorCode(1_030_001_001, "当前维度下已存在该标签值编码");
+    ErrorCode TAG_VALUE_DIMENSION_LEVEL_ERROR = new ErrorCode(1_030_001_002, "标签值只能挂在 L3 原子维度下");
+    ErrorCode TAG_METHOD_INVALID = new ErrorCode(1_030_001_003, "打标方式不合法");
+    ErrorCode TAG_VALUE_IMPORT_LIST_IS_EMPTY = new ErrorCode(1_030_001_004, "导入标签列表不能为空");
+    ErrorCode TAG_VIRTUAL_NOT_EXISTS = new ErrorCode(1_030_002_000, "虚拟标签不存在");
+    ErrorCode TAG_VIRTUAL_CODE_EXISTS = new ErrorCode(1_030_002_001, "当前对象域下已存在该虚拟标签编码");
+    ErrorCode TAG_VIRTUAL_EXPRESSION_INVALID = new ErrorCode(1_030_002_002, "虚拟标签表达式不是合法 JSON 对象");
+    ErrorCode TAG_VIRTUAL_STATUS_INVALID = new ErrorCode(1_030_002_003, "虚拟标签状态不合法");
 }

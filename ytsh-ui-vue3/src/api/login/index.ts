@@ -80,12 +80,12 @@ export const socialAuthRedirect = (type: number, redirectUri: string) => {
 }
 // 获取验证图片以及 token
 export const getCode = (data: any) => {
-  return request.postOriginal({ url: 'system/captcha/get', data })
+  return request.postOriginal({ url: '/system/captcha/get', data })
 }
 
 // 滑动或者点选验证
 export const reqCheck = (data: any) => {
-  return request.postOriginal({ url: 'system/captcha/check', data })
+  return request.postOriginal({ url: '/system/captcha/check', data })
 }
 
 // 通过短信重置密码

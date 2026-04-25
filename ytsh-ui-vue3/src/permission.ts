@@ -74,8 +74,12 @@ router.beforeEach(async (to, from, next) => {
       }
       if (!userStore.getIsSetUser) {
         isRelogin.show = true
-        await userStore.setUserInfoAction()
+        const userInfo = await userStore.setUserInfoAction()
         isRelogin.show = false
+        if (!userInfo) {
+          next(`/login?redirect=${to.fullPath}`)
+          return
+        }
         // 后端过滤菜单
         await permissionStore.generateRoutes()
         permissionStore.getAddRouters.forEach((route) => {
