@@ -4,6 +4,7 @@ import { getAccessToken, removeToken } from '@/utils/auth'
 import { CACHE_KEY, useCache, deleteUserCache } from '@/hooks/web/useCache'
 import { getInfo, loginOut } from '@/api/login'
 import { normalizeUserSession } from './userSessionLogic'
+import { recoverUserSession } from './userSessionRecoveryLogic'
 
 const { wsCache } = useCache()
 
@@ -50,31 +51,25 @@ export const useUserStore = defineStore('admin-user', {
   },
   actions: {
     async setUserInfoAction() {
-      if (!getAccessToken()) {
-        this.resetState()
-        return null
-      }
-      let userInfo = wsCache.get(CACHE_KEY.USER)
-      if (!userInfo) {
-        userInfo = await getInfo()
-      } else {
-        // 特殊：在有缓存的情况下，进行加载。但是即使加载失败，也不影响后续的操作，保证可以进入系统
-        try {
-          userInfo = await getInfo()
-        } catch (error) {}
-      }
-      const normalizedUserInfo = normalizeUserSession(userInfo)
+      const normalizedUserInfo = await recoverUserSession({
+        hasAccessToken: !!getAccessToken(),
+        cachedUserInfo: wsCache.get(CACHE_KEY.USER),
+        getInfo,
+        normalizeUserSession,
+        onRemoveToken: removeToken,
+        onResetState: () => this.resetState(),
+        onDeleteUserCache: deleteUserCache,
+        onCacheUserSession: (value) => {
+          wsCache.set(CACHE_KEY.USER, value)
+        }
+      })
       if (!normalizedUserInfo) {
-        removeToken()
-        this.resetState()
-        deleteUserCache()
         return null
       }
       this.permissions = new Set(normalizedUserInfo.permissions)
       this.roles = normalizedUserInfo.roles
       this.user = normalizedUserInfo.user
       this.isSetUser = true
-      wsCache.set(CACHE_KEY.USER, normalizedUserInfo)
       wsCache.set(CACHE_KEY.ROLE_ROUTERS, normalizedUserInfo.menus)
       return normalizedUserInfo
     },

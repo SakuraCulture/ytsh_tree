@@ -3,7 +3,9 @@ package cn.iocoder.yudao.module.business.service.tag;
 import cn.iocoder.yudao.framework.test.core.ut.BaseDbUnitTest;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagDimensionSaveReqVO;
 import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagDimensionDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagValueDO;
 import cn.iocoder.yudao.module.business.dal.mysql.tag.TagDimensionMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.tag.TagValueMapper;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;
@@ -23,6 +25,9 @@ class TagDimensionServiceImplTest extends BaseDbUnitTest {
 
     @Resource
     private TagDimensionMapper tagDimensionMapper;
+
+    @Resource
+    private TagValueMapper tagValueMapper;
 
     @Test
     void createTagDimension_shouldCreateThreeLevelTree() {
@@ -198,6 +203,28 @@ class TagDimensionServiceImplTest extends BaseDbUnitTest {
         tagDimensionService.createTagDimension(buildReq("PRODUCT", l1Id, LEVEL_L2, "价格属性", "price", 20));
 
         assertServiceException(() -> tagDimensionService.deleteTagDimension(l1Id), TAG_DIMENSION_HAS_CHILDREN);
+    }
+
+    @Test
+    void deleteTagDimension_whenHasTagValues_shouldThrowHasValue() {
+        Long l1Id = tagDimensionService.createTagDimension(buildReq("PRODUCT", ROOT_PARENT_ID, LEVEL_L1, "基础属性", "base", 10));
+        Long l2Id = tagDimensionService.createTagDimension(buildReq("PRODUCT", l1Id, LEVEL_L2, "价格属性", "price", 20));
+        Long l3Id = tagDimensionService.createTagDimension(buildReq("PRODUCT", l2Id, LEVEL_L3, "价格带", "price_band", 30));
+        tagValueMapper.insert(TagValueDO.builder()
+                .dimensionId(l3Id)
+                .name("高价")
+                .code("high_price")
+                .tagMethod("MANUAL")
+                .dataSource("运营后台")
+                .updateFrequency("每日")
+                .logicDescription("高价逻辑")
+                .sort(10)
+                .status(STATUS_ENABLED)
+                .uniqueDeleted(0L)
+                .tenantId(1L)
+                .build());
+
+        assertServiceException(() -> tagDimensionService.deleteTagDimension(l3Id), TAG_DIMENSION_HAS_VALUE);
     }
 
     @Test

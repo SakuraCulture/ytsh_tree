@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagDimensionSaveReqVO;
 import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagDimensionDO;
 import cn.iocoder.yudao.module.business.dal.mysql.tag.TagDimensionMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.tag.TagValueMapper;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +23,9 @@ public class TagDimensionServiceImpl implements TagDimensionService {
 
     @Resource
     private TagDimensionMapper tagDimensionMapper;
+
+    @Resource
+    private TagValueMapper tagValueMapper;
 
     @Override
     public Long createTagDimension(TagDimensionSaveReqVO createReqVO) {
@@ -64,6 +68,9 @@ public class TagDimensionServiceImpl implements TagDimensionService {
         validateTagDimensionExists(id);
         if (tagDimensionMapper.selectCountByParentId(id) > 0) {
             throw exception(TAG_DIMENSION_HAS_CHILDREN);
+        }
+        if (tagValueMapper.selectCountByDimensionId(id) > 0) {
+            throw exception(TAG_DIMENSION_HAS_VALUE);
         }
 
         TagDimensionDO updateObj = new TagDimensionDO();
