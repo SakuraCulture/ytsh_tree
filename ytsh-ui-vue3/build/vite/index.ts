@@ -16,7 +16,11 @@ import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite'
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons-ng'
 import UnoCSS from 'unocss/vite'
 
-export function createVitePlugins() {
+export function shouldEnableEslintPlugin(command: 'serve' | 'build') {
+  return command === 'build'
+}
+
+export function createVitePlugins(command: 'serve' | 'build' = 'serve') {
   const root = process.cwd()
 
   // 路径查找
@@ -66,10 +70,14 @@ export function createVitePlugins() {
       resolvers: [ElementPlusResolver()],
       globs: ["src/components/**/**.{vue, md}", '!src/components/DiyEditor/components/mobile/**']
     }),
-    EslintPlugin({
-      cache: false,
-      include: ['src/**/*.vue', 'src/**/*.ts', 'src/**/*.tsx'] // 检查的文件
-    }),
+    ...(shouldEnableEslintPlugin(command)
+      ? [
+          EslintPlugin({
+            cache: false,
+            include: ['src/**/*.vue', 'src/**/*.ts', 'src/**/*.tsx']
+          })
+        ]
+      : []),
     VueI18nPlugin({
       runtimeOnly: true,
       compositionOnly: true,
