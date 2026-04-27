@@ -2,6 +2,7 @@
 -- 饿了么门店商品全量同步任务表结构 SQL (MySQL)
 -- ============================================
 
+DROP TABLE IF EXISTS `ele_store_goods_shadow`;
 DROP TABLE IF EXISTS `ele_store_goods_full_sync_task_store`;
 DROP TABLE IF EXISTS `ele_store_goods_full_sync_task`;
 
@@ -70,3 +71,45 @@ CREATE TABLE `ele_store_goods_full_sync_task_store` (
   KEY `idx_store_status` (`erp_store_code`, `status`),
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='饿了么门店商品全量同步任务门店明细';
+
+CREATE TABLE IF NOT EXISTS `ele_store_goods_shadow` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '影子门店品ID',
+  `platform_id` bigint NOT NULL COMMENT '平台ID，饿了么=1',
+  `merchant_code` varchar(64) NOT NULL COMMENT '商家编码',
+  `erp_store_code` varchar(64) NOT NULL COMMENT 'ERP门店编码',
+  `platform_store_id` varchar(64) DEFAULT NULL COMMENT '平台门店编码',
+  `store_id` varchar(64) DEFAULT NULL COMMENT '本地门店ID',
+  `spu_code` varchar(100) DEFAULT NULL COMMENT '三方SPU编码',
+  `sku_code` varchar(100) NOT NULL COMMENT '三方SKU编码',
+  `sub_sku_code` varchar(100) DEFAULT NULL COMMENT '店内SKU编码',
+  `title` varchar(255) DEFAULT NULL COMMENT '商品名称快照',
+  `main_pic` varchar(500) DEFAULT NULL COMMENT '主图快照',
+  `sub_pics` longtext DEFAULT NULL COMMENT '副图快照JSON',
+  `front_category` longtext DEFAULT NULL COMMENT '前台类目JSON',
+  `brand_name` varchar(128) DEFAULT NULL COMMENT '品牌名称快照',
+  `specification` varchar(255) DEFAULT NULL COMMENT '规格名称快照',
+  `sale_price` decimal(24, 6) DEFAULT NULL COMMENT '门店销售价',
+  `pos_status` varchar(32) DEFAULT NULL COMMENT '平台上下架状态映射值',
+  `is_active` tinyint DEFAULT NULL COMMENT '是否启用',
+  `raw_payload` longtext DEFAULT NULL COMMENT '原始报文',
+  `match_status` varchar(32) NOT NULL COMMENT 'UNMATCHED/MATCHED/MERGED/CONFLICT/IGNORED',
+  `matched_product_sku_id` varchar(64) DEFAULT NULL COMMENT '匹配到的本地SKU ID',
+  `merged_store_product_id` varchar(64) DEFAULT NULL COMMENT '归并后的正式门店商品ID',
+  `last_sync_time` datetime DEFAULT NULL COMMENT '最近同步时间',
+  `matched_time` datetime DEFAULT NULL COMMENT '匹配时间',
+  `merged_time` datetime DEFAULT NULL COMMENT '归并时间',
+  `conflict_reason` varchar(500) DEFAULT NULL COMMENT '冲突原因',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否删除',
+  `unique_deleted` bigint NOT NULL DEFAULT 0 COMMENT '软删除唯一键释放字段',
+  `tenant_id` bigint NOT NULL DEFAULT 1 COMMENT '租户编号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ele_store_goods_shadow_biz` (`tenant_id`, `platform_id`, `merchant_code`, `erp_store_code`, `sku_code`, `unique_deleted`),
+  KEY `idx_ele_store_goods_shadow_store_status` (`store_id`, `match_status`, `deleted`),
+  KEY `idx_ele_store_goods_shadow_platform_status` (`platform_id`, `erp_store_code`, `match_status`, `deleted`),
+  KEY `idx_ele_store_goods_shadow_sku_status` (`sku_code`, `match_status`, `deleted`),
+  KEY `idx_ele_store_goods_shadow_status_time` (`match_status`, `update_time`, `deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='饿了么门店商品影子快照';
