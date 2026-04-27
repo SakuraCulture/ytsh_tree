@@ -1,5 +1,4 @@
 import request from '@/config/axios'
-import type { Dayjs } from 'dayjs';
 
 /** SKU商品主数据信息 */
 export interface SkuTable {
@@ -44,7 +43,25 @@ export interface SpuTable {
           productDetailImages: string; // 商品详情图片
           productDescription: string; // 商品描述
           productSpuStatus: number; // 状态(0下架1上架)
+          tags?: ProductSpuTagRespVO[]
           skuTables?: SkuTable[]
+}
+
+export interface ProductSpuTagSourceRespVO {
+  sourceType: string
+  sourceRef: string
+  status: number
+  effectiveTime?: string
+  expireTime?: string
+}
+
+export interface ProductSpuTagRespVO {
+  tagValueId: number
+  tagValueCode: string
+  tagValueName: string
+  dimensionPath: string
+  sources: string[]
+  sourceDetails: ProductSpuTagSourceRespVO[]
 }
 
 // SPU基础分类 API
@@ -54,9 +71,24 @@ export const SpuTableApi = {
     return await request.get({ url: `/business/spu-table/page`, params })
   },
 
+  getSpuTableAggregatePage: async (params: any) => {
+    return await request.get<PageResult<SpuTable[]>>({ url: `/business/spu-table/page-aggregate`, params })
+  },
+
   // 查询SPU基础分类详情
   getSpuTable: async (productSpuId: number) => {
     return await request.get({ url: `/business/spu-table/get?productSpuId=` + productSpuId })
+  },
+
+  getProductSpuTagList: async (productSpuId: number) => {
+    return await request.get<ProductSpuTagRespVO[]>({
+      url: '/business/product-spu-tag/list',
+      params: { productSpuId }
+    })
+  },
+
+  saveProductSpuManualTags: async (data: { productSpuId: number; tagValueIds: number[] }) => {
+    return await request.post({ url: '/business/product-spu-tag/save-manual', data })
   },
 
   // 新增SPU基础分类

@@ -4,14 +4,28 @@ import java.util.Set;
 
 public interface TagConstants {
 
+    String DOMAIN_TYPE_PRODUCT = "PRODUCT";
+    String OBJECT_TYPE_SPU = "SPU";
+    String TAG_METHOD_MANUAL = "MANUAL";
+    String TAG_METHOD_RULE = "RULE";
+    String TAG_METHOD_ALGORITHM = "ALGORITHM";
+    String TAG_METHOD_INHERIT = "INHERIT";
+    String SOURCE_TYPE_MANUAL = "MANUAL";
+    String SOURCE_TYPE_RULE = "RULE";
+
     Long ROOT_PARENT_ID = 0L;
     Integer LEVEL_L1 = 1;
     Integer LEVEL_L2 = 2;
     Integer LEVEL_L3 = 3;
     Integer STATUS_DISABLED = 0;
     Integer STATUS_ENABLED = 1;
+    Integer RELATION_STATUS_DISABLED = 0;
+    Integer RELATION_STATUS_ENABLED = 1;
 
-    Set<String> DOMAIN_TYPES = Set.of("PRODUCT", "STORE", "MEMBER");
-    Set<String> TAG_METHODS = Set.of("MANUAL", "RULE", "ALGORITHM", "INHERIT");
+    Set<String> DOMAIN_TYPES = Set.of(DOMAIN_TYPE_PRODUCT, "STORE", "MEMBER");
+    Set<String> TAG_METHODS = Set.of(TAG_METHOD_MANUAL, TAG_METHOD_RULE, TAG_METHOD_ALGORITHM, TAG_METHOD_INHERIT);
+    Set<String> OBJECT_TYPES = Set.of(OBJECT_TYPE_SPU);
+    Set<String> SOURCE_TYPES = Set.of(SOURCE_TYPE_MANUAL, SOURCE_TYPE_RULE);
+    Set<Integer> RELATION_STATUSES = Set.of(RELATION_STATUS_DISABLED, RELATION_STATUS_ENABLED);
 
 }

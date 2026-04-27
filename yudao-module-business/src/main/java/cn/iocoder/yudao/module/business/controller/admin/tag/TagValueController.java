@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.framework.excel.core.util.ExcelUtils;
+import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagSelectableValueRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportReqVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValuePageReqVO;
@@ -91,6 +92,14 @@ public class TagValueController {
     public CommonResult<List<TagValueRespVO>> getTagValueListByDimension(@RequestParam("dimensionId") Long dimensionId) {
         List<TagValueDO> list = tagValueService.getTagValueListByDimensionId(dimensionId);
         return success(BeanUtils.toBean(list, TagValueRespVO.class));
+    }
+
+    @GetMapping("/list-for-object")
+    @Operation(summary = "根据标签对象类型获得可选标签值列表")
+    @Parameter(name = "objectType", description = "标签对象类型", required = true, example = "SPU")
+    @PreAuthorize("@ss.hasPermission('business:tag-value:query')")
+    public CommonResult<List<TagSelectableValueRespVO>> getSelectableTagValuesForObject(@RequestParam("objectType") String objectType) {
+        return success(tagValueService.getSelectableTagValuesForObject(objectType));
     }
 
     @GetMapping("/get-import-template")

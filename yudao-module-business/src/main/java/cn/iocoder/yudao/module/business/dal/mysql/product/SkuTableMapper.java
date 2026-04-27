@@ -24,7 +24,8 @@ public interface SkuTableMapper extends BaseMapperX<SkuTableDO> {
     default List<SkuTableDO> selectListByProductSpuIds(Collection<Long> productSpuIds) {
         return selectList(new LambdaQueryWrapperX<SkuTableDO>()
                 .inIfPresent(SkuTableDO::getProductSpuId, productSpuIds)
-                .orderByDesc(SkuTableDO::getProductSpuId));
+                .orderByAsc(SkuTableDO::getProductSpuId)
+                .orderByAsc(SkuTableDO::getProductSkuId));
     }
 
     default SkuTableDO selectByProductSkuCode(String productSkuCode) {

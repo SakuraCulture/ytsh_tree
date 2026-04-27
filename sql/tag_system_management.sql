@@ -62,3 +62,28 @@ CREATE TABLE IF NOT EXISTS `tag_virtual` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tag_virtual_domain_code` (`tenant_id`, `domain_type`, `code`, `unique_deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='虚拟标签表';
+
+CREATE TABLE IF NOT EXISTS `tag_object_relation` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `domain_type` varchar(32) NOT NULL COMMENT '对象域 PRODUCT/STORE/MEMBER',
+  `object_type` varchar(32) NOT NULL COMMENT '打标对象类型，本期固定为 SPU',
+  `object_id` bigint NOT NULL COMMENT '打标对象 ID',
+  `tag_value_id` bigint NOT NULL COMMENT '标签值 ID',
+  `source_type` varchar(32) NOT NULL COMMENT '来源类型，本期支持 MANUAL/RULE',
+  `source_ref` varchar(64) NOT NULL DEFAULT '' COMMENT '来源引用，如规则编码、批次号',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '关系状态 0停用 1启用',
+  `effective_time` datetime DEFAULT NULL COMMENT '生效时间',
+  `expire_time` datetime DEFAULT NULL COMMENT '失效时间',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` bit(1) NOT NULL DEFAULT b'0' COMMENT '是否删除',
+  `unique_deleted` bigint NOT NULL DEFAULT 0 COMMENT '未删除为0，删除后用于释放唯一键',
+  `tenant_id` bigint NOT NULL DEFAULT 1 COMMENT '租户编号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tag_object_relation_biz` (`tenant_id`, `domain_type`, `object_type`, `object_id`, `tag_value_id`, `source_type`, `source_ref`, `unique_deleted`),
+  KEY `idx_tag_object_relation_object` (`tenant_id`, `domain_type`, `object_type`, `object_id`, `status`),
+  KEY `idx_tag_object_relation_tag_value` (`tenant_id`, `tag_value_id`, `status`),
+  KEY `idx_tag_object_relation_domain_status` (`tenant_id`, `domain_type`, `object_type`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='标签对象关系表';

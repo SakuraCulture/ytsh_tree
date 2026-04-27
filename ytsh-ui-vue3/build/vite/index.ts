@@ -64,8 +64,8 @@ export function createVitePlugins(command: 'serve' | 'build' = 'serve') {
       }
     }),
     Components({
-      // 生成自定义 `auto-components.d.ts` 全局声明
-      dts: 'src/types/auto-components.d.ts',
+      // 仅在开发态生成组件声明，避免构建产物污染源码目录
+      dts: command === 'serve' ? 'types/auto-components.d.ts' : false,
       // 自定义组件的解析器
       resolvers: [ElementPlusResolver()],
       globs: ["src/components/**/**.{vue, md}", '!src/components/DiyEditor/components/mobile/**']

@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.business.service.tag;
 
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagSelectableValueRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportReqVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValuePageReqVO;
@@ -23,6 +24,8 @@ public interface TagValueService {
     PageResult<TagValueDO> getTagValuePage(TagValuePageReqVO pageReqVO);
 
     List<TagValueDO> getTagValueListByDimensionId(Long dimensionId);
+
+    List<TagSelectableValueRespVO> getSelectableTagValuesForObject(String objectType);
 
     TagValueImportRespVO importTagValueList(List<TagValueImportReqVO> importList, boolean updateSupport);
 

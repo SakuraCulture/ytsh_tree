@@ -92,6 +92,22 @@
             class="!w-100%"
           />
         </el-form-item>
+        <el-form-item label="商品标签" prop="tagValueId">
+          <el-select
+            v-model="queryParams.tagValueId"
+            placeholder="请选择标签"
+            clearable
+            filterable
+            class="!w-100%"
+          >
+            <el-option
+              v-for="item in selectableTagList"
+              :key="item.tagValueId"
+              :label="`${item.tagValueName}（${item.tagValueCode}）`"
+              :value="item.tagValueId"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态" prop="productSpuStatus">
           <el-select
             v-model="queryParams.productSpuStatus"
@@ -312,6 +328,20 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="标签" min-width="220">
+        <template #default="{ row }">
+          <el-space wrap>
+            <el-tag
+              v-for="tag in row.tags || []"
+              :key="`${row.productSpuId}-${tag.tagValueId}`"
+              type="success"
+            >
+              {{ tag.tagValueName }}
+            </el-tag>
+            <span v-if="!(row.tags || []).length" class="text-gray-400">-</span>
+          </el-space>
+        </template>
+      </el-table-column>
       <el-table-column
         label="创建时间"
         align="center"
@@ -319,7 +349,7 @@
         :formatter="dateFormatter"
         width="180"
       />
-      <el-table-column label="操作" align="center" fixed="right" width="150">
+      <el-table-column label="操作" align="center" fixed="right" width="220">
         <template #default="scope">
           <el-button
             link
@@ -328,6 +358,14 @@
             v-hasPermi="['business:spu-table:update']"
           >
             编辑
+          </el-button>
+          <el-button
+            link
+            type="primary"
+            @click="openTagForm(scope.row.productSpuId)"
+            v-hasPermi="['business:spu-table:update']"
+          >
+            管理标签
           </el-button>
           <el-button
             link
@@ -351,6 +389,7 @@
 
   <!-- 表单弹窗：添加/修改 -->
   <SpuTableForm ref="formRef" @success="getList" />
+  <ProductSpuTagForm ref="tagFormRef" @success="handleTagSaved" />
 
   <!-- UPC码表单弹窗 -->
   <el-dialog v-model="upcDialogVisible" :title="upcDialogTitle" width="500px" destroy-on-close>
@@ -448,8 +487,15 @@ import { isEmpty } from '@/utils/is'
 import { dateFormatter } from '@/utils/formatTime'
 import { handleTree } from '@/utils/tree'
 import download from '@/utils/download'
-import { SpuTableApi, SpuTable, UpcTableApi, UpcTable } from '@/api/business/product'
+import {
+  SpuTableApi,
+  type SpuTable,
+  UpcTableApi,
+  type UpcTable
+} from '@/api/business/product'
 import { CategoryTableApi } from '@/api/business/category'
+import { TagValueApi, type TagSelectableValue } from '@/api/business/tag/value'
+import ProductSpuTagForm from './ProductSpuTagForm.vue'
 import SpuTableForm from './SpuTableForm.vue'
 
 /** SPU基础分类 列表 */
@@ -478,6 +524,7 @@ const queryParams = reactive({
   productSpuStatus: undefined,
   productSkuCode: undefined,
   productSkuName: undefined,
+  tagValueId: undefined as number | undefined,
   createTime: [] as string[]
 })
 const queryFormRef = ref() // 搜索的表单
@@ -488,35 +535,24 @@ const tableRef = ref()
 const expandedRows = ref<number[]>([]) // 展开行的key
 const categoryMap = ref<Map<number, string>>(new Map()) // categoryId -> categoryName
 const categoryTreeData = ref<any[]>([]) // 类目树形数据
+const selectableTagList = ref<TagSelectableValue[]>([])
+const tagFormRef = ref()
 
 /** 查询列表 */
 const getList = async () => {
   loading.value = true
   try {
-    const data = await SpuTableApi.getSpuTablePage(queryParams)
+    const data = await SpuTableApi.getSpuTableAggregatePage(queryParams)
     list.value = data.list
     total.value = data.total
-    // 为每个SPU获取关联的SKU列表
-    const spuIds = data.list.map(item => item.productSpuId).filter(Boolean)
-    if (spuIds.length > 0) {
-      for (const spu of list.value) {
-        if (spu.productSpuId) {
-          const skuData = await SpuTableApi.getSkuTableListByProductSpuId(spu.productSpuId)
-          spu.skuTables = skuData || []
-          // 为每个SKU获取UPC码列表
-          for (const sku of spu.skuTables) {
-            if (sku.productSkuId) {
-              const upcData = await UpcTableApi.getUpcTableListByProductSkuId(sku.productSkuId)
-              sku.upcTables = upcData || []
-            }
-          }
-        }
-      }
-    }
-    tableData.value = list.value
+    tableData.value = data.list
   } finally {
     loading.value = false
   }
+}
+
+const loadSelectableTags = async () => {
+  selectableTagList.value = await TagValueApi.getTagValueListForObject('SPU')
 }
 
 /** 搜索按钮操作 */
@@ -541,6 +577,14 @@ const resetQuery = () => {
 const formRef = ref()
 const openForm = (type: string, id?: number) => {
   formRef.value.open(type, id)
+}
+
+const openTagForm = (productSpuId: number) => {
+  tagFormRef.value.open(productSpuId)
+}
+
+const handleTagSaved = async () => {
+  await getList()
 }
 
 /** 删除按钮操作 */
@@ -819,9 +863,12 @@ const handleImport = async (file: File) => {
 }
 
 /** 初始化 **/
-onMounted(() => {
-  getList()
-  fetchCategoryData()
+onMounted(async () => {
+  await Promise.all([
+    getList(),
+    fetchCategoryData().catch(() => undefined),
+    loadSelectableTags().catch(() => undefined)
+  ])
 })
 
 /** 获取类目数据（映射和树形） */

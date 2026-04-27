@@ -36,8 +36,7 @@
   "include": [
     "src",
     "types/**/*.d.ts",
-    "src/types/auto-imports.d.ts",
-    "src/types/auto-components.d.ts"
+    "src/types/auto-imports.d.ts"
   ],
   "exclude": ["dist", "target", "node_modules"]
 }

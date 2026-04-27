@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.business.service.tag;
 
 import cn.iocoder.yudao.framework.test.core.ut.BaseDbUnitTest;
+import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagSelectableValueRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportReqVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueSaveReqVO;
@@ -130,6 +131,55 @@ class TagValueServiceImplTest extends BaseDbUnitTest {
     }
 
     @Test
+    void getSelectableTagValuesForObject_shouldReturnEnabledProductL3ValuesOnly() {
+        Long productL1Id = createDimension("PRODUCT", ROOT_PARENT_ID, LEVEL_L1, "商品属性", "product_attr");
+        Long productL2Id = createDimension("PRODUCT", productL1Id, LEVEL_L2, "商品角色", "product_role");
+        Long enabledProductL3Id = createDimension("PRODUCT", productL2Id, LEVEL_L3, "功能角色", "function_role");
+        Long disabledProductL3Id = createDimension("PRODUCT", productL2Id, LEVEL_L3, "下架角色", "disabled_role", STATUS_DISABLED);
+
+        Long storeL1Id = createDimension("STORE", ROOT_PARENT_ID, LEVEL_L1, "门店属性", "store_attr");
+        Long storeL2Id = createDimension("STORE", storeL1Id, LEVEL_L2, "门店角色", "store_role");
+        Long storeL3Id = createDimension("STORE", storeL2Id, LEVEL_L3, "门店功能", "store_function");
+
+        createTagValue(enabledProductL3Id, "高价值商品", "high_value_product", STATUS_ENABLED);
+        createTagValue(enabledProductL3Id, "停用商品", "disabled_product_value", STATUS_DISABLED);
+        createTagValue(disabledProductL3Id, "禁用维度商品", "disabled_dimension_value", STATUS_ENABLED);
+        createTagValue(storeL3Id, "门店标签", "store_value", STATUS_ENABLED);
+
+        List<TagSelectableValueRespVO> result = tagValueService.getSelectableTagValuesForObject(OBJECT_TYPE_SPU);
+
+        assertEquals(1, result.size());
+        TagSelectableValueRespVO respVO = result.get(0);
+        assertEquals("high_value_product", respVO.getTagValueCode());
+        assertEquals("高价值商品", respVO.getTagValueName());
+        assertEquals(enabledProductL3Id, respVO.getDimensionId());
+        assertEquals("功能角色", respVO.getDimensionName());
+        assertEquals("商品属性 / 商品角色 / 功能角色", respVO.getDimensionPath());
+        assertEquals(STATUS_ENABLED, respVO.getStatus());
+    }
+
+    @Test
+    void getSelectableTagValuesForObject_whenObjectTypeInvalid_shouldThrow() {
+        assertServiceException(() -> tagValueService.getSelectableTagValuesForObject("SKU"), TAG_OBJECT_TYPE_INVALID);
+    }
+
+    @Test
+    void getSelectableTagValuesForObject_whenDimensionParentMissing_shouldSkipBrokenValue() {
+        Long productL1Id = createDimension("PRODUCT", ROOT_PARENT_ID, LEVEL_L1, "商品属性", "product_attr");
+        Long productL2Id = createDimension("PRODUCT", productL1Id, LEVEL_L2, "商品角色", "product_role");
+        Long enabledProductL3Id = createDimension("PRODUCT", productL2Id, LEVEL_L3, "功能角色", "function_role");
+        Long brokenL3Id = createBrokenL3Dimension();
+
+        createTagValue(enabledProductL3Id, "高价值商品", "high_value_product", STATUS_ENABLED);
+        createTagValue(brokenL3Id, "脏数据商品", "broken_product", STATUS_ENABLED);
+
+        List<TagSelectableValueRespVO> result = tagValueService.getSelectableTagValuesForObject(OBJECT_TYPE_SPU);
+
+        assertEquals(1, result.size());
+        assertEquals("high_value_product", result.get(0).getTagValueCode());
+    }
+
+    @Test
     void importTagValueList_shouldCreateHierarchyAndBeIdempotent() {
         TagValueImportReqVO first = buildImportReq("PRODUCT", "商品属性", "attr", "价格属性", "price", "价格带", "price_band",
                 "高价格", "high_price");
@@ -236,6 +286,22 @@ class TagValueServiceImplTest extends BaseDbUnitTest {
         return createDimension("PRODUCT", l2Id, LEVEL_L3, "价格带", "price_band");
     }
 
+    private Long createBrokenL3Dimension() {
+        TagDimensionDO dimension = TagDimensionDO.builder()
+                .domainType("PRODUCT")
+                .parentId(999999L)
+                .level(LEVEL_L3)
+                .name("脏数据维度")
+                .code("broken_dimension")
+                .sort(10)
+                .status(STATUS_ENABLED)
+                .uniqueDeleted(0L)
+                .tenantId(1L)
+                .build();
+        tagDimensionMapper.insert(dimension);
+        return dimension.getId();
+    }
+
     private Long createL3DimensionIdIfExists() {
         List<TagDimensionDO> l1List = tagDimensionMapper.selectList("PRODUCT", ROOT_PARENT_ID, LEVEL_L1);
         assertFalse(l1List.isEmpty());
@@ -247,6 +313,10 @@ class TagValueServiceImplTest extends BaseDbUnitTest {
     }
 
     private Long createDimension(String domainType, Long parentId, Integer level, String name, String code) {
+        return createDimension(domainType, parentId, level, name, code, STATUS_ENABLED);
+    }
+
+    private Long createDimension(String domainType, Long parentId, Integer level, String name, String code, Integer status) {
         cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagDimensionSaveReqVO reqVO =
                 new cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagDimensionSaveReqVO();
         reqVO.setDomainType(domainType);
@@ -255,9 +325,15 @@ class TagValueServiceImplTest extends BaseDbUnitTest {
         reqVO.setName(name);
         reqVO.setCode(code);
         reqVO.setSort(10);
-        reqVO.setStatus(STATUS_ENABLED);
+        reqVO.setStatus(status);
         reqVO.setDescription(name + "说明");
         return tagDimensionService.createTagDimension(reqVO);
+    }
+
+    private Long createTagValue(Long dimensionId, String name, String code, Integer status) {
+        TagValueSaveReqVO reqVO = buildSaveReq(dimensionId, name, code);
+        reqVO.setStatus(status);
+        return tagValueService.createTagValue(reqVO);
     }
 
     private static TagValueSaveReqVO buildSaveReq(Long dimensionId, String name, String code) {

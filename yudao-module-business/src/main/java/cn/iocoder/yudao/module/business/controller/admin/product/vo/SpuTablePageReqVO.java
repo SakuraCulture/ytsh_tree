@@ -279,8 +279,11 @@ public class SpuTablePageReqVO extends PageParam {
     @Schema(description = "SKU名称", example = "芋艿")
     private String productSkuName;
 
+    @Schema(description = "标签值 ID", example = "1001")
+    private Long tagValueId;
+
     /**
-     * SPU ID列表（内部用于SKU关联查询）
+     * SPU ID列表（内部用于关联筛选）
      */
     @Schema(description = "SPU ID列表（内部使用）")
     private List<Long> spuIds;

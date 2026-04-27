@@ -251,6 +251,8 @@ yudao:
         sender-kafka:
             topic: ${spring.application.name}-websocket # WebSocket 消息 Topic
             consumer-group: ${spring.application.name}-websocket-consumer
+    captcha:
+        enable: false
 
 --- #################### 服务保障相关配置 ####################
 

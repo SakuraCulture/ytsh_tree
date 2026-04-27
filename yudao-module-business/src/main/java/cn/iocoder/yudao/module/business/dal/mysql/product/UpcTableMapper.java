@@ -19,7 +19,8 @@ public interface UpcTableMapper extends BaseMapperX<UpcTableDO> {
     default List<UpcTableDO> selectListByProductSkuIds(Collection<Long> productSkuIds) {
         return selectList(new LambdaQueryWrapperX<UpcTableDO>()
                 .inIfPresent(UpcTableDO::getProductSkuId, productSkuIds)
-                .orderByDesc(UpcTableDO::getProductUpcId));
+                .orderByAsc(UpcTableDO::getProductSkuId)
+                .orderByAsc(UpcTableDO::getProductUpcId));
     }
 
     default int deleteByProductSkuId(Long productSkuId) {

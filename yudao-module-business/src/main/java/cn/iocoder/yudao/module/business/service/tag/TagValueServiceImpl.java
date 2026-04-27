@@ -4,6 +4,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
+import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagSelectableValueRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportReqVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValueImportRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.tag.vo.TagValuePageReqVO;
@@ -98,6 +99,51 @@ public class TagValueServiceImpl implements TagValueService {
     }
 
     @Override
+    public List<TagSelectableValueRespVO> getSelectableTagValuesForObject(String objectType) {
+        validateObjectType(objectType);
+        List<TagDimensionDO> dimensions = tagDimensionMapper.selectList(DOMAIN_TYPE_PRODUCT, null, null);
+        if (CollUtil.isEmpty(dimensions)) {
+            return List.of();
+        }
+        LinkedHashMap<Long, TagDimensionDO> dimensionMap = new LinkedHashMap<>();
+        List<Long> enabledL3DimensionIds = new ArrayList<>();
+        for (TagDimensionDO dimension : dimensions) {
+            dimensionMap.put(dimension.getId(), dimension);
+            if (Objects.equals(dimension.getLevel(), LEVEL_L3) && Objects.equals(dimension.getStatus(), STATUS_ENABLED)) {
+                enabledL3DimensionIds.add(dimension.getId());
+            }
+        }
+        if (CollUtil.isEmpty(enabledL3DimensionIds)) {
+            return List.of();
+        }
+        List<TagValueDO> tagValues = tagValueMapper.selectEnabledListByDimensionIds(enabledL3DimensionIds);
+        if (CollUtil.isEmpty(tagValues)) {
+            return List.of();
+        }
+        List<TagSelectableValueRespVO> results = new ArrayList<>(tagValues.size());
+        for (TagValueDO tagValue : tagValues) {
+            TagDimensionDO dimension = dimensionMap.get(tagValue.getDimensionId());
+            if (dimension == null) {
+                continue;
+            }
+            String dimensionPath = buildDimensionPath(dimension, dimensionMap);
+            if (dimensionPath == null) {
+                continue;
+            }
+            TagSelectableValueRespVO respVO = new TagSelectableValueRespVO();
+            respVO.setTagValueId(tagValue.getId());
+            respVO.setTagValueCode(tagValue.getCode());
+            respVO.setTagValueName(tagValue.getName());
+            respVO.setDimensionId(dimension.getId());
+            respVO.setDimensionName(dimension.getName());
+            respVO.setDimensionPath(dimensionPath);
+            respVO.setStatus(tagValue.getStatus());
+            results.add(respVO);
+        }
+        return results;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public TagValueImportRespVO importTagValueList(List<TagValueImportReqVO> importList, boolean updateSupport) {
         if (CollUtil.isEmpty(importList)) {
@@ -149,6 +195,12 @@ public class TagValueServiceImpl implements TagValueService {
     private void validateTagMethod(String tagMethod) {
         if (!TAG_METHODS.contains(tagMethod)) {
             throw exception(TAG_METHOD_INVALID);
+        }
+    }
+
+    private void validateObjectType(String objectType) {
+        if (!OBJECT_TYPES.contains(objectType)) {
+            throw exception(TAG_OBJECT_TYPE_INVALID);
         }
     }
 
@@ -231,6 +283,18 @@ public class TagValueServiceImpl implements TagValueService {
         if (StrUtil.isBlank(value)) {
             throw exception(TAG_DIMENSION_LEVEL_ERROR);
         }
+    }
+
+    private String buildDimensionPath(TagDimensionDO l3Dimension, LinkedHashMap<Long, TagDimensionDO> dimensionMap) {
+        TagDimensionDO l2Dimension = dimensionMap.get(l3Dimension.getParentId());
+        if (l2Dimension == null) {
+            return null;
+        }
+        TagDimensionDO l1Dimension = dimensionMap.get(l2Dimension.getParentId());
+        if (l1Dimension == null) {
+            return null;
+        }
+        return StrUtil.format("{} / {} / {}", l1Dimension.getName(), l2Dimension.getName(), l3Dimension.getName());
     }
 
     private String buildFailureName(String tagValueName, int rowIndex) {

@@ -49,6 +49,16 @@ export interface TagValueImportRespVO {
   failureNames?: Record<string, string>
 }
 
+export interface TagSelectableValue {
+  tagValueId: number
+  tagValueCode: string
+  tagValueName: string
+  dimensionId: number
+  dimensionName: string
+  dimensionPath: string
+  status: number
+}
+
 export const TagValueApi = {
   getTagValuePage: async (params: TagValuePageReqVO) => {
     return await request.get({ url: '/business/tag-value/page', params })
@@ -60,6 +70,13 @@ export const TagValueApi = {
 
   getTagValueListByDimensionId: async (dimensionId: number) => {
     return await request.get({ url: '/business/tag-value/list-by-dimension', params: { dimensionId } })
+  },
+
+  getTagValueListForObject: async (objectType: string) => {
+    return await request.get<TagSelectableValue[]>({
+      url: '/business/tag-value/list-for-object',
+      params: { objectType }
+    })
   },
 
   createTagValue: async (data: TagValue) => {

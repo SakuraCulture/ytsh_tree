@@ -190,6 +190,13 @@ public class SpuTableController {
         return success(BeanUtils.toBean(pageResult, SpuTableRespVO.class));
     }
 
+    @GetMapping("/page-aggregate")
+    @Operation(summary = "获得SPU基础分类聚合分页")
+    @PreAuthorize("@ss.hasPermission('business:spu-table:query')")
+    public CommonResult<PageResult<SpuTableAggregateRespVO>> getSpuTableAggregatePage(@Valid SpuTablePageReqVO pageReqVO) {
+        return success(spuTableService.getSpuTableAggregatePage(pageReqVO));
+    }
+
     /**
      * 导出SPU基础分类数据到Excel
      *

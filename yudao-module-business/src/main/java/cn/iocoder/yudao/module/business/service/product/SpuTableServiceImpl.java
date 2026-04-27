@@ -21,7 +21,13 @@ import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.module.business.dal.mysql.product.SpuTableMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.product.SkuTableMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.product.UpcTableMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.tag.TagObjectRelationMapper;
+import cn.iocoder.yudao.module.business.service.product.ProductSpuTagService;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
+import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagObjectRelationDO;
+
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.DOMAIN_TYPE_PRODUCT;
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.OBJECT_TYPE_SPU;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertList;
@@ -42,6 +48,10 @@ public class SpuTableServiceImpl implements SpuTableService {
     private SkuTableMapper skuTableMapper;
     @Resource
     private UpcTableMapper upcTableMapper;
+    @Resource
+    private TagObjectRelationMapper tagObjectRelationMapper;
+    @Resource
+    private ProductSpuTagService productSpuTagService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -106,6 +116,53 @@ public class SpuTableServiceImpl implements SpuTableService {
 
     @Override
     public PageResult<SpuTableDO> getSpuTablePage(SpuTablePageReqVO pageReqVO) {
+        return getFilteredSpuTablePage(pageReqVO);
+    }
+
+    @Override
+    public PageResult<SpuTableAggregateRespVO> getSpuTableAggregatePage(SpuTablePageReqVO pageReqVO) {
+        PageResult<SpuTableDO> pageResult = getFilteredSpuTablePage(pageReqVO);
+        if (CollUtil.isEmpty(pageResult.getList())) {
+            return new PageResult<>(Collections.emptyList(), pageResult.getTotal());
+        }
+
+        List<SpuTableDO> spuList = pageResult.getList();
+        List<Long> productSpuIds = convertList(spuList, SpuTableDO::getProductSpuId);
+        Map<Long, List<ProductSpuTagRespVO>> tagMap = productSpuTagService.getSimpleTagList(productSpuIds).stream()
+                .collect(Collectors.toMap(ProductSpuTagSimpleRespVO::getProductSpuId,
+                        item -> item.getTags() == null ? Collections.emptyList() : item.getTags(),
+                        (a, b) -> a,
+                        LinkedHashMap::new));
+
+        List<SkuTableDO> skuList = skuTableMapper.selectListByProductSpuIds(productSpuIds);
+        Map<Long, List<SkuTableDO>> skuMap = skuList.stream()
+                .collect(Collectors.groupingBy(SkuTableDO::getProductSpuId, LinkedHashMap::new, Collectors.toList()));
+
+        List<Long> productSkuIds = convertList(skuList, SkuTableDO::getProductSkuId);
+        Map<Long, List<UpcTableRespVO>> upcMap = upcTableMapper.selectListByProductSkuIds(productSkuIds).stream()
+                .map(item -> BeanUtils.toBean(item, UpcTableRespVO.class))
+                .collect(Collectors.groupingBy(UpcTableRespVO::getProductSkuId, LinkedHashMap::new, Collectors.toList()));
+
+        List<SpuTableAggregateRespVO> aggregateList = new ArrayList<>(spuList.size());
+        for (SpuTableDO spu : spuList) {
+            SpuTableAggregateRespVO aggregateRespVO = BeanUtils.toBean(spu, SpuTableAggregateRespVO.class);
+            aggregateRespVO.setTags(tagMap.getOrDefault(spu.getProductSpuId(), Collections.emptyList()));
+
+            List<SkuTableAggregateRespVO> aggregateSkus = skuMap.getOrDefault(spu.getProductSpuId(), Collections.emptyList()).stream()
+                    .map(sku -> {
+                        SkuTableAggregateRespVO skuRespVO = BeanUtils.toBean(sku, SkuTableAggregateRespVO.class);
+                        skuRespVO.setUpcTables(upcMap.getOrDefault(sku.getProductSkuId(), Collections.emptyList()));
+                        return skuRespVO;
+                    })
+                    .collect(Collectors.toList());
+            aggregateRespVO.setSkuTables(aggregateSkus);
+            aggregateList.add(aggregateRespVO);
+        }
+        return new PageResult<>(aggregateList, pageResult.getTotal());
+    }
+
+    private PageResult<SpuTableDO> getFilteredSpuTablePage(SpuTablePageReqVO pageReqVO) {
+        List<Long> filteredSpuIds = null;
         if (StrUtil.isNotEmpty(pageReqVO.getProductSkuCode())
                 || StrUtil.isNotEmpty(pageReqVO.getProductSkuName())) {
             List<SkuTableDO> skuList = skuTableMapper.selectList(
@@ -116,10 +173,24 @@ public class SpuTableServiceImpl implements SpuTableService {
             if (CollUtil.isEmpty(skuList)) {
                 return PageResult.empty();
             }
-            List<Long> spuIds = convertList(skuList, SkuTableDO::getProductSpuId);
-            pageReqVO.setSpuIds(CollUtil.distinct(spuIds));
+            filteredSpuIds = CollUtil.distinct(convertList(skuList, SkuTableDO::getProductSpuId));
         }
-        return spuTableMapper.selectPage(pageReqVO);
+        if (pageReqVO.getTagValueId() != null) {
+            List<TagObjectRelationDO> relations = tagObjectRelationMapper.selectActiveListByTagValue(DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_SPU,
+                    pageReqVO.getTagValueId());
+            if (CollUtil.isEmpty(relations)) {
+                return PageResult.empty();
+            }
+            List<Long> taggedSpuIds = CollUtil.distinct(convertList(relations, TagObjectRelationDO::getObjectId));
+            filteredSpuIds = filteredSpuIds == null ? taggedSpuIds
+                    : new ArrayList<>(CollUtil.intersectionDistinct(filteredSpuIds, taggedSpuIds));
+            if (CollUtil.isEmpty(filteredSpuIds)) {
+                return PageResult.empty();
+            }
+        }
+        SpuTablePageReqVO queryReqVO = BeanUtils.toBean(pageReqVO, SpuTablePageReqVO.class);
+        queryReqVO.setSpuIds(filteredSpuIds);
+        return spuTableMapper.selectPage(queryReqVO);
     }
 
     // ==================== 子表（SKU商品主数据） ====================

@@ -11,6 +11,8 @@ import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.STATUS_ENABLED;
+
 @Mapper
 public interface TagValueMapper extends BaseMapperX<TagValueDO> {
 
@@ -29,6 +31,14 @@ public interface TagValueMapper extends BaseMapperX<TagValueDO> {
 
     default Long selectCountByDimensionId(Long dimensionId) {
         return selectCount(TagValueDO::getDimensionId, dimensionId);
+    }
+
+    default List<TagValueDO> selectEnabledListByDimensionIds(List<Long> dimensionIds) {
+        return selectList(new LambdaQueryWrapperX<TagValueDO>()
+                .inIfPresent(TagValueDO::getDimensionId, dimensionIds)
+                .eq(TagValueDO::getStatus, STATUS_ENABLED)
+                .orderByAsc(TagValueDO::getSort)
+                .orderByAsc(TagValueDO::getId));
     }
 
     default PageResult<TagValueDO> selectPage(TagValuePageReqVO reqVO) {

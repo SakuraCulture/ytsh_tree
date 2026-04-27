@@ -61,6 +61,14 @@ public interface SpuTableService {
      */
     PageResult<SpuTableDO> getSpuTablePage(SpuTablePageReqVO pageReqVO);
 
+    /**
+     * 获得SPU基础分类聚合分页
+     *
+     * @param pageReqVO 分页查询
+     * @return 聚合后的SPU基础分类分页
+     */
+    PageResult<SpuTableAggregateRespVO> getSpuTableAggregatePage(SpuTablePageReqVO pageReqVO);
+
     // ==================== 子表（SKU商品主数据） ====================
 
     /**

@@ -84,4 +84,10 @@ public interface ErrorCodeConstants {
     ErrorCode TAG_VIRTUAL_CODE_EXISTS = new ErrorCode(1_030_002_001, "当前对象域下已存在该虚拟标签编码");
     ErrorCode TAG_VIRTUAL_EXPRESSION_INVALID = new ErrorCode(1_030_002_002, "虚拟标签表达式不是合法 JSON 对象");
     ErrorCode TAG_VIRTUAL_STATUS_INVALID = new ErrorCode(1_030_002_003, "虚拟标签状态不合法");
+    ErrorCode TAG_OBJECT_TYPE_INVALID = new ErrorCode(1_030_003_000, "标签对象类型不合法");
+    ErrorCode TAG_SOURCE_TYPE_INVALID = new ErrorCode(1_030_003_001, "标签来源类型不合法");
+    ErrorCode TAG_RELATION_STATUS_INVALID = new ErrorCode(1_030_003_002, "标签关系状态不合法");
+    ErrorCode TAG_VALUE_NOT_PRODUCT_DOMAIN = new ErrorCode(1_030_003_003, "标签值不属于 PRODUCT 域");
+    ErrorCode TAG_VALUE_DISABLED = new ErrorCode(1_030_003_004, "标签值已停用");
+    ErrorCode TAG_SOURCE_REF_REQUIRED = new ErrorCode(1_030_003_005, "RULE 来源的 sourceRef 不能为空");
 }

@@ -240,6 +240,8 @@ yudao:
         sender-kafka:
             topic: ${spring.application.name}-websocket # WebSocket 消息 Topic
             consumer-group: ${spring.application.name}-websocket-consumer
+    captcha:
+        enable: false # 隔离环境关闭登录验证码，便于联调
 
 --- #################### 服务保障相关配置 ####################
 
