@@ -532,7 +532,6 @@ const exportLoading = ref(false) // 导出的加载中
 const importLoading = ref(false) // 导入的加载中
 const templateLoading = ref(false) // 模板下载的加载中
 const tableRef = ref()
-const expandedRows = ref<number[]>([]) // 展开行的key
 const categoryMap = ref<Map<number, string>>(new Map()) // categoryId -> categoryName
 const categoryTreeData = ref<any[]>([]) // 类目树形数据
 const selectableTagList = ref<TagSelectableValue[]>([])
@@ -785,14 +784,6 @@ const submitSkuForm = async () => {
   } catch (error) {
     console.error('更新失败:', error)
   }
-}
-
-const toggleUpcSection = (row: any) => {
-  row.showUpc = !row.showUpc
-}
-
-const toggleSkuUpc = (sku: any) => {
-  sku.showUpc = !sku.showUpc
 }
 
 const checkedIds = ref<number[]>([])

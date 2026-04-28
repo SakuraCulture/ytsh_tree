@@ -4,6 +4,7 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.annotation.Resource;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.security.access.prepost.PreAuthorize;
+import jakarta.annotation.security.PermitAll;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Operation;
@@ -416,8 +417,8 @@ import org.springframework.web.multipart.MultipartFile;
      * @return 门店平台信息列表
      */
     @GetMapping("/platform-info/list")
-    @Operation(summary = "获取已开店门店的平台信息列表(从Redis获取)")
-    @PreAuthorize("@ss.hasPermission('business:table:query')")
+    @Operation(summary = "获取全部门店的平台信息列表(从Redis获取)")
+    @PermitAll
     public CommonResult<List<StorePlatformInfoRespVO>> getStorePlatformInfoList() {
         return success(storeService.getStorePlatformInfoList());
     }
@@ -435,7 +436,7 @@ import org.springframework.web.multipart.MultipartFile;
      */
     @GetMapping("/platform-info/sync")
     @Operation(summary = "手动同步门店平台信息到Redis")
-    @PreAuthorize("@ss.hasPermission('business:table:update')")
+    @PermitAll
     public CommonResult<Boolean> syncStorePlatformInfo() {
         storeService.syncStorePlatformInfo();
         return success(true);

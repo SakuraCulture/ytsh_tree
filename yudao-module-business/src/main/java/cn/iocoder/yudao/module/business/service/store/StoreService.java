@@ -384,6 +384,22 @@ public interface StoreService {
     List<cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO> getOpenPlatformStoresByPlatformCode(String platformCode);
 
     /**
+     * 获取全部门店的平台关联列表（缓存优先，含开店和关店）
+     *
+     * 【What】
+     * 先查 Redis 缓存，未命中则查询数据库并回填缓存
+     * 返回全部门店（不管开店关店），用于订单同步等需要全量门店的场景
+     *
+     * 【Constraints】
+     * - 只返回有 platformStoreId 的门店，无关联的门店会被跳过
+     * - 不过滤 storeStatus，全部门店都返回
+     *
+     * @param platformCode 平台编码（保留参数，当前实现不使用）
+     * @return 全部平台门店列表
+     */
+    List<StorePlatformRespVO> getAllPlatformStoresByPlatformCode(String platformCode);
+
+    /**
      * 从Redis获取已开店门店的平台信息列表
      *
      * 【What】

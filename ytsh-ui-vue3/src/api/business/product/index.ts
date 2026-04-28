@@ -141,11 +141,6 @@ export const SpuTableApi = {
 
 // UPC码管理 API
 export const UpcTableApi = {
-  // 获取SKU的UPC码列表
-  getUpcTableListByProductSkuId: async (productSkuId: number) => {
-    return await request.get({ url: `/business/upc-table/list-by-product-sku-id`, params: { productSkuId } })
-  },
-
   // 新增UPC码
   createUpcTable: async (data: UpcTable) => {
     return await request.post({ url: `/business/upc-table/create`, data })

@@ -13,4 +13,7 @@ public class StorePlatformInfoRespVO {
     @Schema(description = "平台门店名称", requiredMode = Schema.RequiredMode.REQUIRED)
     private String storeName;
 
+    @Schema(description = "门店状态 0=停用 1=正常")
+    private Integer storeStatus;
+
 }

@@ -161,12 +161,12 @@ public class StorePlatformCacheService {
      * 实际执行缓存同步的核心逻辑
      *
      * 【处理流程】
-     * 1. 查询所有已开店的门店（store_status=0）
+     * 1. 查询所有门店（不管开店关店）
      * 2. 查询所有门店的平台关联信息
      * 3. 组装数据并写入 Redis
      *
      * 【Constraints】
-     * - 只同步已开店的门店
+     * - 同步全部门店（含开店和关店）
      * - 只同步有 platformStoreId 的关联
      * - 无数据时清空缓存
      *
@@ -178,12 +178,11 @@ public class StorePlatformCacheService {
     private void doSyncStorePlatformInfoToRedis() {
         log.info("【门店平台信息同步】开始同步门店平台信息到Redis,/admin-api/business/table/platform-info/sync");
 
-        // 1. 查询所有已开店的门店（storeStatus=1 表示正常/开店）
+        // 1. 查询全部门店（不管开店关店，都缓存到Redis）
         List<StoreDO> stores = storeMapper.selectList(new LambdaQueryWrapperX<StoreDO>()
-                .eq(StoreDO::getStoreStatus, 1)
                 .orderByDesc(StoreDO::getStoreId));
         if (CollUtil.isEmpty(stores)) {
-            log.info("【门店平台信息同步】未查询到已开店的门店，清空Redis缓存");
+            log.info("【门店平台信息同步】未查询到门店，清空Redis缓存");
             storePlatformRedisDAO.deleteStorePlatformList();
             return;
         }
@@ -239,6 +238,7 @@ public class StorePlatformCacheService {
             StorePlatformInfoRespVO vo = new StorePlatformInfoRespVO();
             vo.setPlatformStoreId(StrUtil.trim(platformTable.getPlatformStoreId()));
             vo.setStoreName(StrUtil.trim(store.getStoreName()));
+            vo.setStoreStatus(store.getStoreStatus());
             result.add(vo);
         }
 

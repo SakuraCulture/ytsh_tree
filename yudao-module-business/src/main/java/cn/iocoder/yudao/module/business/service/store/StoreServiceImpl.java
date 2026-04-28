@@ -46,75 +46,8 @@ import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.
 import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.*;
 
 /**
- * 门店 Service 实现类
- *
- * 【Why - 为什么要用 .clean() 方法？】
- * MyBatis-Plus 的 insertOrUpdate() 依赖主键判断新增还是更新：
- * - 有主键值 → 执行 UPDATE，此时 updateTime 字段使用数据库默认值（不更新）
- * - 无主键值 → 执行 INSERT
- *
- * 问题场景：门店编辑页面回显时，BeanUtils.toBean() 会复制完整的 DO 对象，
- * 包括 createTime、updateTime 等审计字段。当调用 insertOrUpdate() 时，
- * 这些审计字段被当作普通字段处理，导致 updateTime 无法更新。
- *
- * 解决方案：在 setStoreId() 后调用 .clean() 方法，清除 createTime、
- * updateTime、creator、updater 等审计字段，让 MyBatis-Plus 使用当前时间戳。
- *
- * 【Why - 为什么缓存同步在事务提交后执行？】
- * storePlatformCacheService.syncStorePlatformInfoToRedis() 放在事务方法内执行：
- * - Spring 默认 @Transactional 使用代理，方法返回后才提交事务
- * - 但 Redis 同步在事务提交前执行，事务回滚时缓存已更新，数据不一致
- *
- * 解决方案：将缓存同步改为 @TransactionalEventListener(phase = AFTER_COMMIT)，
- * 或使用 TransactionSynchronizationManager.registerSynchronization() 回调
- *
- * 当前实现风险：createStore/updateStore 等方法在事务内调用缓存同步，
- * 如果后续出现异常，可能导致缓存与数据库不一致。生产环境需评估是否可以接受。
- *
- * 【Why - ContactTable 为什么用 diffList 而不是全量替换？】
- * 一对多子表（一个门店多个联系人）的更新策略：
- *
- * 方案A - 全量删除再插入：
- *   deleteByStoreId(storeId);
- *   insertBatch(newList);
- *   优点：实现简单
- *   缺点：联系人ID每次都变，关联的业务数据（订单、日志）外键失效
- *
- * 方案B - diffList 增量更新：【采用】
- *   1. 查询原列表 oldList
- *   2. 与新列表 newList 做 diff
- *   3. 分三类处理：
- *      - diffList.get(0)：新增记录，直接 insertBatch
- *      - diffList.get(1)：需更新记录，updateBatch（保留原ID）
- *      - diffList.get(2)：需删除记录，deleteBatch
- *   优点：保留 contactId，关联数据不受影响
- *   缺点：实现复杂度高
- *
- * 【What - 核心功能】
- * 1. 主档 CRUD：createStore、updateStore、deleteStore、deleteStoreListByIds、getStore、getStorePage
- * 2. 子表管理：每个子表有独立的 create/update/delete/query 方法
- * 3. 批量导入：importStoreList 支持新增和更新模式
- * 4. 平台关联：getPlatformTableByStoreId 等方法查询平台关联信息
- * 5. 缓存同步：syncStorePlatformInfoToRedis() 保持 Redis 与数据库一致
- *
- * 【Constraints - 事务管理规则】
- * - 所有增删改方法必须使用 @Transactional(rollbackFor = Exception.class)
- * - 子表操作在主事务内完成，保持原子性
- * - 缓存同步在事务提交后执行（或在事务内执行，接受短暂不一致）
- *
- * 【Pitfalls - 历史教训】
- * - 【教训2024-03】storeId 格式校验缺失：storeId 为 String 类型，
- *   未校验格式导致非法ID入库，如 "null"、"undefined"、纯空格等
- * - 【教训2024-03】ContactTable ID 变更：全量替换导致关联订单的客户名丢失
- * - 【教训2024-03】updateTime 未更新：未调用 .clean() 导致审计日志不准确
- * - 【教训2024-03】子表未级联删除：删除门店时子表残留，产生孤儿数据
- * - 【教训2024-03】批量导入部分失败：forEach 内异常未处理，导致部分数据入库
- *
- * 【Pitfalls - 未来风险】
- * - 缓存一致性问题：事务内同步缓存，事务回滚时缓存已更新
- * - 并发更新冲突：两个用户同时编辑同一门店，后提交者覆盖前者的修改
- * - 大数据量导入：importStoreList 使用 forEach 单条处理，1000+ 条时性能差
- *
+ * 门店服务实现类
+ * 
  * @author 彼岸花
  */
 @Slf4j
@@ -485,17 +418,17 @@ public class StoreServiceImpl implements StoreService {
      *
      * 【Why - 为什么用 diffList？】
      * 一对多关系，如果用全量删除再插入：
-     *   deleteByStoreId(storeId);
-     *   insertBatch(newList);
+     * deleteByStoreId(storeId);
+     * insertBatch(newList);
      * 问题：contactId 每次都变，关联的业务数据（订单、日志）外键失效
      *
      * diffList 算法：
      * 1. 查询 oldList（数据库中原有记录）
      * 2. 与 newList（新传入记录）做 diff
      * 3. 分三类处理：
-     *    - diffList.get(0)：需新增（oldList 有，newList 无对应ID）→ insertBatch
-     *    - diffList.get(1)：需更新（oldList、newList 都有同一 contactId）→ updateBatch
-     *    - diffList.get(2)：需删除（oldList 有，newList 无）→ deleteBatch
+     * - diffList.get(0)：需新增（oldList 有，newList 无对应ID）→ insertBatch
+     * - diffList.get(1)：需更新（oldList、newList 都有同一 contactId）→ updateBatch
+     * - diffList.get(2)：需删除（oldList 有，newList 无）→ deleteBatch
      *
      * 【Constraints】
      * - 依赖 contactId 做匹配，contactId 为空则视为新增
@@ -503,7 +436,7 @@ public class StoreServiceImpl implements StoreService {
      *
      * 【Pitfalls】
      * - 【教训2024-03】匹配条件有误：当前用 == 比较 Long 类型，可能导致自动装箱比较失效
-     *   建议改为 ObjectUtil.equal(oldVal.getContactId(), newVal.getContactId())
+     * 建议改为 ObjectUtil.equal(oldVal.getContactId(), newVal.getContactId())
      */
     private void updateContactTableList(String storeId, List<ContactTableDO> list) {
         // 【Why - 必须清除审计字段，否则 updateTime 不更新】
@@ -604,36 +537,36 @@ public class StoreServiceImpl implements StoreService {
      *
      * 【导入流程 - 三步走】
      * ┌─────────────────────────────────────────────────────────────┐
-     * │ 第一步：数据准备                                            │
-     * │ - 校验导入列表非空                                          │
+     * │ 第一步：数据准备 │
+     * │ - 校验导入列表非空 │
      * │ - 构建响应 VO（createNames、updateNames、failureStoreNames）│
      * └─────────────────────────────────────────────────────────────┘
-     *                          ↓
+     * ↓
      * ┌─────────────────────────────────────────────────────────────┐
-     * │ 第二步：逐条处理（forEach + try-catch）                      │
-     * │                                                          │
-     * │ 判断逻辑：                                                 │
-     * │ ┌──────────────────────────────────────────────────────┐  │
-     * │ │ storeId 存在？ → selectById(storeId)                  │  │
-     * │ │ storeName 存在？ → selectByStoreName(storeName)     │  │
-     * │ │ 都不存在 → 新增模式                                   │  │
-     * │ │ 存在 + isUpdateSupport=true → 更新模式               │  │
-     * │ │ 存在 + isUpdateSupport=false → 失败                  │  │
-     * │ └──────────────────────────────────────────────────────┘  │
-     * │                                                          │
-     * │ 新增模式处理：                                             │
-     * │ - insert 主表                                             │
-     * │ - 按条件插入子表（SpaceTable、AffiliationTable...）        │
-     * │                                                          │
-     * │ 更新模式处理：                                             │
-     * │ - update 主表                                             │
-     * │ - 子表需先查再决定 insert/update（避免覆盖）               │
+     * │ 第二步：逐条处理（forEach + try-catch） │
+     * │ │
+     * │ 判断逻辑： │
+     * │ ┌──────────────────────────────────────────────────────┐ │
+     * │ │ storeId 存在？ → selectById(storeId) │ │
+     * │ │ storeName 存在？ → selectByStoreName(storeName) │ │
+     * │ │ 都不存在 → 新增模式 │ │
+     * │ │ 存在 + isUpdateSupport=true → 更新模式 │ │
+     * │ │ 存在 + isUpdateSupport=false → 失败 │ │
+     * │ └──────────────────────────────────────────────────────┘ │
+     * │ │
+     * │ 新增模式处理： │
+     * │ - insert 主表 │
+     * │ - 按条件插入子表（SpaceTable、AffiliationTable...） │
+     * │ │
+     * │ 更新模式处理： │
+     * │ - update 主表 │
+     * │ - 子表需先查再决定 insert/update（避免覆盖） │
      * └─────────────────────────────────────────────────────────────┘
-     *                          ↓
+     * ↓
      * ┌─────────────────────────────────────────────────────────────┐
-     * │ 第三步：缓存同步 & 返回                                    │
-     * │ - syncStorePlatformInfoToRedis()                          │
-     * │ - 返回导入结果                                             │
+     * │ 第三步：缓存同步 & 返回 │
+     * │ - syncStorePlatformInfoToRedis() │
+     * │ - 返回导入结果 │
      * └─────────────────────────────────────────────────────────────┘
      *
      * 【Why - 为什么用 forEach + try-catch？】
@@ -649,12 +582,12 @@ public class StoreServiceImpl implements StoreService {
      *
      * 【Pitfalls】
      * - 【教训2024-03】更新模式子表处理有误：
-     *   当前实现先查 existXxx，再决定 insert/update
-     *   但 insertOrUpdate 时未传子表 ID，会变成覆盖而非更新
+     * 当前实现先查 existXxx，再决定 insert/update
+     * 但 insertOrUpdate 时未传子表 ID，会变成覆盖而非更新
      * - 【教训2024-03】ContactTable 导入问题：
-     *   导入时不保留 contactId，每次都新增，导致联系人重复
+     * 导入时不保留 contactId，每次都新增，导致联系人重复
      * - 【教训2024-03】批量导入性能差：
-     *   forEach 单条处理，1000+ 条时耗时较长
+     * forEach 单条处理，1000+ 条时耗时较长
      *
      * 【未来优化方向】
      * - 改用批量 SQL 插入（Batch Insert）
@@ -724,7 +657,7 @@ public class StoreServiceImpl implements StoreService {
                     // 记录成功创建
                     respVO.getCreateStoreNames().add(importStore.getStoreName());
 
-                // 【分支2：更新模式】门店存在 + isUpdateSupport=true
+                    // 【分支2：更新模式】门店存在 + isUpdateSupport=true
                 } else if (isUpdateSupport) {
                     // 更新主表
                     StoreDO updateStore = BeanUtils.toBean(importStore, StoreDO.class);
@@ -787,12 +720,12 @@ public class StoreServiceImpl implements StoreService {
                     // 记录成功更新
                     respVO.getUpdateStoreNames().add(importStore.getStoreName());
 
-                // 【分支3：拒绝模式】门店存在 + isUpdateSupport=false
+                    // 【分支3：拒绝模式】门店存在 + isUpdateSupport=false
                 } else {
                     respVO.getFailureStoreNames().put(importStore.getStoreName(), "门店已存在，不允许重复导入");
                 }
 
-            // 【异常处理】吞掉异常，记录到失败列表，不影响其他数据
+                // 【异常处理】吞掉异常，记录到失败列表，不影响其他数据
             } catch (Exception ex) {
                 String key = (importStore.getStoreName() != null && !importStore.getStoreName().isEmpty())
                         ? importStore.getStoreName()
@@ -838,6 +771,7 @@ public class StoreServiceImpl implements StoreService {
         List<StoreSimpleRespVO> result = new ArrayList<>();
         for (StoreDO store : storeList) {
             StoreSimpleRespVO vo = new StoreSimpleRespVO();
+            vo.setStoreId(store.getStoreId());
             vo.setStoreName(store.getStoreName());
             vo.setStoreStatus(store.getStoreStatus());
 
@@ -845,7 +779,7 @@ public class StoreServiceImpl implements StoreService {
             if (CollUtil.isNotEmpty(platformTables)) {
                 PlatformTableDO first = platformTables.get(0);
                 vo.setPlatformId(first.getPlatformId());
-                vo.setPlatformStoreId(first.getPlatformStoreId());
+                vo.setPlatformStoreId(StrUtil.trim(first.getPlatformStoreId()));
             }
             result.add(vo);
         }
@@ -990,8 +924,8 @@ public class StoreServiceImpl implements StoreService {
      * 【What】获取已开店门店的平台关联列表（缓存优先）
      *
      * 【查询流程】
-     * 1. 从 Redis 缓存获取已开店门店列表
-     * 2. 缓存命中则直接转换返回
+     * 1. 从 Redis 缓存获取全部门店列表
+     * 2. 缓存命中则按 storeStatus=1 过滤后转换返回
      * 3. 缓存未命中则查数据库，回填缓存
      *
      * 【Why - platformCode 参数保留但未使用？】
@@ -1000,31 +934,43 @@ public class StoreServiceImpl implements StoreService {
      *
      * 【Constraints】
      * - 只返回有 platformStoreId 的门店
-     * - store_status=0 表示已开店
+     * - 只返回 storeStatus=1（正常/开店）的门店
      *
      * 【Pitfalls】
      * - 【教训2024-03】缓存与数据库不一致导致同步任务漏掉门店
      */
     @Override
     public List<StorePlatformRespVO> getOpenPlatformStoresByPlatformCode(String platformCode) {
-        // 【缓存查询】优先从 Redis 获取门店数据
         List<StorePlatformInfoRespVO> cachedList = storePlatformCacheService.getStorePlatformListFromRedis();
 
         if (CollUtil.isNotEmpty(cachedList)) {
-            // 【缓存命中】直接转换返回
+            List<StorePlatformInfoRespVO> openStores = cachedList.stream()
+                    .filter(item -> item.getStoreStatus() != null && item.getStoreStatus() == 1)
+                    .collect(Collectors.toList());
+            return convertCachedListToVO(openStores);
+        }
+
+        log.info("【门店平台关联查询】Redis缓存未命中，查询数据库...");
+        return queryPlatformStoresFromDatabase(platformCode, true);
+    }
+
+    @Override
+    public List<StorePlatformRespVO> getAllPlatformStoresByPlatformCode(String platformCode) {
+        List<StorePlatformInfoRespVO> cachedList = storePlatformCacheService.getStorePlatformListFromRedis();
+
+        if (CollUtil.isNotEmpty(cachedList)) {
             return convertCachedListToVO(cachedList);
         }
 
-        // 【缓存未命中】查询数据库
-        log.info("【门店平台关联查询】Redis缓存未命中，查询数据库...");
-        return queryPlatformStoresFromDatabase(platformCode);
+        log.info("【门店平台关联查询-全部门店】Redis缓存未命中，查询数据库...");
+        return queryPlatformStoresFromDatabase(platformCode, false);
     }
 
     /**
      * 【What】从数据库查询门店平台数据并回填 Redis
      *
      * 【查询流程】
-     * 1. 查询已开店门店（store_status=0）
+     * 1. 查询门店（onlyOpen=true 时只查 storeStatus=1，否则查全部）
      * 2. 查询门店的平台关联（必须有 platformStoreId）
      * 3. 组装结果并回填 Redis 缓存
      *
@@ -1034,11 +980,16 @@ public class StoreServiceImpl implements StoreService {
      *
      * 【Pitfalls】
      * - 【教训2024-03】无 platformStoreId 的门店会被跳过，可能导致同步不完整
+     * - 【Bug修复】原 storeStatus=0 条件有误，storeStatus=1 才是正常/开店
      */
-    private List<StorePlatformRespVO> queryPlatformStoresFromDatabase(String platformCode) {
-        List<StoreDO> stores = storeMapper.selectList(new LambdaQueryWrapperX<StoreDO>()
-                .eq(StoreDO::getStoreStatus, 0)
-                .orderByDesc(StoreDO::getStoreId));
+    private List<StorePlatformRespVO> queryPlatformStoresFromDatabase(String platformCode, boolean onlyOpen) {
+        LambdaQueryWrapperX<StoreDO> wrapper = new LambdaQueryWrapperX<StoreDO>()
+                .orderByDesc(StoreDO::getStoreId);
+        if (onlyOpen) {
+            wrapper.eq(StoreDO::getStoreStatus, 1);
+        }
+
+        List<StoreDO> stores = storeMapper.selectList(wrapper);
         if (CollUtil.isEmpty(stores)) {
             return Collections.emptyList();
         }
@@ -1055,7 +1006,7 @@ public class StoreServiceImpl implements StoreService {
                 .in(PlatformTableDO::getStoreId, storeIds)
                 .isNotNull(PlatformTableDO::getPlatformStoreId)
                 .orderByDesc(PlatformTableDO::getStoreId));
-        log.info("【门店平台关联查询】store_status=0 门店数量={}, 查询到平台关联数量={}", stores.size(), platformTables.size());
+        log.info("【门店平台关联查询】onlyOpen={}, 门店数量={}, 查询到平台关联数量={}", onlyOpen, stores.size(), platformTables.size());
         if (CollUtil.isEmpty(platformTables)) {
             return Collections.emptyList();
         }
@@ -1063,13 +1014,15 @@ public class StoreServiceImpl implements StoreService {
         Map<String, PlatformTableDO> platformTableMap = platformTables.stream()
                 .filter(item -> StrUtil.isNotBlank(item.getStoreId()))
                 .filter(item -> StrUtil.isNotBlank(item.getPlatformStoreId()))
-                .collect(Collectors.toMap(PlatformTableDO::getStoreId, item -> item, (left, right) -> left, LinkedHashMap::new));
+                .collect(Collectors.toMap(PlatformTableDO::getStoreId, item -> item, (left, right) -> left,
+                        LinkedHashMap::new));
 
         List<StorePlatformRespVO> result = new ArrayList<>();
         for (StoreDO store : stores) {
             PlatformTableDO platformTable = platformTableMap.get(store.getStoreId());
             if (platformTable == null) {
-                log.info("【门店平台关联查询】门店缺少 platform_store_id, storeId={}, storeName={}", store.getStoreId(), store.getStoreName());
+                log.info("【门店平台关联查询】门店缺少 platform_store_id, storeId={}, storeName={}", store.getStoreId(),
+                        store.getStoreName());
                 continue;
             }
             StorePlatformRespVO vo = BeanUtils.toBean(platformTable, StorePlatformRespVO.class);
@@ -1082,7 +1035,6 @@ public class StoreServiceImpl implements StoreService {
             result.add(vo);
         }
 
-        // 【回填缓存】将查询结果同步到 Redis
         if (CollUtil.isNotEmpty(result)) {
             storePlatformCacheService.syncStorePlatformInfoToRedis();
             log.info("【门店平台关联查询】数据库查询完成，已回填Redis缓存，共{}条", result.size());
