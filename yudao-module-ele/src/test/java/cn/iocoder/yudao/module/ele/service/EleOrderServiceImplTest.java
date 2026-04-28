@@ -1,11 +1,13 @@
 package cn.iocoder.yudao.module.ele.service;
 
+import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.framework.test.core.ut.BaseMockitoUnitTest;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleApiConfig;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleOrderFailRecord;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleOrderSyncLog;
 import cn.iocoder.yudao.module.ele.dal.dataobject.OrderDO;
+import cn.iocoder.yudao.module.ele.dal.dataobject.OrderPlatformDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleApiConfigMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleOrderFailRecordMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleOrderStatusLogMapper;
@@ -21,6 +23,7 @@ import cn.iocoder.yudao.module.ele.service.dto.OrderDetailRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListReqDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderMessage;
+import cn.iocoder.yudao.module.ele.service.executor.EleOrderSyncTaskExecutor;
 import com.alibaba.ocean.rawsdk.common.BizResultWrapper;
 import lib.ele.retail.param.SaasOrderGetResult;
 import lib.ele.retail.param.SaasOrderListResult;
@@ -35,8 +38,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -49,6 +55,8 @@ class EleOrderServiceImplTest extends BaseMockitoUnitTest {
     @InjectMocks
     private EleOrderServiceImpl eleOrderService;
 
+    @Mock
+    private EleOrderSyncTaskExecutor syncTaskExecutor;
     @Mock
     private EleApiConfigMapper eleApiConfigMapper;
     @Mock
@@ -77,21 +85,19 @@ class EleOrderServiceImplTest extends BaseMockitoUnitTest {
     private EleOrderLockService eleOrderLockService;
     @Mock
     private EleOpenApiClient eleOpenApiClient;
+    @Mock
+    private ShutdownStateManager shutdownStateManager;
 
     @Test
     void saveOrUpdateBatch_shouldSkipNonTerminalStatus() {
         OrderListRespDTO.OrderDetail nonTerminal = buildOrder("order-1", 5);
         OrderListRespDTO.OrderDetail terminal = buildOrder("order-2", 6);
 
-        when(eleOrderLockService.tryLockOrderWithWatchdog("order-2", 1)).thenReturn(true);
-        when(orderMapper.selectList(any())).thenReturn(List.of());
-        when(orderPlatformMapper.selectList(any())).thenReturn(List.of());
-        when(orderMapper.insertOrUpdate(any(OrderDO.class))).thenReturn(true);
+        when(orderMapper.upsertOrder(any(OrderDO.class))).thenReturn(1);
 
         eleOrderService.saveOrUpdateBatch(List.of(nonTerminal, terminal), "store-1", "merchant", "1001");
 
-        verify(orderMapper, times(1)).insertOrUpdate(any(OrderDO.class));
-        verify(orderMapper, never()).insertOrUpdate(argThat((OrderDO order) -> "order-1".equals(order.getOrderId())));
+        verify(orderMapper, times(1)).upsertOrder(any(OrderDO.class));
     }
 
     @Test
@@ -100,24 +106,18 @@ class EleOrderServiceImplTest extends BaseMockitoUnitTest {
 
         eleOrderService.consumeOrderMessage(nonTerminal);
 
-        verify(orderMapper, never()).insertOrUpdate(any(OrderDO.class));
-        verify(orderPlatformMapper, never()).insert(any(cn.iocoder.yudao.module.ele.dal.dataobject.OrderPlatformDO.class));
-        verify(orderItemMapper, never()).delete(any(cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX.class));
-        verify(orderDiscountMapper, never()).delete(any(cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX.class));
+        verify(orderMapper, never()).upsertOrder(any(OrderDO.class));
     }
 
     @Test
     void consumeOrderMessage_shouldPersistTerminalStatus() {
         OrderMessage terminal = buildMessage("order-4", -1);
 
-        when(eleOrderLockService.tryLockOrderWithWatchdog("order-4", 1)).thenReturn(true);
-        when(orderMapper.selectList(any())).thenReturn(List.of());
-        when(orderPlatformMapper.selectList(any())).thenReturn(List.of());
-        when(orderMapper.insertOrUpdate(any(OrderDO.class))).thenReturn(true);
+        when(orderMapper.upsertOrder(any(OrderDO.class))).thenReturn(1);
 
         eleOrderService.consumeOrderMessage(terminal);
 
-        verify(orderMapper).insertOrUpdate(any(OrderDO.class));
+        verify(orderMapper).upsertOrder(any(OrderDO.class));
     }
 
     @Test
@@ -186,6 +186,9 @@ class EleOrderServiceImplTest extends BaseMockitoUnitTest {
 
         when(eleOrderLockService.tryLockSync("store-1", 1, 5)).thenReturn(true);
         when(storeService.getPlatformTableByPlatformStoreId("store-1")).thenReturn(store);
+        when(shutdownStateManager.isShuttingDown()).thenReturn(false);
+        doNothing().when(shutdownStateManager).registerStoreSyncStarted(anyString(), any());
+        doNothing().when(shutdownStateManager).addOrderCounts(anyInt(), anyInt(), anyInt());
         when(eleOrderSyncLogMapper.selectLastSync("store-1")).thenReturn(lastSync);
         when(eleOrderSyncLogMapper.insert(any(EleOrderSyncLog.class))).thenReturn(1);
         OrderListRespDTO emptyResult = new OrderListRespDTO();
@@ -193,7 +196,8 @@ class EleOrderServiceImplTest extends BaseMockitoUnitTest {
 
         eleOrderService.syncOrders("store-1", "merchant", "1001");
 
-        verify(eleOrderSyncLogMapper).insert(argThat((EleOrderSyncLog log) -> Long.valueOf(200L).equals(log.getLastSyncTime())));
+        verify(eleOrderSyncLogMapper)
+                .insert(argThat((EleOrderSyncLog log) -> Long.valueOf(200L).equals(log.getLastSyncTime())));
     }
 
     @Test
@@ -202,39 +206,46 @@ class EleOrderServiceImplTest extends BaseMockitoUnitTest {
         record.setId(1L);
         record.setOrderId("order-retry-1");
         record.setRetryCount(0);
-
-        OrderDO localOrder = new OrderDO();
-        localOrder.setOrderId("order-retry-1");
-        localOrder.setStoreCode("1001");
+        record.setPlatformStoreId("store-1");
+        record.setMerchantCode("merchant");
+        record.setErpStoreCode("1001");
 
         EleApiConfig config = new EleApiConfig();
         config.setMerchantCode("merchant-default");
 
-        OrderDetailRespDTO localDetail = new OrderDetailRespDTO();
-        localDetail.setOrderId("order-retry-1");
-        localDetail.setStoreCode("1001");
+        StorePlatformRespVO storePlatform = new StorePlatformRespVO();
+        storePlatform.setPlatformStoreId("store-1");
+        storePlatform.setSettlementAccount("merchant-resolved");
+        storePlatform.setStoreId("1001");
 
         BizResultWrapper<SaasOrderGetResult> wrapper = new BizResultWrapper<>();
         SaasOrderGetResult result = new SaasOrderGetResult();
         result.setErrno("0");
         SaasOrderGetResult.SaasOrderGetData data = new SaasOrderGetResult.SaasOrderGetData();
         data.setOrder_id("order-retry-1");
-        data.setStatus(5);
+        data.setStatus(6);
         data.setStore_code("1001");
-        data.setErp_store_code("1001");
+        data.setErp_store_code("store-1");
         wrapper.setBody(result);
         result.setData(data);
 
         when(eleOrderFailRecordMapper.selectById(1L)).thenReturn(record);
-        when(orderMapper.selectList(any())).thenReturn(List.of(localOrder));
-        when(eleOrderConvertService.assembleOrderDetail(localOrder)).thenReturn(localDetail);
         when(eleApiConfigMapper.selectActive()).thenReturn(config);
-        when(eleOpenApiClient.sendOrderDetail(any(), any(), eq("merchant-default"), eq(null), eq("1001"), eq("order-retry-1")))
+        when(storeService.getPlatformTableByPlatformStoreId("store-1")).thenReturn(storePlatform);
+        when(eleOpenApiClient.sendOrderDetail(any(), any(), eq("merchant-resolved"), eq("store-1"), eq("store-1"),
+                eq("order-retry-1")))
                 .thenReturn(wrapper);
+        when(orderMapper.upsertOrder(any(OrderDO.class))).thenReturn(1);
+        when(orderPlatformMapper.selectList(any())).thenReturn(List.of());
+        when(orderPlatformMapper.insert(any(OrderPlatformDO.class))).thenReturn(1);
+        when(orderItemMapper.delete(any())).thenReturn(0);
+        when(orderDiscountMapper.delete(any())).thenReturn(0);
+        when(shutdownStateManager.isShuttingDown()).thenReturn(false);
 
         assertDoesNotThrow(() -> eleOrderService.retryFailRecord(1L));
 
-        verify(eleOpenApiClient).sendOrderDetail(any(), any(), eq("merchant-default"), eq(null), eq("1001"), eq("order-retry-1"));
+        verify(eleOpenApiClient).sendOrderDetail(any(), any(), eq("merchant-resolved"), eq("store-1"), eq("store-1"),
+                eq("order-retry-1"));
     }
 
     private static OrderListRespDTO.OrderDetail buildOrder(String orderId, Integer status) {

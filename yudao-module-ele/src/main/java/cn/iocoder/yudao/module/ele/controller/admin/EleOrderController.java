@@ -5,7 +5,10 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderFailRecordRespVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderScheduleConfigReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderStatusLogRespVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.OrderPushSettingVO;
+import cn.iocoder.yudao.module.ele.dal.mysql.OrderMapper;
 import cn.iocoder.yudao.module.ele.exception.EleOrderSyncException;
 import cn.iocoder.yudao.module.ele.service.EleOrderService;
 import cn.iocoder.yudao.module.ele.service.ShutdownStateManager;
@@ -14,6 +17,14 @@ import cn.iocoder.yudao.module.ele.service.dto.EleSyncSubmitRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderDetailRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListReqDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListRespDTO;
+import cn.iocoder.yudao.module.system.api.user.AdminUserApi;
+import cn.iocoder.yudao.module.system.api.user.dto.AdminUserRespDTO;
+import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobSaveReqVO;
 import cn.iocoder.yudao.module.infra.dal.dataobject.job.JobDO;
 import cn.iocoder.yudao.module.infra.enums.job.JobStatusEnum;
@@ -66,10 +77,19 @@ public class EleOrderController {
     private EleOrderService eleOrderService;
 
     @Resource
+    private OrderMapper orderMapper;
+
+    @Resource
     private ShutdownStateManager shutdownStateManager;
 
     @Resource
     private JobService jobService;
+
+    @Resource
+    private AdminUserApi adminUserApi;
+
+    @Resource
+    private JdbcTemplate jdbcTemplate;
 
     private static final String SYNC_JOB_HANDLER_NAME = "eleOrderSyncJob";
 
@@ -80,6 +100,7 @@ public class EleOrderController {
     @PermitAll
     public CommonResult<PageResult<OrderListRespDTO.OrderDetail>> getOrderList(
             @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
+            @Parameter(description = "门店ID") @RequestParam(required = false) String storeId,
             @Parameter(description = "订单状态") @RequestParam(required = false) Integer status,
             @Parameter(description = "起始时间(unix秒)") @RequestParam(required = false) Long startTime,
             @Parameter(description = "结束时间(unix秒)") @RequestParam(required = false) Long endTime,
@@ -87,8 +108,20 @@ public class EleOrderController {
             @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") Integer pageSize) {
 
         PageResult<OrderListRespDTO.OrderDetail> result = eleOrderService.getOrdersFromLocal(
-                platformStoreId, status, startTime, endTime, pageNo, pageSize);
+                platformStoreId, storeId, status, startTime, endTime, pageNo, pageSize);
         return CommonResult.success(result);
+    }
+
+    @GetMapping("/status-counts")
+    @Operation(summary = "按订单状态分组统计数量")
+    @PermitAll
+    public CommonResult<Map<Integer, Long>> getOrderStatusCounts(
+            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
+            @Parameter(description = "起始时间(unix秒)") @RequestParam(required = false) Long startTime,
+            @Parameter(description = "结束时间(unix秒)") @RequestParam(required = false) Long endTime) {
+
+        Map<Integer, Long> counts = orderMapper.selectCountGroupByStatus(platformStoreId, startTime, endTime);
+        return CommonResult.success(counts);
     }
 
     @GetMapping("/list/remote")
@@ -181,6 +214,26 @@ public class EleOrderController {
         status.put("batchSyncStartTime", shutdownStateManager.getBatchSyncStartTime());
         status.put("statusInfo", shutdownStateManager.getStatusInfo());
         return CommonResult.success(status);
+    }
+
+    @GetMapping("/sync/batch-progress")
+    @Operation(summary = "查询门店同步进度（批量同步）")
+    @PermitAll
+    public CommonResult<java.util.Map<String, Object>> getBatchSyncProgress() {
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("isSyncing", shutdownStateManager.isBatchSyncing());
+        result.put("syncStatus", shutdownStateManager.getSyncStatus());
+        result.put("totalStores", shutdownStateManager.getTotalStoreCount());
+        result.put("completedStores", shutdownStateManager.getCompletedStoreCount());
+        result.put("successStores", shutdownStateManager.getSuccessStoreCount());
+        result.put("failedStores", shutdownStateManager.getFailedStoreCount());
+        result.put("currentSyncingCount", shutdownStateManager.getCurrentSyncingStoreCount());
+        result.put("currentSyncingStores", shutdownStateManager.getCurrentSyncingStores());
+        result.put("startTime", shutdownStateManager.getBatchSyncStartTime());
+        result.put("totalOrders", shutdownStateManager.getTotalOrderCount());
+        result.put("successOrders", shutdownStateManager.getSuccessOrderCount());
+        result.put("failOrders", shutdownStateManager.getFailOrderCount());
+        return CommonResult.success(result);
     }
 
     @PostMapping("/sync/reset-status")
@@ -342,10 +395,38 @@ public class EleOrderController {
         }
         result.put("exists", true);
         result.put("enabled", JobStatusEnum.NORMAL.getStatus().equals(job.getStatus()));
-        result.put("intervalMinutes", parseIntervalFromCron(job.getCronExpression()));
         result.put("cronExpression", job.getCronExpression());
         result.put("jobId", job.getId());
         result.put("jobStatus", job.getStatus());
+
+        String handlerParam = job.getHandlerParam();
+        if (StrUtil.isNotBlank(handlerParam)) {
+            try {
+                JSONObject paramJson = JSONUtil.parseObj(handlerParam);
+                result.put("scheduleType", paramJson.getStr("scheduleType", "time"));
+                if (paramJson.containsKey("timePoints")) {
+                    result.put("timePoints", paramJson.get("timePoints"));
+                }
+                if (paramJson.containsKey("daysOfMonth")) {
+                    result.put("daysOfMonth", paramJson.get("daysOfMonth"));
+                }
+                if (paramJson.containsKey("dayOfMonthTime")) {
+                    result.put("dayOfMonthTime", paramJson.getStr("dayOfMonthTime"));
+                }
+                if (paramJson.containsKey("weekDays")) {
+                    result.put("weekDays", paramJson.get("weekDays"));
+                }
+                if (paramJson.containsKey("weekDayTime")) {
+                    result.put("weekDayTime", paramJson.getStr("weekDayTime"));
+                }
+            } catch (Exception e) {
+                result.put("scheduleType", "time");
+                result.put("intervalMinutes", parseIntervalFromCron(job.getCronExpression()));
+            }
+        } else {
+            result.put("scheduleType", "time");
+            result.put("intervalMinutes", parseIntervalFromCron(job.getCronExpression()));
+        }
         return CommonResult.success(result);
     }
 
@@ -353,36 +434,60 @@ public class EleOrderController {
     @Operation(summary = "更新定时同步配置")
     @PermitAll
     public CommonResult<Boolean> updateSyncScheduleConfig(
-            @Parameter(description = "间隔分钟数(1-1440)", required = true) @RequestParam Integer intervalMinutes,
-            @Parameter(description = "是否开启", required = true) @RequestParam Boolean enabled) {
-        if (intervalMinutes < 1 || intervalMinutes > 1440) {
-            return CommonResult.error(400, "间隔分钟数必须在1-1440之间");
+            @RequestBody EleOrderScheduleConfigReqVO reqVO) {
+        String cronExpression = reqVO.getCronExpression();
+
+        Map<String, Object> extParam = new HashMap<>();
+        extParam.put("scheduleType", reqVO.getScheduleType());
+        extParam.put("enabled", reqVO.getEnabled());
+        if (reqVO.getTimePoints() != null && !reqVO.getTimePoints().isEmpty()) {
+            extParam.put("timePoints", reqVO.getTimePoints());
         }
-        JobDO job = findSyncJob();
-        if (job == null) {
-            return CommonResult.error(404, "定时任务不存在，请先在基础设施管理中创建eleOrderSyncJob任务");
+        if (reqVO.getDaysOfMonth() != null && !reqVO.getDaysOfMonth().isEmpty()) {
+            extParam.put("daysOfMonth", reqVO.getDaysOfMonth());
         }
-        String newCron = buildCronFromInterval(intervalMinutes);
+        if (reqVO.getDayOfMonthTime() != null) {
+            extParam.put("dayOfMonthTime", reqVO.getDayOfMonthTime());
+        }
+        if (reqVO.getWeekDays() != null && !reqVO.getWeekDays().isEmpty()) {
+            extParam.put("weekDays", reqVO.getWeekDays());
+        }
+        if (reqVO.getWeekDayTime() != null) {
+            extParam.put("weekDayTime", reqVO.getWeekDayTime());
+        }
+        if (reqVO.getIntervalStartTime() != null) {
+            extParam.put("intervalStartTime", reqVO.getIntervalStartTime());
+        }
+        if (reqVO.getIntervalHours() != null) {
+            extParam.put("intervalHours", reqVO.getIntervalHours());
+        }
+        String handlerParam = JSONUtil.toJsonStr(extParam);
+
         try {
-            if (JobStatusEnum.STOP.getStatus().equals(job.getStatus())) {
-                jobService.updateJobStatus(job.getId(), JobStatusEnum.NORMAL.getStatus());
-                job.setStatus(JobStatusEnum.NORMAL.getStatus());
+            JobDO job = findSyncJob();
+            if (job != null) {
+                jobService.deleteJob(job.getId());
             }
-            if (JobStatusEnum.NORMAL.getStatus().equals(job.getStatus())) {
-                JobSaveReqVO updateReqVO = new JobSaveReqVO();
-                updateReqVO.setId(job.getId());
-                updateReqVO.setName(job.getName());
-                updateReqVO.setHandlerName(job.getHandlerName());
-                updateReqVO.setHandlerParam(job.getHandlerParam());
-                updateReqVO.setCronExpression(newCron);
-                updateReqVO.setRetryCount(job.getRetryCount());
-                updateReqVO.setRetryInterval(job.getRetryInterval());
-                updateReqVO.setMonitorTimeout(job.getMonitorTimeout());
-                jobService.updateJob(updateReqVO);
+
+            if (StrUtil.isNotBlank(cronExpression)) {
+                JobSaveReqVO createReqVO = new JobSaveReqVO();
+                createReqVO.setName("翱象订单定时同步");
+                createReqVO.setHandlerName(SYNC_JOB_HANDLER_NAME);
+                createReqVO.setHandlerParam(handlerParam);
+                createReqVO.setCronExpression(cronExpression);
+                createReqVO.setRetryCount(0);
+                createReqVO.setRetryInterval(0);
+                createReqVO.setMonitorTimeout(0);
+                jobService.createJob(createReqVO);
+
+                if (!reqVO.getEnabled()) {
+                    job = findSyncJob();
+                    if (job != null) {
+                        jobService.updateJobStatus(job.getId(), JobStatusEnum.STOP.getStatus());
+                    }
+                }
             }
-            if (!enabled) {
-                jobService.updateJobStatus(job.getId(), JobStatusEnum.STOP.getStatus());
-            }
+
             return CommonResult.success(true);
         } catch (Exception e) {
             return CommonResult.error(500, "更新定时同步配置失败: " + e.getMessage());
@@ -390,8 +495,7 @@ public class EleOrderController {
     }
 
     private JobDO findSyncJob() {
-        cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO pageReq =
-                new cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO();
+        cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO pageReq = new cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO();
         pageReq.setHandlerName(SYNC_JOB_HANDLER_NAME);
         pageReq.setPageNo(1);
         pageReq.setPageSize(1);
@@ -401,7 +505,8 @@ public class EleOrderController {
     }
 
     private Integer parseIntervalFromCron(String cronExpression) {
-        if (cronExpression == null) return null;
+        if (cronExpression == null)
+            return null;
         Matcher matcher = CRON_INTERVAL_PATTERN.matcher(cronExpression);
         if (matcher.find()) {
             String group = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
@@ -424,6 +529,93 @@ public class EleOrderController {
     @ExceptionHandler(EleOrderSyncException.class)
     public CommonResult<Boolean> handleEleOrderSyncException(EleOrderSyncException e) {
         return CommonResult.error(EleOrderSyncException.ERROR_CODE, e.getMessage());
+    }
+
+    @GetMapping("/push-setting")
+    @Operation(summary = "获取当前用户订单推送设置")
+    @PermitAll
+    public CommonResult<OrderPushSettingVO> getOrderPushSetting() {
+        Long userId = SecurityFrameworkUtils.getLoginUserId();
+        if (userId == null) {
+            return CommonResult.error(401, "未登录");
+        }
+
+        AdminUserRespDTO user = adminUserApi.getUser(userId);
+        if (user == null) {
+            return CommonResult.error(404, "用户不存在");
+        }
+
+        OrderPushSettingVO vo = new OrderPushSettingVO();
+        vo.setOrderPushEnabled(getOrderPushEnabled(user));
+        vo.setOrderPushTypes(getOrderPushTypes(user));
+        vo.setOrderPushSound(getOrderPushSound(user));
+        vo.setOrderPushDesktop(getOrderPushDesktop(user));
+
+        return CommonResult.success(vo);
+    }
+
+    @PostMapping("/update-push-setting")
+    @Operation(summary = "更新当前用户订单推送设置")
+    @PermitAll
+    public CommonResult<Boolean> updateOrderPushSetting(@RequestBody OrderPushSettingVO vo) {
+        Long userId = SecurityFrameworkUtils.getLoginUserId();
+        if (userId == null) {
+            return CommonResult.error(401, "未登录");
+        }
+
+        AdminUserRespDTO user = adminUserApi.getUser(userId);
+        if (user == null) {
+            return CommonResult.error(404, "用户不存在");
+        }
+
+        Boolean pushEnabled = vo.getOrderPushEnabled() != null ? vo.getOrderPushEnabled() : true;
+        String pushTypes = vo.getOrderPushTypes();
+        Boolean pushSound = vo.getOrderPushSound() != null ? vo.getOrderPushSound() : true;
+        Boolean pushDesktop = vo.getOrderPushDesktop() != null ? vo.getOrderPushDesktop() : false;
+
+        String sql = "UPDATE system_users SET order_push_enabled = ?, order_push_types = ?, " +
+                "order_push_sound = ?, order_push_desktop = ?, updater = ?, update_time = NOW() " +
+                "WHERE id = ?";
+        jdbcTemplate.update(sql, pushEnabled ? 1 : 0, pushTypes, pushSound ? 1 : 0,
+                pushDesktop ? 1 : 0, userId, userId);
+
+        return CommonResult.success(true);
+    }
+
+    private Boolean getOrderPushEnabled(AdminUserRespDTO user) {
+        try {
+            Object enabled = user.getClass().getMethod("getOrderPushEnabled").invoke(user);
+            return enabled != null ? (Boolean) enabled : true;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private String getOrderPushTypes(AdminUserRespDTO user) {
+        try {
+            Object types = user.getClass().getMethod("getOrderPushTypes").invoke(user);
+            return types != null ? (String) types : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Boolean getOrderPushSound(AdminUserRespDTO user) {
+        try {
+            Object sound = user.getClass().getMethod("getOrderPushSound").invoke(user);
+            return sound != null ? (Boolean) sound : true;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private Boolean getOrderPushDesktop(AdminUserRespDTO user) {
+        try {
+            Object desktop = user.getClass().getMethod("getOrderPushDesktop").invoke(user);
+            return desktop != null ? (Boolean) desktop : false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
 }

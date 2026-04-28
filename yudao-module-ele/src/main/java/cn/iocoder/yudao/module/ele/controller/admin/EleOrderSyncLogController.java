@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.ele.service.EleOrderSyncLogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.security.PermitAll;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +25,7 @@ public class EleOrderSyncLogController {
 
     @GetMapping("/page")
     @Operation(summary = "分页查询同步日志")
+    @PermitAll
     public CommonResult<PageResult<EleOrderSyncLogRespVO>> getSyncLogPage(
             @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
             @Parameter(description = "外部门店编码") @RequestParam(required = false) String erpStoreCode,
@@ -40,6 +42,7 @@ public class EleOrderSyncLogController {
 
     @GetMapping("/{id}")
     @Operation(summary = "获取同步日志详情")
+    @PermitAll
     public CommonResult<EleOrderSyncLogRespVO> getSyncLog(
             @Parameter(description = "同步日志ID") @PathVariable Long id) {
         EleOrderSyncLogRespVO result = eleOrderSyncLogService.getSyncLogById(id);
@@ -48,6 +51,7 @@ public class EleOrderSyncLogController {
 
     @GetMapping("/stats/{platformStoreId}")
     @Operation(summary = "获取门店累计同步统计")
+    @PermitAll
     public CommonResult<EleOrderSyncStatsRespVO> getStoreSyncStats(
             @Parameter(description = "平台门店ID", required = true) @PathVariable String platformStoreId) {
         EleOrderSyncStatsRespVO result = eleOrderSyncLogService.getStoreSyncStats(platformStoreId);

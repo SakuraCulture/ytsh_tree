@@ -12,6 +12,8 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import cn.iocoder.yudao.framework.common.util.monitor.TracerUtils;
 import jakarta.annotation.Resource;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +23,8 @@ import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
+
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class EleOrderRetryKafkaConsumer {
@@ -36,8 +40,13 @@ public class EleOrderRetryKafkaConsumer {
     @Resource
     private EleOrderRetryKafkaProducer retryKafkaProducer;
 
+    @Resource
+    private RedissonClient redissonClient;
+
     @Value("${ele.kafka.retry.max-retry-count:3}")
     private int maxRetryCount;
+
+    private static final String RETRY_LOCK_PREFIX = "ele:order:retry:";
 
     @KafkaListener(topics = "${ele.kafka.retry.topic:ele-order-retry}", groupId = "${ele.kafka.retry.consumer.group-id:ele-order-retry-consumer}", concurrency = "${ele.kafka.retry.consumer.concurrency:5}")
     public void consumeRetryMessage(
@@ -50,9 +59,25 @@ public class EleOrderRetryKafkaConsumer {
         log.info("【重试Kafka】消费重试消息，orderId={}, partition={}, offset={}, retryCount={}",
                 orderId, partition, offset, message.getRetryCount());
 
+        // 分布式锁去重: 防止同一订单被多个Consumer同时处理
+        String lockKey = RETRY_LOCK_PREFIX + orderId;
+        RLock lock = redissonClient.getLock(lockKey);
+        boolean locked = false;
         try {
-            updateFailRecordStatus(message.getFailRecordId(), "RETRYING", null);
+            locked = lock.tryLock(0, 30, TimeUnit.SECONDS);
+            if (!locked) {
+                log.info("【重试消费-去重】订单正在被其他Consumer处理，跳过，orderId={}", orderId);
+                acknowledgment.acknowledge();
+                return;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("【重试消费】获取锁被中断，orderId={}", orderId);
+            acknowledgment.acknowledge();
+            return;
+        }
 
+        try {
             OrderListRespDTO.OrderDetail orderDetail = queryOrderDetail(message);
             if (orderDetail == null) {
                 throw new RuntimeException("订单详情不存在，无法重试，orderId=" + orderId);
@@ -61,7 +86,18 @@ public class EleOrderRetryKafkaConsumer {
             OrderMessage orderMessage = buildOrderMessage(orderDetail, message);
             eleOrderService.consumeOrderMessage(orderMessage);
 
-            clearFailRecord(message.getFailRecordId(), orderId);
+            EleOrderFailRecord record = eleOrderFailRecordMapper.selectById(message.getFailRecordId());
+            if (record != null) {
+                record.setProcessStatus("SUCCESS");
+                record.setUpdateTime(System.currentTimeMillis());
+                if (StrUtil.isBlank(record.getRemark())) {
+                    record.setRemark("Kafka重试成功，自动清理");
+                } else {
+                    record.setRemark(record.getRemark() + " | Kafka重试成功，自动清理");
+                }
+                eleOrderFailRecordMapper.updateById(record);
+                log.info("【重试Kafka】失败记录标记成功，orderId={}, failRecordId={}", orderId, message.getFailRecordId());
+            }
             acknowledgment.acknowledge();
             log.info("【重试Kafka】订单重试成功，orderId={}", orderId);
 
@@ -69,6 +105,10 @@ public class EleOrderRetryKafkaConsumer {
             log.error("【重试Kafka】订单重试失败，orderId={}, error={}", orderId, e.getMessage());
             handleRetryFailure(message, e);
             acknowledgment.acknowledge();
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
         }
     }
 
@@ -195,9 +235,6 @@ public class EleOrderRetryKafkaConsumer {
                 return;
             }
             record.setProcessStatus(status);
-            record.setRetryCount(
-                    status.equals("RETRYING") ? (record.getRetryCount() == null ? 1 : record.getRetryCount() + 1)
-                            : record.getRetryCount());
             if (errorMessage != null) {
                 record.setFailMessage(errorMessage.length() > 1000 ? errorMessage.substring(0, 1000) : errorMessage);
             }
@@ -231,11 +268,9 @@ public class EleOrderRetryKafkaConsumer {
         int currentRetryCount = message.getRetryCount() == null ? 1 : message.getRetryCount();
 
         if (currentRetryCount >= maxRetryCount) {
-            log.warn("【死信Kafka】订单重试{}次全部失败，转入死信队列，orderId={}", currentRetryCount, message.getOrderId());
-            message.setRetryCount(currentRetryCount);
-            retryKafkaProducer.sendDeadLetterMessage(message);
-            updateFailRecordStatus(message.getFailRecordId(), "PENDING_MANUAL",
-                    "死信队列：重试" + currentRetryCount + "次全部失败，等待人工处理");
+            log.warn("【重试Kafka】订单重试{}次全部失败，退回FAILED状态，orderId={}", currentRetryCount, message.getOrderId());
+            updateFailRecordStatus(message.getFailRecordId(), "FAILED",
+                    "Kafka重试" + currentRetryCount + "次全部失败，等待人工处理");
         } else {
             message.setRetryCount(currentRetryCount + 1);
             message.setCreateTime(System.currentTimeMillis());
@@ -245,6 +280,17 @@ public class EleOrderRetryKafkaConsumer {
             }
             log.info("【重试Kafka】重新发送重试消息，orderId={}, 新retryCount={}", message.getOrderId(), message.getRetryCount());
             retryKafkaProducer.sendRetryMessage(message);
+
+            EleOrderFailRecord record = eleOrderFailRecordMapper.selectById(message.getFailRecordId());
+            if (record != null) {
+                record.setProcessStatus("PENDING_RETRY");
+                record.setRetryCount(currentRetryCount + 1);
+                record.setFailMessage(e.getMessage() != null && e.getMessage().length() > 1000
+                        ? e.getMessage().substring(0, 1000)
+                        : e.getMessage());
+                record.setUpdateTime(System.currentTimeMillis());
+                eleOrderFailRecordMapper.updateById(record);
+            }
         }
     }
 }

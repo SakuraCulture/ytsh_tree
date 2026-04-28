@@ -4,10 +4,12 @@ import cn.iocoder.yudao.framework.test.core.ut.BaseMockitoUnitTest;
 import cn.iocoder.yudao.module.business.integration.apilog.service.ExternalApiCallLogService;
 import cn.iocoder.yudao.module.business.integration.apilog.service.bo.ExternalApiCallLogCreateReqBO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleApiConfig;
+import cn.iocoder.yudao.module.ele.service.traffic.EleTrafficInterceptor;
 import com.alibaba.ocean.rawsdk.ApiExecutor;
 import com.alibaba.ocean.rawsdk.common.BizResultWrapper;
 import lib.ele.retail.param.SaasOrderListParam;
 import lib.ele.retail.param.SaasOrderListResult;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -18,6 +20,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -33,7 +39,16 @@ class EleOpenApiClientImplTest extends BaseMockitoUnitTest {
     private ExternalApiCallLogService externalApiCallLogService;
 
     @Mock
+    private EleTrafficInterceptor trafficInterceptor;
+
+    @Mock
     private ApiExecutor<SaasOrderListResult> listExecutor;
+
+    @BeforeEach
+    void setUp() {
+        doNothing().when(trafficInterceptor).beforeRequest(anyString(), anyString(), any());
+        doNothing().when(trafficInterceptor).afterResponse(anyString(), anyString(), any(), anyBoolean(), anyInt());
+    }
 
     @Test
     void sendOrderList_shouldSkipExternalApiCallLogWhenSuccess() throws Exception {
@@ -82,7 +97,8 @@ class EleOpenApiClientImplTest extends BaseMockitoUnitTest {
 
         client.sendOrderList(config, param, "merchant", "store-1", "1001");
 
-        ArgumentCaptor<ExternalApiCallLogCreateReqBO> captor = ArgumentCaptor.forClass(ExternalApiCallLogCreateReqBO.class);
+        ArgumentCaptor<ExternalApiCallLogCreateReqBO> captor = ArgumentCaptor
+                .forClass(ExternalApiCallLogCreateReqBO.class);
         verify(externalApiCallLogService).createExternalApiCallLog(captor.capture());
         assertEquals(true, captor.getValue().getSuccess());
         assertEquals("0", captor.getValue().getResultCode());
@@ -109,7 +125,8 @@ class EleOpenApiClientImplTest extends BaseMockitoUnitTest {
 
         client.sendOrderList(config, param, "merchant", "store-1", "1001");
 
-        ArgumentCaptor<ExternalApiCallLogCreateReqBO> captor = ArgumentCaptor.forClass(ExternalApiCallLogCreateReqBO.class);
+        ArgumentCaptor<ExternalApiCallLogCreateReqBO> captor = ArgumentCaptor
+                .forClass(ExternalApiCallLogCreateReqBO.class);
         verify(externalApiCallLogService).createExternalApiCallLog(captor.capture());
         assertEquals("ELE", captor.getValue().getPlatformCode());
         assertEquals("ORDER_LIST", captor.getValue().getApiCode());
@@ -128,12 +145,12 @@ class EleOpenApiClientImplTest extends BaseMockitoUnitTest {
         SaasOrderListParam param = new SaasOrderListParam();
         param.setTicket("ticket-1");
 
-        doReturn(listExecutor).when(client).buildListExecutor(config);
-        doThrow(new RuntimeException("network error")).when(listExecutor).send(param);
+        doThrow(new RuntimeException("network error")).when(client).buildListExecutor(any(EleApiConfig.class));
 
         assertThrows(RuntimeException.class, () -> client.sendOrderList(config, param, "merchant", "store-1", "1001"));
 
-        ArgumentCaptor<ExternalApiCallLogCreateReqBO> captor = ArgumentCaptor.forClass(ExternalApiCallLogCreateReqBO.class);
+        ArgumentCaptor<ExternalApiCallLogCreateReqBO> captor = ArgumentCaptor
+                .forClass(ExternalApiCallLogCreateReqBO.class);
         verify(externalApiCallLogService).createExternalApiCallLog(captor.capture());
         assertEquals(false, captor.getValue().getSuccess());
         assertEquals("network error", captor.getValue().getResultMsg());

@@ -70,12 +70,16 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
 
         Consumer<StorePlatformRespVO> syncAction = store -> {
             String platformStoreId = StrUtil.trim(store.getPlatformStoreId());
+            String storeName = StrUtil.trim(store.getPlatformStoreName());
             try {
+                shutdownStateManager.registerStoreSyncStarted(platformStoreId, storeName);
                 doSyncStore(store, forcedStartTime, forcedEndTime);
                 successCount.incrementAndGet();
+                shutdownStateManager.registerStoreSyncFinished(platformStoreId, true);
             } catch (Exception e) {
                 failCount.incrementAndGet();
                 failedStores.add(platformStoreId);
+                shutdownStateManager.registerStoreSyncFinished(platformStoreId, false);
                 log.error("门店{}同步失败: {}", platformStoreId, e.getMessage(), e);
             }
         };
@@ -122,7 +126,7 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
                 boolean completed = batchLatch.await(timeoutMinutes, TimeUnit.MINUTES);
                 if (!completed) {
                     long unfinished = batchLatch.getCount();
-                    log.warn("第{}批任务超时，{}/{}家门店未完成（超时设置{}分钟）", 
+                    log.warn("第{}批任务超时，{}/{}家门店未完成（超时设置{}分钟）",
                             batchIndex + 1, unfinished, batchStores.size(), timeoutMinutes);
                 }
             } catch (InterruptedException e) {

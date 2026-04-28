@@ -38,7 +38,7 @@ public interface EleOrderService {
 
     List<EleOrderStatusLog> getStatusLogs(String orderId);
 
-    PageResult<OrderListRespDTO.OrderDetail> getOrdersFromLocal(String platformStoreId, Integer status,
+    PageResult<OrderListRespDTO.OrderDetail> getOrdersFromLocal(String platformStoreId, String storeId, Integer status,
             Long startTime, Long endTime,
             Integer pageNo, Integer pageSize);
 

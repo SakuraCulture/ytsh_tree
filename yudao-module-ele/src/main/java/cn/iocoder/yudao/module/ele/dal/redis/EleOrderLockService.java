@@ -10,6 +10,10 @@ public interface EleOrderLockService {
 
     boolean tryLockCompensate(String taskId, int waitSeconds, int leaseMinutes);
 
+    boolean tryLockSyncWindow(String platformStoreId, long windowStart, long windowEnd, int waitSeconds, int leaseMinutes);
+
+    void unlockSyncWindow(String platformStoreId, long windowStart, long windowEnd);
+
     void unlockSync(String platformStoreId);
 
     void unlockCompensate(String taskId);

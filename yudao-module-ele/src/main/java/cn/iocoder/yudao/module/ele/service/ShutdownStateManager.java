@@ -63,6 +63,35 @@ public class ShutdownStateManager {
     private volatile long batchSyncStartTime = 0;
 
     /**
+     * 同步状态：IDLE(空闲), RUNNING(运行中), COMPLETED(已完成), FAILED(失败)
+     */
+    private volatile String syncStatus = "IDLE";
+
+    /**
+     * 总门店数
+     */
+    private volatile int totalStoreCount = 0;
+
+    /**
+     * 已完成门店数
+     */
+    private final AtomicInteger completedStoreCount = new AtomicInteger(0);
+
+    /**
+     * 成功门店数
+     */
+    private final AtomicInteger successStoreCount = new AtomicInteger(0);
+
+    /**
+     * 失败门店数
+     */
+    private final AtomicInteger failedStoreCount = new AtomicInteger(0);
+
+    private final AtomicInteger totalOrderCount = new AtomicInteger(0);
+    private final AtomicInteger successOrderCount = new AtomicInteger(0);
+    private final AtomicInteger failOrderCount = new AtomicInteger(0);
+
+    /**
      * 注册任务开始
      *
      * @param orderId 当前处理的订单ID
@@ -105,9 +134,10 @@ public class ShutdownStateManager {
     /**
      * 标记开始处理批量同步
      *
+     * @param totalStores 总门店数
      * @return true-成功标记，false-正在关闭，无法开始新批次
      */
-    public synchronized boolean startBatchSync() {
+    public synchronized boolean startBatchSync(int totalStores) {
         if (shuttingDown) {
             log.warn("【优雅关闭】应用正在关闭，拒绝新的批量同步任务");
             return false;
@@ -117,21 +147,52 @@ public class ShutdownStateManager {
             return false;
         }
         syncingBatch = true;
+        syncStatus = "RUNNING";
         batchSyncStartTime = System.currentTimeMillis();
+        totalStoreCount = totalStores;
+        completedStoreCount.set(0);
+        successStoreCount.set(0);
+        failedStoreCount.set(0);
+        totalOrderCount.set(0);
+        successOrderCount.set(0);
+        failOrderCount.set(0);
         syncingStores.clear();
         currentSyncingStoreCount.set(0);
-        log.info("【批次控制】开始新的批量同步任务");
+        log.info("【批次控制】开始新的批量同步任务，总门店数: {}", totalStores);
         return true;
     }
 
+    /**
+     * 标记开始处理批量同步（兼容旧接口）
+     *
+     * @return true-成功标记，false-正在关闭，无法开始新批次
+     */
+    public synchronized boolean startBatchSync() {
+        return startBatchSync(0);
+    }
+
+    /**
+     * 标记批量同步完成（默认成功）
+     */
     public synchronized void finishBatchSync() {
+        finishBatchSync(true);
+    }
+
+    /**
+     * 标记批量同步完成
+     *
+     * @param success 是否成功完成
+     */
+    public synchronized void finishBatchSync(boolean success) {
         long elapsed = System.currentTimeMillis() - batchSyncStartTime;
         int syncedCount = currentSyncingStoreCount.get();
         syncingBatch = false;
+        syncStatus = success ? "COMPLETED" : "FAILED";
         batchSyncStartTime = 0;
         syncingStores.clear();
         currentSyncingStoreCount.set(0);
-        log.info("【优雅关闭】批量同步完成，共同步{}家门店，耗时{}秒", syncedCount, elapsed / 1000);
+        log.info("【优雅关闭】批量同步完成，共同步{}家门店，耗时{}秒，状态: {}", 
+                syncedCount, elapsed / 1000, syncStatus);
     }
 
     public synchronized boolean isBatchSyncing() {
@@ -157,9 +218,26 @@ public class ShutdownStateManager {
      * @param platformStoreId 平台门店ID
      */
     public void registerStoreSyncFinished(String platformStoreId) {
+        registerStoreSyncFinished(platformStoreId, true);
+    }
+
+    /**
+     * 注册门店同步完成
+     *
+     * @param platformStoreId 平台门店ID
+     * @param success 是否成功
+     */
+    public void registerStoreSyncFinished(String platformStoreId, boolean success) {
         syncingStores.removeIf(s -> s.contains(platformStoreId));
         currentSyncingStoreCount.decrementAndGet();
-        log.debug("【同步跟踪】门店同步完成: {}, 当前同步数: {}", platformStoreId, syncingStores.size());
+        completedStoreCount.incrementAndGet();
+        if (success) {
+            successStoreCount.incrementAndGet();
+        } else {
+            failedStoreCount.incrementAndGet();
+        }
+        log.debug("【同步跟踪】门店同步完成: {}, 成功: {}, 当前同步数: {}", 
+                platformStoreId, success, syncingStores.size());
     }
 
     /**
@@ -261,6 +339,52 @@ public class ShutdownStateManager {
 
         log.info("【优雅关闭】所有任务已完成");
         return true;
+    }
+
+    public String getSyncStatus() {
+        return syncStatus;
+    }
+
+    public int getTotalStoreCount() {
+        return totalStoreCount;
+    }
+
+    public int getCompletedStoreCount() {
+        return completedStoreCount.get();
+    }
+
+    public int getSuccessStoreCount() {
+        return successStoreCount.get();
+    }
+
+    public int getFailedStoreCount() {
+        return failedStoreCount.get();
+    }
+
+    /**
+     * 累加订单同步数量
+     *
+     * @param syncCount 同步订单数
+     * @param successCount 成功订单数
+     * @param failCount 失败订单数
+     */
+    public void addOrderCounts(int syncCount, int successCount, int failCount) {
+        totalOrderCount.addAndGet(syncCount);
+        successOrderCount.addAndGet(successCount);
+        failOrderCount.addAndGet(failCount);
+        log.debug("【同步跟踪】累加订单数: 总={}, 成功={}, 失败={}", syncCount, successCount, failCount);
+    }
+
+    public int getTotalOrderCount() {
+        return totalOrderCount.get();
+    }
+
+    public int getSuccessOrderCount() {
+        return successOrderCount.get();
+    }
+
+    public int getFailOrderCount() {
+        return failOrderCount.get();
     }
 
     /**

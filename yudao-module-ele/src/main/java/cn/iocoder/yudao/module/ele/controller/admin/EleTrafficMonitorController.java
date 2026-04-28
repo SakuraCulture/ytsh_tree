@@ -22,7 +22,7 @@ import java.util.List;
 @RequestMapping("/ele/traffic")
 @Validated
 @TenantIgnore
-public class EleTrafficMonitorController {
+public class    EleTrafficMonitorController {
 
     @Resource
     private EleTrafficMonitorService trafficMonitorService;

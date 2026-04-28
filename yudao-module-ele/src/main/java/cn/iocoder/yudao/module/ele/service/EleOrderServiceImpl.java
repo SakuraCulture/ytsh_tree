@@ -2,11 +2,13 @@ package cn.iocoder.yudao.module.ele.service;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import cn.iocoder.yudao.framework.common.pojo.PageParam;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.monitor.TracerUtils;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO;
 import cn.iocoder.yudao.module.business.service.store.StoreService;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderFailRecordRespVO;
@@ -18,10 +20,8 @@ import cn.iocoder.yudao.module.ele.dal.dataobject.OrderDO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.OrderDiscountDO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.OrderItemDO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.OrderPlatformDO;
-import cn.iocoder.yudao.module.ele.dal.dataobject.EleOrder;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleApiConfigMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleOrderFailRecordMapper;
-import cn.iocoder.yudao.module.ele.dal.mysql.EleOrderMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleOrderStatusLogMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleOrderSyncLogMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.OrderDiscountMapper;
@@ -38,6 +38,9 @@ import cn.iocoder.yudao.module.ele.service.dto.OrderDetailRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListReqDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderMessage;
+import cn.iocoder.yudao.module.ele.service.dto.FailedOrderInfo;
+import cn.iocoder.yudao.module.ele.service.dto.CompensationResult;
+import cn.iocoder.yudao.module.ele.service.dto.CompensationTaskResult;
 import cn.iocoder.yudao.module.ele.util.RetryUtil;
 import cn.iocoder.yudao.module.ele.service.executor.EleOrderSyncTaskExecutor;
 import cn.iocoder.yudao.module.ele.exception.EleOrderSyncException;
@@ -65,11 +68,15 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -77,6 +84,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.RateLimiter;
@@ -112,8 +125,6 @@ public class EleOrderServiceImpl implements EleOrderService {
     @Resource
     private EleOrderFailRecordMapper eleOrderFailRecordMapper;
     @Resource
-    private EleOrderMapper eleOrderMapper;
-    @Resource
     private EleOrderStatusLogMapper eleOrderStatusLogMapper;
     @Resource
     private EleOrderKafkaProducer eleOrderKafkaProducer;
@@ -125,12 +136,29 @@ public class EleOrderServiceImpl implements EleOrderService {
     private EleOrderLockService eleOrderLockService;
     @Resource(name = "eleOrderCompensateExecutor")
     private ThreadPoolTaskExecutor compensateExecutor;
+    @Resource(name = "eleOrderRetryExecutor")
+    private ThreadPoolTaskExecutor retryExecutor;
     @Resource
     private EleOrderRetryTaskSubmitter retryTaskSubmitter;
     @Resource
     private EleOpenApiClient eleOpenApiClient;
     @Resource
     private ShutdownStateManager shutdownStateManager;
+
+    @Value("${ele.order.sync.window.min-count:10}")
+    private int windowMinCount;
+
+    @Value("${ele.order.sync.window.target-per-window:5000}")
+    private int windowTargetPerWindow;
+
+    @Value("${ele.order.sync.window.max-windows:12}")
+    private int windowMaxWindows;
+
+    @Value("${ele.order.sync.window.overlap-seconds:1}")
+    private long windowOverlapSeconds;
+
+    @Value("${ele.order.sync.window.lock-lease-minutes:30}")
+    private int windowLockLeaseMinutes;
 
     @PostConstruct
     public void initSyncDelegate() {
@@ -271,13 +299,85 @@ public class EleOrderServiceImpl implements EleOrderService {
                             .orderByAsc(EleOrderFailRecord::getCreateTime)
                             .last("LIMIT 100"));
 
-            if (pendingRecords == null || pendingRecords.isEmpty()) {
+            long stuckThreshold = System.currentTimeMillis() - 1 * 60 * 1000;
+            List<EleOrderFailRecord> stuckRetryingRecords = eleOrderFailRecordMapper.selectList(
+                    new LambdaQueryWrapperX<EleOrderFailRecord>()
+                            .eq(EleOrderFailRecord::getProcessStatus, "RETRYING")
+                            .lt(EleOrderFailRecord::getRetryCount, 3)
+                            .lt(EleOrderFailRecord::getUpdateTime, stuckThreshold)
+                            .orderByAsc(EleOrderFailRecord::getCreateTime)
+                            .last("LIMIT 100"));
+
+            List<EleOrderFailRecord> exhaustedRetryingRecords = eleOrderFailRecordMapper.selectList(
+                    new LambdaQueryWrapperX<EleOrderFailRecord>()
+                            .eq(EleOrderFailRecord::getProcessStatus, "RETRYING")
+                            .ge(EleOrderFailRecord::getRetryCount, 3)
+                            .lt(EleOrderFailRecord::getUpdateTime, stuckThreshold)
+                            .orderByAsc(EleOrderFailRecord::getCreateTime)
+                            .last("LIMIT 100"));
+
+            if (pendingRecords == null) {
+                pendingRecords = new ArrayList<>();
+            }
+            if (exhaustedRetryingRecords != null && !exhaustedRetryingRecords.isEmpty()) {
+                log.info("【定时扫描】发现{}条RETRYING重试耗尽记录（已重试≥3次且超时），退回FAILED",
+                        exhaustedRetryingRecords.size());
+                for (EleOrderFailRecord exhausted : exhaustedRetryingRecords) {
+                    exhausted.setProcessStatus("FAILED");
+                    exhausted.setRemark("已重试" + exhausted.getRetryCount() + "次仍失败，退回FAILED等待人工处理");
+                    exhausted.setUpdateTime(System.currentTimeMillis());
+                    eleOrderFailRecordMapper.updateById(exhausted);
+                }
+            }
+            if (stuckRetryingRecords != null && !stuckRetryingRecords.isEmpty()) {
+                log.info("【定时扫描】发现{}条RETRYING超时记录（超过1分钟未更新），回退为PENDING_RETRY重新提交",
+                        stuckRetryingRecords.size());
+                for (EleOrderFailRecord stuck : stuckRetryingRecords) {
+                    stuck.setProcessStatus("PENDING_RETRY");
+                    stuck.setRemark("RETRYING超时，自动回退为PENDING_RETRY");
+                    stuck.setUpdateTime(System.currentTimeMillis());
+                    eleOrderFailRecordMapper.updateById(stuck);
+                }
+                pendingRecords.addAll(stuckRetryingRecords);
+            }
+
+            if (pendingRecords.isEmpty()) {
                 return;
             }
 
-            log.info("【定时扫描】发现{}条PENDING_RETRY记录，准备重新提交", pendingRecords.size());
+            log.info("【定时扫描】发现{}条待重试记录，准备去重提交", pendingRecords.size());
 
+            // 去重: 尝试将状态更新为RETRYING，失败则跳过(已被其他路径处理)
+            List<EleOrderFailRecord> dedupedRecords = new ArrayList<>();
             for (EleOrderFailRecord record : pendingRecords) {
+                try {
+                    EleOrderFailRecord updatedRecord = new EleOrderFailRecord();
+                    updatedRecord.setId(record.getId());
+                    updatedRecord.setProcessStatus("RETRYING");
+                    updatedRecord.setUpdateTime(System.currentTimeMillis());
+                    int updated = eleOrderFailRecordMapper.update(updatedRecord,
+                            new LambdaQueryWrapperX<EleOrderFailRecord>()
+                                    .eq(EleOrderFailRecord::getId, record.getId())
+                                    .eq(EleOrderFailRecord::getProcessStatus, "PENDING_RETRY"));
+                    if (updated > 0) {
+                        record.setProcessStatus("RETRYING");
+                        dedupedRecords.add(record);
+                    } else {
+                        log.info("【重试去重】订单已被其他路径处理，跳过，orderId={}", record.getOrderId());
+                    }
+                } catch (Exception e) {
+                    log.warn("【重试去重】更新状态失败，跳过，orderId={}", record.getOrderId());
+                }
+            }
+
+            if (dedupedRecords.isEmpty()) {
+                log.info("【定时扫描】去重后无待重试记录");
+                return;
+            }
+
+            log.info("【定时扫描】去重后{}条记录，准备提交Kafka", dedupedRecords.size());
+
+            for (EleOrderFailRecord record : dedupedRecords) {
                 try {
                     String platformStoreId = record.getPlatformStoreId();
                     if (platformStoreId == null || platformStoreId.isEmpty()) {
@@ -304,6 +404,10 @@ public class EleOrderServiceImpl implements EleOrderService {
                     List<EleOrderRetryTaskSubmitter.RetryTask> tasks = new ArrayList<>();
                     tasks.add(task);
                     retryTaskSubmitter.submitRetryTasks(tasks);
+
+                    record.setProcessStatus("RETRYING");
+                    record.setUpdateTime(System.currentTimeMillis());
+                    eleOrderFailRecordMapper.updateById(record);
 
                 } catch (Exception e) {
                     log.warn("【定时扫描】提交重试任务异常，orderId={}, error={}",
@@ -344,175 +448,220 @@ public class EleOrderServiceImpl implements EleOrderService {
     private void syncOrdersWithWindow(StorePlatformRespVO store, Long forcedStartTime, Long forcedEndTime) {
         shutdownStateManager.registerStoreSyncStarted(
                 StrUtil.trim(store.getPlatformStoreId()), store.getPlatformStoreName());
-        try {
-            if (shutdownStateManager.isShuttingDown()) {
-                log.warn("【订单同步】应用正在关闭，跳过门店同步，platformStoreId={}", store.getPlatformStoreId());
-                throw new EleOrderSyncException("【订单同步】应用正在关闭，跳过门店同步，platformStoreId=" + store.getPlatformStoreId());
+        if (shutdownStateManager.isShuttingDown()) {
+            log.warn("【订单同步】应用正在关闭，跳过门店同步，platformStoreId={}", store.getPlatformStoreId());
+            throw new EleOrderSyncException("【订单同步】应用正在关闭，跳过门店同步，platformStoreId=" + store.getPlatformStoreId());
+        }
+
+        String platformStoreId = StrUtil.trim(store.getPlatformStoreId());
+        String merchantCode = StrUtil.trim(store.getSettlementAccount());
+        String erpStoreCode = platformStoreId;
+        String storeName = store.getPlatformStoreName();
+        LocalDateTime syncStartTime = LocalDateTime.now();
+        String syncBatchId = UUID.randomUUID().toString().replace("-", "");
+
+        Long startTime = forcedStartTime;
+        if (startTime != null && startTime > 100000000000L) {
+            startTime = startTime / 1000;
+        }
+
+        if (startTime == null) {
+            EleOrderSyncLog lastSync = eleOrderSyncLogMapper.selectLastSync(platformStoreId);
+            if (lastSync != null && lastSync.getSyncTime() != null) {
+                startTime = lastSync.getSyncTime();
+                if (startTime > 100000000000L) {
+                    startTime = startTime / 1000;
+                }
+                log.info("【增量同步】门店{}，从上次同步时间继续，startTime={}", platformStoreId, startTime);
             }
-
-            String platformStoreId = StrUtil.trim(store.getPlatformStoreId());
-            String merchantCode = StrUtil.trim(store.getSettlementAccount());
-            String erpStoreCode = platformStoreId;
-            String storeName = store.getPlatformStoreName();
-            LocalDateTime syncStartTime = LocalDateTime.now();
-
-            Long startTime = forcedStartTime;
-            if (startTime != null && startTime > 100000000000L) {
-                startTime = startTime / 1000;
-            }
-
             if (startTime == null) {
-                EleOrderSyncLog lastSync = eleOrderSyncLogMapper.selectLastSync(platformStoreId);
-                if (lastSync != null && lastSync.getSyncTime() != null) {
-                    startTime = lastSync.getSyncTime();
-                    if (startTime > 100000000000L) {
-                        startTime = startTime / 1000;
-                    }
-                    log.info("【增量同步】门店{}，从上次同步时间继续，startTime={}", platformStoreId, startTime);
-                }
-                if (startTime == null) {
-                    Calendar calendar = Calendar.getInstance();
-                    calendar.set(Calendar.DAY_OF_MONTH, 1);
-                    calendar.set(Calendar.HOUR_OF_DAY, 0);
-                    calendar.set(Calendar.MINUTE, 0);
-                    calendar.set(Calendar.SECOND, 0);
-                    calendar.set(Calendar.MILLISECOND, 0);
-                    startTime = calendar.getTimeInMillis() / 1000;
-                    log.info("【首次同步】门店{}无同步记录，从本月1日0点起拉取订单，startTime={}", platformStoreId, startTime);
-                }
+                Calendar calendar = Calendar.getInstance();
+                calendar.set(Calendar.DAY_OF_MONTH, 1);
+                calendar.set(Calendar.HOUR_OF_DAY, 0);
+                calendar.set(Calendar.MINUTE, 0);
+                calendar.set(Calendar.SECOND, 0);
+                calendar.set(Calendar.MILLISECOND, 0);
+                startTime = calendar.getTimeInMillis() / 1000;
+                log.info("【首次同步】门店{}无同步记录，从本月1日0点起拉取订单，startTime={}", platformStoreId, startTime);
+            }
+        }
+
+        Long endTime = forcedEndTime;
+        if (endTime != null && endTime > 100000000000L) {
+            endTime = endTime / 1000;
+        }
+        if (endTime == null) {
+            endTime = System.currentTimeMillis() / 1000;
+        }
+
+        try {
+            long totalCount = getTotalCountByStatus(platformStoreId, merchantCode, erpStoreCode, startTime, endTime);
+            log.info("【动态窗口】门店{}试探完成，时间范围[{}-{}]内总订单数: {}条", 
+                    platformStoreId, startTime, endTime, totalCount);
+
+            int windowCount = calculateWindowCount(totalCount);
+            log.info("【动态窗口】门店{}总数据量{}条，拆分成{}个窗口", platformStoreId, totalCount, windowCount);
+
+            List<OrderListRespDTO.OrderDetail> allOrders;
+            if (windowCount == 1) {
+                log.info("【动态窗口】门店{}数据量<{}条，不拆分，直接串行拉取", platformStoreId, windowMinCount);
+                allOrders = pullAllOrders(platformStoreId, merchantCode, erpStoreCode, startTime, endTime);
+            } else {
+                log.info("【动态窗口】门店{}数据量>=10条，启动{}个窗口并行拉取", platformStoreId, windowCount);
+                allOrders = pullAllOrdersWithWindows(platformStoreId, merchantCode, erpStoreCode, startTime, endTime, windowCount);
             }
 
-            Long endTime = forcedEndTime;
-            if (endTime != null && endTime > 100000000000L) {
-                endTime = endTime / 1000;
-            }
-            if (endTime == null) {
-                endTime = System.currentTimeMillis() / 1000;
-            }
+            List<FailedOrderInfo> failedOrders = Collections.synchronizedList(new ArrayList<>());
+            Long lastSuccessTimestamp = saveOrUpdateBatchWithFailureTracking(allOrders, platformStoreId, merchantCode,
+                    erpStoreCode, failedOrders);
 
-            try {
-                List<OrderListRespDTO.OrderDetail> allOrders = pullAllOrders(platformStoreId, merchantCode,
-                        erpStoreCode,
-                        startTime, endTime);
+            CompensationResult compResult = executeCompensationTasks(failedOrders, platformStoreId, merchantCode,
+                    erpStoreCode);
 
-                Long lastSuccessTimestamp = saveOrUpdateBatch(allOrders, platformStoreId, merchantCode, erpStoreCode);
+            handleCompensationResults(compResult);
 
-                submitPendingRetries(platformStoreId, merchantCode, erpStoreCode);
+            submitPendingRetries(platformStoreId, merchantCode, erpStoreCode);
 
-                Long finalSyncTime = (lastSuccessTimestamp != null && lastSuccessTimestamp > startTime)
-                        ? lastSuccessTimestamp
-                        : startTime;
+            Long finalSyncTime = (lastSuccessTimestamp != null && lastSuccessTimestamp > startTime)
+                    ? lastSuccessTimestamp
+                    : startTime;
 
-                long successCount = allOrders.stream().filter(this::isTerminalOrder).count();
-                int failCount = (int) (allOrders.size() - successCount);
-                LocalDateTime syncEndTime = LocalDateTime.now();
+            long successCount = allOrders.stream().filter(o -> o.getStatus() != null).count();
+            int failCount = (int) (allOrders.size() - successCount);
+            LocalDateTime syncEndTime = LocalDateTime.now();
 
-                List<OrderListRespDTO.OrderDetail> kafkaOrders = allOrders.stream()
-                        .filter(this::isTerminalOrder)
-                        .collect(Collectors.toList());
+            List<OrderListRespDTO.OrderDetail> kafkaOrders = allOrders.stream()
+                    .filter(o -> o.getStatus() != null)
+                    .collect(Collectors.toList());
 
-                EleOrderSyncLog existingLog = eleOrderSyncLogMapper.selectByStoreId(platformStoreId);
-                if (existingLog != null) {
-                    existingLog.setMerchantCode(merchantCode);
-                    existingLog.setErpStoreCode(erpStoreCode);
-                    existingLog.setStoreName(storeName);
-                    existingLog.setLastSyncTime(startTime);
-                    existingLog.setSyncStartTime(syncStartTime);
-                    existingLog.setSyncEndTime(syncEndTime);
-                    existingLog.setSyncTime(finalSyncTime);
-                    existingLog.setSyncCount(existingLog.getSyncCount() + allOrders.size());
-                    existingLog.setSuccessCount(existingLog.getSuccessCount() + (int) successCount);
-                    existingLog.setFailCount(existingLog.getFailCount() + failCount);
+            boolean allCompensationSuccess = compResult == null || compResult.isAllSuccess();
+            int compensationFailCount = compResult != null ? compResult.getFailedCount() : 0;
+
+            EleOrderSyncLog existingLog = eleOrderSyncLogMapper.selectByStoreId(platformStoreId);
+            if (existingLog != null) {
+                existingLog.setSyncBatchId(syncBatchId);
+                existingLog.setMerchantCode(merchantCode);
+                existingLog.setErpStoreCode(erpStoreCode);
+                existingLog.setStoreName(storeName);
+                existingLog.setLastSyncTime(startTime);
+                existingLog.setSyncStartTime(syncStartTime);
+                existingLog.setSyncEndTime(syncEndTime);
+                existingLog.setSyncTime(finalSyncTime);
+                existingLog.setSyncCount(allOrders.size());
+                existingLog.setSuccessCount((int) successCount);
+                existingLog.setFailCount(failCount);
+                if (allCompensationSuccess) {
                     existingLog.setStatus(1);
+                    existingLog.setPartialFailed(0);
                     existingLog.setErrorMsg(null);
-                    eleOrderSyncLogMapper.updateById(existingLog);
                 } else {
-                    EleOrderSyncLog syncLog = new EleOrderSyncLog();
-                    syncLog.setPlatformStoreId(platformStoreId);
-                    syncLog.setMerchantCode(merchantCode);
-                    syncLog.setErpStoreCode(erpStoreCode);
-                    syncLog.setStoreName(storeName);
-                    syncLog.setLastSyncTime(startTime);
-                    syncLog.setSyncStartTime(syncStartTime);
-                    syncLog.setSyncEndTime(syncEndTime);
-                    syncLog.setSyncTime(finalSyncTime);
-                    syncLog.setSyncCount(allOrders.size());
-                    syncLog.setSuccessCount((int) successCount);
-                    syncLog.setFailCount(failCount);
-                    syncLog.setStatus(1);
-                    syncLog.setCreateTime(System.currentTimeMillis());
-                    eleOrderSyncLogMapper.insert(syncLog);
-                }
-
-                log.info("【syncTime推进】门店{}，startTime={}，endTime={}，lastSuccess={}，finalSyncTime={}",
-                        platformStoreId, startTime, endTime, lastSuccessTimestamp, finalSyncTime);
-
-                for (OrderListRespDTO.OrderDetail detail : kafkaOrders) {
-                    try {
-                        eleOrderKafkaProducer
-                                .sendOrderMessage(buildMessage(detail, platformStoreId, merchantCode, erpStoreCode));
-                    } catch (Exception e) {
-                        saveFailRecord(detail.getOrderId(), detail.getChannelOrderId(), "SYNC", "KAFKA_SEND",
-                                e.getMessage(),
-                                detail, null, 0, null, platformStoreId, merchantCode, erpStoreCode);
-                    }
-                }
-            } catch (Exception e) {
-                LocalDateTime syncEndTime = LocalDateTime.now();
-                EleOrderSyncLog existingLog = eleOrderSyncLogMapper.selectByStoreId(platformStoreId);
-                if (existingLog != null) {
                     existingLog.setStatus(0);
-                    existingLog.setSyncStartTime(syncStartTime);
-                    existingLog.setSyncEndTime(syncEndTime);
-                    if (existingLog.getSyncTime() == null) {
-                        existingLog.setSyncTime(endTime != null ? endTime : System.currentTimeMillis() / 1000);
-                    }
-                    existingLog.setErrorMsg(e.getMessage() != null && e.getMessage().length() > 1000
-                            ? e.getMessage().substring(0, 1000)
-                            : e.getMessage());
-                    eleOrderSyncLogMapper.updateById(existingLog);
-                } else {
-                    EleOrderSyncLog failLog = new EleOrderSyncLog();
-                    failLog.setPlatformStoreId(platformStoreId);
-                    failLog.setMerchantCode(merchantCode);
-                    failLog.setErpStoreCode(erpStoreCode);
-                    failLog.setStoreName(storeName);
-                    failLog.setLastSyncTime(startTime);
-                    failLog.setSyncStartTime(syncStartTime);
-                    failLog.setSyncEndTime(syncEndTime);
-                    failLog.setSyncTime(endTime != null ? endTime : System.currentTimeMillis() / 1000);
-                    failLog.setSyncCount(0);
-                    failLog.setSuccessCount(0);
-                    failLog.setFailCount(0);
-                    failLog.setStatus(0);
-                    failLog.setErrorMsg(e.getMessage() != null && e.getMessage().length() > 1000
-                            ? e.getMessage().substring(0, 1000)
-                            : e.getMessage());
-                    failLog.setCreateTime(System.currentTimeMillis());
-                    eleOrderSyncLogMapper.insert(failLog);
+                    existingLog.setPartialFailed(1);
+                    existingLog.setErrorMsg("补偿任务完成后仍有" + compensationFailCount + "个订单失败");
                 }
-                log.error("【订单同步失败】门店{}，startTime={}，endTime={}，错误: {}", platformStoreId, startTime, endTime,
-                        e.getMessage(), e);
-                throw e;
+                eleOrderSyncLogMapper.updateById(existingLog);
+            } else {
+                EleOrderSyncLog syncLog = new EleOrderSyncLog();
+                syncLog.setSyncBatchId(syncBatchId);
+                syncLog.setPlatformStoreId(platformStoreId);
+                syncLog.setMerchantCode(merchantCode);
+                syncLog.setErpStoreCode(erpStoreCode);
+                syncLog.setStoreName(storeName);
+                syncLog.setLastSyncTime(startTime);
+                syncLog.setSyncStartTime(syncStartTime);
+                syncLog.setSyncEndTime(syncEndTime);
+                syncLog.setSyncTime(finalSyncTime);
+                syncLog.setSyncCount(allOrders.size());
+                syncLog.setSuccessCount((int) successCount);
+                syncLog.setFailCount(failCount);
+                if (allCompensationSuccess) {
+                    syncLog.setStatus(1);
+                    syncLog.setPartialFailed(0);
+                } else {
+                    syncLog.setStatus(0);
+                    syncLog.setPartialFailed(1);
+                    syncLog.setErrorMsg("补偿任务完成后仍有" + compensationFailCount + "个订单失败");
+                }
+                syncLog.setCreateTime(System.currentTimeMillis());
+                eleOrderSyncLogMapper.insert(syncLog);
             }
-        } finally {
-            shutdownStateManager.registerStoreSyncFinished(StrUtil.trim(store.getPlatformStoreId()));
+
+            log.info("【syncTime推进】门店{}，startTime={}，endTime={}，lastSuccess={}，finalSyncTime={}",
+                    platformStoreId, startTime, endTime, lastSuccessTimestamp, finalSyncTime);
+
+            shutdownStateManager.addOrderCounts(allOrders.size(), (int) successCount, failCount);
+
+            for (OrderListRespDTO.OrderDetail detail : kafkaOrders) {
+                try {
+                    eleOrderKafkaProducer
+                            .sendOrderMessage(buildMessage(detail, platformStoreId, merchantCode, erpStoreCode));
+                } catch (Exception e) {
+                    saveFailRecord(detail.getOrderId(), detail.getChannelOrderId(), "SYNC", "KAFKA_SEND",
+                            e.getMessage(),
+                            detail, null, 0, null, platformStoreId, merchantCode, erpStoreCode);
+                }
+            }
+        } catch (Exception e) {
+            LocalDateTime syncEndTime = LocalDateTime.now();
+            EleOrderSyncLog existingLog = eleOrderSyncLogMapper.selectByStoreId(platformStoreId);
+            if (existingLog != null) {
+                existingLog.setSyncBatchId(syncBatchId);
+                existingLog.setStatus(0);
+                existingLog.setSyncStartTime(syncStartTime);
+                existingLog.setSyncEndTime(syncEndTime);
+                if (existingLog.getSyncTime() == null) {
+                    existingLog.setSyncTime(endTime != null ? endTime : System.currentTimeMillis() / 1000);
+                }
+                existingLog.setErrorMsg(e.getMessage() != null && e.getMessage().length() > 1000
+                        ? e.getMessage().substring(0, 1000)
+                        : e.getMessage());
+                eleOrderSyncLogMapper.updateById(existingLog);
+            } else {
+                EleOrderSyncLog failLog = new EleOrderSyncLog();
+                failLog.setSyncBatchId(syncBatchId);
+                failLog.setPlatformStoreId(platformStoreId);
+                failLog.setMerchantCode(merchantCode);
+                failLog.setErpStoreCode(erpStoreCode);
+                failLog.setStoreName(storeName);
+                failLog.setLastSyncTime(startTime);
+                failLog.setSyncStartTime(syncStartTime);
+                failLog.setSyncEndTime(syncEndTime);
+                failLog.setSyncTime(endTime != null ? endTime : System.currentTimeMillis() / 1000);
+                failLog.setSyncCount(0);
+                failLog.setSuccessCount(0);
+                failLog.setFailCount(0);
+                failLog.setStatus(0);
+                failLog.setErrorMsg(e.getMessage() != null && e.getMessage().length() > 1000
+                        ? e.getMessage().substring(0, 1000)
+                        : e.getMessage());
+                failLog.setCreateTime(System.currentTimeMillis());
+                eleOrderSyncLogMapper.insert(failLog);
+            }
+            log.error("【订单同步失败】门店{}，startTime={}，endTime={}，错误: {}", platformStoreId, startTime, endTime,
+                    e.getMessage(), e);
+            throw e;
         }
     }
 
     private void runSyncCycle(Long forcedStartTime, Long forcedEndTime) {
-        if (!shutdownStateManager.startBatchSync()) {
+        List<StorePlatformRespVO> stores = storeService.getAllPlatformStoresByPlatformCode(null);
+        List<StorePlatformRespVO> validStores = stores == null ? List.of()
+                : stores.stream()
+                        .filter(s -> cn.hutool.core.util.StrUtil.isNotBlank(s.getPlatformStoreId()))
+                        .toList();
+
+        if (!shutdownStateManager.startBatchSync(validStores.size())) {
             log.warn("【订单同步】已有批次在执行或应用正在关闭，跳过本次同步");
             return;
         }
         try {
-            List<StorePlatformRespVO> stores = storeService.getOpenPlatformStoresByPlatformCode(null);
-            if (stores == null || stores.isEmpty()) {
+            if (validStores.isEmpty()) {
                 log.info("暂无需要同步的门店");
+                shutdownStateManager.finishBatchSync();
                 return;
             }
 
-            syncTaskExecutor.executeSync(stores, forcedStartTime, forcedEndTime);
+            syncTaskExecutor.executeSync(validStores, forcedStartTime, forcedEndTime);
         } catch (Exception e) {
             saveFailRecord(null, null, "SYNC", "CYCLE", e.getMessage(), null, null, 0, null, null, null, null);
             log.error("门店同步任务执行异常: {}", e.getMessage(), e);
@@ -595,10 +744,16 @@ public class EleOrderServiceImpl implements EleOrderService {
     public void retryFailRecord(Long id, boolean overwrite) {
         EleOrderFailRecord record = eleOrderFailRecordMapper.selectById(id);
         if (record == null) {
-            throw new RuntimeException("失败记录不存在");
+            throw new ServiceException(400, "失败记录不存在");
         }
         if ("SUCCESS".equals(record.getProcessStatus())) {
-            throw new RuntimeException("该失败记录已成功处理，无需重试");
+            throw new ServiceException(400, "该失败记录已成功处理，无需重试");
+        }
+        if ("RETRYING".equals(record.getProcessStatus())) {
+            throw new ServiceException(400, "该失败记录正在重试中，请勿重复操作，请稍后再试");
+        }
+        if ("PENDING_MANUAL".equals(record.getProcessStatus())) {
+            throw new ServiceException(400, "该失败记录已标记为需要人工处理，请检查门店信息配置后重试");
         }
 
         boolean hasOrderId = record.getOrderId() != null && !record.getOrderId().isEmpty();
@@ -607,17 +762,60 @@ public class EleOrderServiceImpl implements EleOrderService {
                 && record.getErpStoreCode() != null && !record.getErpStoreCode().isEmpty();
 
         if (hasOrderId && !hasStoreInfo) {
-            EleOrder existingOrder = eleOrderMapper.selectByOrderId(record.getOrderId());
-            if (existingOrder != null
-                    && existingOrder.getPlatformStoreId() != null && !existingOrder.getPlatformStoreId().isEmpty()
-                    && existingOrder.getMerchantCode() != null && !existingOrder.getMerchantCode().isEmpty()
-                    && existingOrder.getErpStoreCode() != null && !existingOrder.getErpStoreCode().isEmpty()) {
-                log.info("【重试补全门店信息】从ele_order表补全，orderId={}, platformStoreId={}", record.getOrderId(),
-                        existingOrder.getPlatformStoreId());
-                record.setPlatformStoreId(existingOrder.getPlatformStoreId());
-                record.setMerchantCode(existingOrder.getMerchantCode());
-                record.setErpStoreCode(existingOrder.getErpStoreCode());
-                hasStoreInfo = true;
+            OrderDO existingOrder = orderMapper.selectList(new LambdaQueryWrapperX<OrderDO>()
+                    .eq(OrderDO::getOrderId, record.getOrderId())
+                    .eq(OrderDO::getDeleted, false)
+                    .last("LIMIT 1"))
+                    .stream().findFirst().orElse(null);
+            if (existingOrder != null && StrUtil.isNotBlank(existingOrder.getStoreCode())) {
+                StorePlatformRespVO platformInfo = storeService
+                        .getPlatformTableByPlatformStoreId(existingOrder.getStoreCode());
+                if (platformInfo != null && StrUtil.isNotBlank(platformInfo.getPlatformStoreId())) {
+                    log.info("【重试补全门店信息】从order_table+storeService补全，orderId={}, storeCode={}, platformStoreId={}",
+                            record.getOrderId(), existingOrder.getStoreCode(), platformInfo.getPlatformStoreId());
+                    record.setPlatformStoreId(platformInfo.getPlatformStoreId());
+                    record.setMerchantCode(platformInfo.getSettlementAccount());
+                    record.setErpStoreCode(platformInfo.getPlatformStoreId());
+                    hasStoreInfo = true;
+                }
+            }
+            if (!hasStoreInfo) {
+                StorePlatformRespVO platformInfo = storeService
+                        .getPlatformTableByPlatformStoreId(record.getOrderId());
+                if (platformInfo != null && StrUtil.isNotBlank(platformInfo.getPlatformStoreId())) {
+                    log.info("【重试补全门店信息】通过storeService直接补全，orderId={}", record.getOrderId());
+                    record.setPlatformStoreId(platformInfo.getPlatformStoreId());
+                    record.setMerchantCode(platformInfo.getSettlementAccount());
+                    record.setErpStoreCode(platformInfo.getPlatformStoreId());
+                    hasStoreInfo = true;
+                }
+            }
+            if (!hasStoreInfo && StrUtil.isNotBlank(record.getRequestParam())) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode jsonNode = objectMapper.readTree(record.getRequestParam());
+                    String storeCodeFromParam = null;
+                    if (jsonNode.has("storeCode")) {
+                        storeCodeFromParam = jsonNode.get("storeCode").asText();
+                    } else if (jsonNode.has("platformStoreId")) {
+                        storeCodeFromParam = jsonNode.get("platformStoreId").asText();
+                    } else if (jsonNode.has("erpStoreCode")) {
+                        storeCodeFromParam = jsonNode.get("erpStoreCode").asText();
+                    }
+                    if (StrUtil.isNotBlank(storeCodeFromParam)) {
+                        StorePlatformRespVO platformInfo = storeService
+                                .getPlatformTableByPlatformStoreId(storeCodeFromParam);
+                        if (platformInfo != null && StrUtil.isNotBlank(platformInfo.getPlatformStoreId())) {
+                            log.info("【重试补全门店信息】从requestParam解析，orderId={}, storeCode={}",
+                                    record.getOrderId(), storeCodeFromParam);
+                            record.setPlatformStoreId(platformInfo.getPlatformStoreId());
+                            record.setMerchantCode(platformInfo.getSettlementAccount());
+                            record.setErpStoreCode(platformInfo.getPlatformStoreId());
+                            hasStoreInfo = true;
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("【解析requestParam失败】recordId={}, error={}", record.getId(), e.getMessage());
+                }
             }
         }
 
@@ -628,40 +826,14 @@ public class EleOrderServiceImpl implements EleOrderService {
         } else {
             record.setProcessStatus("PENDING_MANUAL");
             if (hasOrderId) {
-                record.setRemark("无法自动重试：有orderId但缺少门店信息，且ele_order表中未找到对应记录，等待人工处理");
+                record.setRemark("无法自动重试：有orderId但缺少门店信息，且order_table中未找到对应记录，等待人工处理");
             } else {
                 record.setRemark("无法自动重试：缺少orderId和门店信息，等待人工处理");
             }
             record.setUpdateTime(System.currentTimeMillis());
             eleOrderFailRecordMapper.updateById(record);
             String detail = hasOrderId ? "有orderId但缺少门店信息" : "缺少orderId和门店信息";
-            throw new RuntimeException("失败记录" + detail + "，无法自动重试，已标记为人工处理，记录ID=" + id);
-        }
-    }
-
-    private void retryFailRecordForSingleOrder(EleOrderFailRecord record, boolean overwrite) {
-        record.setRetryCount(record.getRetryCount() == null ? 1 : record.getRetryCount() + 1);
-        record.setProcessStatus("RETRYING");
-        record.setUpdateTime(System.currentTimeMillis());
-        eleOrderFailRecordMapper.updateById(record);
-
-        try {
-            OrderDetailRespDTO detail = getOrderDetailRemote(
-                    record.getPlatformStoreId(), record.getMerchantCode(), record.getErpStoreCode(),
-                    record.getOrderId());
-            consumeOrderMessage(buildMessage(convertToOrderListDetail(detail), record.getPlatformStoreId(),
-                    record.getMerchantCode(), record.getErpStoreCode()), overwrite);
-            record.setProcessStatus("SUCCESS");
-            record.setUpdateTime(System.currentTimeMillis());
-            eleOrderFailRecordMapper.updateById(record);
-        } catch (Exception e) {
-            record.setProcessStatus("FAILED");
-            record.setFailMessage(e.getMessage().length() > 1000
-                    ? e.getMessage().substring(0, 1000)
-                    : e.getMessage());
-            record.setUpdateTime(System.currentTimeMillis());
-            eleOrderFailRecordMapper.updateById(record);
-            throw new RuntimeException("手动重试失败: " + e.getMessage(), e);
+            throw new ServiceException(400, "失败记录" + detail + "，无法自动重试，已标记为人工处理，记录ID=" + id);
         }
     }
 
@@ -767,8 +939,8 @@ public class EleOrderServiceImpl implements EleOrderService {
         List<OrderListRespDTO.OrderDetail> allOrders = new ArrayList<>();
         final int pageSize = 100;
 
-        // 只拉取状态为 -1（交易关闭）和 6（交易成功）的订单
-        Integer[] targetStatuses = { -1, 6 };
+        // 拉取全部状态的订单
+        Integer[] targetStatuses = { 1, 2, 3, 4, 5, 6, -1 };
 
         for (Integer status : targetStatuses) {
             String scrollId = null;
@@ -801,11 +973,8 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         int originalCount = allOrders.size();
-        allOrders = allOrders.stream()
-                .filter(this::isTerminalOrder)
-                .collect(Collectors.toList());
-
-        log.info("【拉取订单】platformStoreId={}, 原始{}条，终态保留{}条", platformStoreId, originalCount, allOrders.size());
+        
+        log.info("【拉取订单】platformStoreId={}, 共{}条（全部状态）", platformStoreId, originalCount);
         for (OrderListRespDTO.OrderDetail order : allOrders) {
             log.info("【拉取订单】订单详情: orderId={}, channelOrderId={}, status={}, deliveryStatus={}, totalFee={}, payFee={}",
                     order.getOrderId(), order.getChannelOrderId(), order.getStatus(), order.getDeliveryStatus(),
@@ -816,9 +985,24 @@ public class EleOrderServiceImpl implements EleOrderService {
     }
 
     @Override
-    public PageResult<OrderListRespDTO.OrderDetail> getOrdersFromLocal(String platformStoreId, Integer status,
+    public PageResult<OrderListRespDTO.OrderDetail> getOrdersFromLocal(String platformStoreId, String storeId,
+            Integer status,
             Long startTime, Long endTime, Integer pageNo, Integer pageSize) {
-        String storeCode = platformStoreId;
+        List<String> storeCodes = new ArrayList<>();
+
+        if (StrUtil.isNotBlank(storeId)) {
+            List<StorePlatformRespVO> platforms = storeService.getPlatformTableListByStoreId(storeId);
+            if (CollUtil.isNotEmpty(platforms)) {
+                for (StorePlatformRespVO p : platforms) {
+                    if (StrUtil.isNotBlank(p.getPlatformStoreId())) {
+                        storeCodes.add(p.getPlatformStoreId());
+                    }
+                }
+            }
+            storeCodes.add(storeId);
+        } else if (StrUtil.isNotBlank(platformStoreId)) {
+            storeCodes.add(platformStoreId);
+        }
 
         if (startTime != null && startTime < 100000000000L) {
             startTime = startTime * 1000;
@@ -828,7 +1012,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         List<OrderDO> orders = orderMapper.selectList(new LambdaQueryWrapperX<OrderDO>()
-                .eq(storeCode != null, OrderDO::getStoreCode, storeCode)
+                .in(CollUtil.isNotEmpty(storeCodes), OrderDO::getStoreCode, storeCodes)
                 .eq(status != null, OrderDO::getOrderStatus, status)
                 .ge(startTime != null, OrderDO::getCreateTime, startTime)
                 .le(endTime != null, OrderDO::getCreateTime, endTime)
@@ -837,7 +1021,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 .last("LIMIT " + ((pageNo - 1) * pageSize) + ", " + pageSize));
 
         Long total = orderMapper.selectCount(new LambdaQueryWrapperX<OrderDO>()
-                .eq(storeCode != null, OrderDO::getStoreCode, storeCode)
+                .in(CollUtil.isNotEmpty(storeCodes), OrderDO::getStoreCode, storeCodes)
                 .eq(status != null, OrderDO::getOrderStatus, status)
                 .ge(startTime != null, OrderDO::getCreateTime, startTime)
                 .le(endTime != null, OrderDO::getCreateTime, endTime)
@@ -871,155 +1055,249 @@ public class EleOrderServiceImpl implements EleOrderService {
             return null;
         }
 
-        // 1. 过滤出终态订单
-        List<OrderListRespDTO.OrderDetail> terminalOrders = orders.stream()
-                .filter(this::isTerminalOrder)
+        // 1. 保存全部订单（所有状态）
+        List<OrderListRespDTO.OrderDetail> allValidOrders = orders.stream()
+                .filter(o -> o.getStatus() != null)
                 .collect(Collectors.toList());
 
-        if (terminalOrders.isEmpty()) {
+        if (allValidOrders.isEmpty()) {
             return null;
         }
 
-        Long lastSuccessTimestamp = null;
+        int totalCount = allValidOrders.size();
+        int threadCount = calculateWriteThreadCount(totalCount);
 
-        // 2. 批量查询已存在的订单（1次SQL代替N次查询）
-        List<String> orderIds = terminalOrders.stream()
-                .map(OrderListRespDTO.OrderDetail::getOrderId)
-                .collect(Collectors.toList());
+        log.info("【订单保存】开始保存{}个订单（全部状态），动态分配{}线程", totalCount, threadCount);
 
-        List<String> existingIds = orderMapper.selectExistingOrderIds(orderIds);
-        Set<String> existingIdSet = new HashSet<>(existingIds);
-
-        // 3. 分离新订单和已存在订单
-        List<OrderListRespDTO.OrderDetail> newOrders = new ArrayList<>();
-        List<OrderListRespDTO.OrderDetail> existOrders = new ArrayList<>();
-
-        for (OrderListRespDTO.OrderDetail order : terminalOrders) {
-            if (existingIdSet.contains(order.getOrderId())) {
-                existOrders.add(order);
-            } else {
-                newOrders.add(order);
-            }
+        List<FailedOrderInfo> failedOrders = new ArrayList<>();
+        if (threadCount <= 1 || totalCount <= 50) {
+            return saveOrdersSingleThread(allValidOrders, platformStoreId, merchantCode, erpStoreCode, failedOrders);
+        } else {
+            return saveOrdersMultiThread(allValidOrders, platformStoreId, merchantCode, erpStoreCode, threadCount,
+                    failedOrders);
         }
+    }
 
-        log.info("【订单分类】总计{}个终态订单，新订单{}个，已存在{}个",
-                terminalOrders.size(), newOrders.size(), existOrders.size());
+    /**
+     * 根据订单量计算写入线程数
+     */
+    private int calculateWriteThreadCount(int orderCount) {
+        if (orderCount < 100)
+            return 1;
+        if (orderCount < 500)
+            return 2;
+        if (orderCount < 2000)
+            return 3;
+        return 4;
+    }
 
-        // 4. 批量插入新订单（无锁，高性能）
-        if (!newOrders.isEmpty()) {
+    /**
+     * 单线程保存订单（小数据量场景）
+     * 失败时：记录到内存列表+提交Kafka重试，不写DB
+     */
+    private Long saveOrdersSingleThread(List<OrderListRespDTO.OrderDetail> orders, String platformStoreId,
+            String merchantCode, String erpStoreCode, List<FailedOrderInfo> failedOrders) {
+        int successCount = 0;
+        List<String> failedOrderIds = new ArrayList<>();
+        Long maxCreateTime = null;
+        Long minFailedCreateTime = null;
+
+        for (OrderListRespDTO.OrderDetail order : orders) {
             try {
-                batchInsertNewOrders(newOrders, erpStoreCode);
+                upsertOrder(order, platformStoreId, merchantCode, erpStoreCode);
+                successCount++;
 
-                // 更新 lastSuccessTimestamp
-                for (OrderListRespDTO.OrderDetail order : newOrders) {
-                    if (order.getCreateTime() != null) {
-                        if (lastSuccessTimestamp == null || order.getCreateTime() > lastSuccessTimestamp) {
-                            lastSuccessTimestamp = order.getCreateTime();
-                        }
+                if (order.getCreateTime() != null) {
+                    if (maxCreateTime == null || order.getCreateTime() > maxCreateTime) {
+                        maxCreateTime = order.getCreateTime();
                     }
                 }
             } catch (Exception e) {
-                log.error("【批量插入失败】降级为逐个插入，错误: {}", e.getMessage(), e);
-                // 降级：批量失败时逐个插入
-                for (OrderListRespDTO.OrderDetail order : newOrders) {
-                    processSingleOrder(order, platformStoreId, merchantCode, erpStoreCode, overwrite);
-                    if (order.getCreateTime() != null) {
-                        if (lastSuccessTimestamp == null || order.getCreateTime() > lastSuccessTimestamp) {
-                            lastSuccessTimestamp = order.getCreateTime();
-                        }
+                log.error("【订单保存失败】orderId={}, error={}", order.getOrderId(), e.getMessage());
+                failedOrderIds.add(order.getOrderId());
+
+                if (order.getCreateTime() != null) {
+                    if (minFailedCreateTime == null || order.getCreateTime() < minFailedCreateTime) {
+                        minFailedCreateTime = order.getCreateTime();
                     }
                 }
+
+                FailedOrderInfo failedInfo = new FailedOrderInfo();
+                failedInfo.setOrderId(order.getOrderId());
+                failedInfo.setChannelOrderId(order.getChannelOrderId());
+                failedInfo.setPlatformStoreId(platformStoreId);
+                failedInfo.setMerchantCode(merchantCode);
+                failedInfo.setErpStoreCode(erpStoreCode);
+                failedInfo.setErrorMessage(e.getMessage());
+                failedInfo.setFailTimestamp(System.currentTimeMillis());
+                failedInfo.setOrderDetail(order);
+                failedInfo.setRetryCount(0);
+                failedOrders.add(failedInfo);
+
+                EleOrderRetryTaskSubmitter.RetryTask retryTask = new EleOrderRetryTaskSubmitter.RetryTask(
+                        order.getOrderId(), order.getChannelOrderId(),
+                        platformStoreId, merchantCode, erpStoreCode,
+                        null, order);
+                List<EleOrderRetryTaskSubmitter.RetryTask> tasks = new ArrayList<>();
+                tasks.add(retryTask);
+                retryTaskSubmitter.submitRetryTasks(tasks);
             }
         }
 
-        // 5. 逐个处理已存在订单（保持原有锁逻辑）
-        for (OrderListRespDTO.OrderDetail order : existOrders) {
-            processSingleOrder(order, platformStoreId, merchantCode, erpStoreCode, overwrite);
-            if (order.getCreateTime() != null) {
-                if (lastSuccessTimestamp == null || order.getCreateTime() > lastSuccessTimestamp) {
-                    lastSuccessTimestamp = order.getCreateTime();
+        Long finalSyncTime = calculateSyncTime(maxCreateTime, minFailedCreateTime, successCount, orders.size());
+
+        updateSyncLogWithFailedDetails(platformStoreId, merchantCode, erpStoreCode,
+                orders.size(), successCount, failedOrderIds, finalSyncTime, null);
+
+        return maxCreateTime;
+    }
+
+    /**
+     * 多线程保存订单（大数据量场景）
+     * 失败时：记录到内存列表+提交Kafka重试，不写DB
+     */
+    private Long saveOrdersMultiThread(List<OrderListRespDTO.OrderDetail> orders, String platformStoreId,
+            String merchantCode, String erpStoreCode, int threadCount, List<FailedOrderInfo> failedOrders) {
+        int totalOrders = orders.size();
+        List<List<OrderListRespDTO.OrderDetail>> partitions = new ArrayList<>();
+        int partitionSize = (totalOrders + threadCount - 1) / threadCount;
+
+        for (int i = 0; i < totalOrders; i += partitionSize) {
+            partitions.add(orders.subList(i, Math.min(i + partitionSize, totalOrders)));
+        }
+
+        AtomicInteger totalSuccess = new AtomicInteger(0);
+        List<String> allFailedOrderIds = new CopyOnWriteArrayList<>();
+        List<FailedOrderInfo> threadFailedOrders = new CopyOnWriteArrayList<>();
+        LongAdderAtomicReference maxCreateTimeRef = new LongAdderAtomicReference(null);
+        LongAdderAtomicReference minFailedCreateTimeRef = new LongAdderAtomicReference(null);
+
+        CountDownLatch latch = new CountDownLatch(partitions.size());
+
+        for (List<OrderListRespDTO.OrderDetail> partition : partitions) {
+            compensateExecutor.execute(() -> {
+                try {
+                    for (OrderListRespDTO.OrderDetail order : partition) {
+                        try {
+                            upsertOrder(order, platformStoreId, merchantCode, erpStoreCode);
+                            totalSuccess.incrementAndGet();
+
+                            if (order.getCreateTime() != null) {
+                                maxCreateTimeRef.updateIfGreater(order.getCreateTime());
+                            }
+                        } catch (Exception e) {
+                            log.error("【订单保存失败】orderId={}, error={}", order.getOrderId(), e.getMessage());
+                            allFailedOrderIds.add(order.getOrderId());
+
+                            if (order.getCreateTime() != null) {
+                                minFailedCreateTimeRef.updateIfLesser(order.getCreateTime());
+                            }
+
+                            FailedOrderInfo failedInfo = new FailedOrderInfo();
+                            failedInfo.setOrderId(order.getOrderId());
+                            failedInfo.setChannelOrderId(order.getChannelOrderId());
+                            failedInfo.setPlatformStoreId(platformStoreId);
+                            failedInfo.setMerchantCode(merchantCode);
+                            failedInfo.setErpStoreCode(erpStoreCode);
+                            failedInfo.setErrorMessage(e.getMessage());
+                            failedInfo.setFailTimestamp(System.currentTimeMillis());
+                            failedInfo.setOrderDetail(order);
+                            failedInfo.setRetryCount(0);
+                            threadFailedOrders.add(failedInfo);
+
+                            EleOrderRetryTaskSubmitter.RetryTask retryTask = new EleOrderRetryTaskSubmitter.RetryTask(
+                                    order.getOrderId(), order.getChannelOrderId(),
+                                    platformStoreId, merchantCode, erpStoreCode,
+                                    null, order);
+                            List<EleOrderRetryTaskSubmitter.RetryTask> tasks = new ArrayList<>();
+                            tasks.add(retryTask);
+                            retryTaskSubmitter.submitRetryTasks(tasks);
+                        }
+                    }
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        try {
+            boolean completed = latch.await(10, TimeUnit.MINUTES);
+            if (!completed) {
+                log.warn("【多线程保存超时】门店{}部分订单未完成", platformStoreId);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("【多线程保存中断】门店{}", platformStoreId);
+        }
+
+        failedOrders.addAll(threadFailedOrders);
+
+        Long finalSyncTime = calculateSyncTime(maxCreateTimeRef.get(), minFailedCreateTimeRef.get(),
+                totalSuccess.get(), orders.size());
+
+        updateSyncLogWithFailedDetails(platformStoreId, merchantCode, erpStoreCode,
+                orders.size(), totalSuccess.get(), new ArrayList<>(allFailedOrderIds), finalSyncTime, threadCount);
+
+        return maxCreateTimeRef.get();
+    }
+
+    /**
+     * 计算 syncTime 推进策略
+     */
+    private Long calculateSyncTime(Long maxCreateTime, Long minFailedCreateTime, int successCount, int totalCount) {
+        double successRate = (double) successCount / totalCount;
+
+        if (successRate == 1.0) {
+            return maxCreateTime;
+        } else if (successRate > 0.8 && minFailedCreateTime != null) {
+            return minFailedCreateTime - 1;
+        } else {
+            log.warn("【syncTime】失败率过高({}%)，不推进syncTime", (1 - successRate) * 100);
+            return null;
+        }
+    }
+
+    /**
+     * 原子操作的Long引用类
+     */
+    private static class LongAdderAtomicReference {
+        private volatile Long value;
+
+        public LongAdderAtomicReference(Long initialValue) {
+            this.value = initialValue;
+        }
+
+        public void updateIfGreater(Long newValue) {
+            synchronized (this) {
+                if (newValue != null && (value == null || newValue > value)) {
+                    value = newValue;
                 }
             }
         }
 
-        return lastSuccessTimestamp;
+        public void updateIfLesser(Long newValue) {
+            synchronized (this) {
+                if (newValue != null && (value == null || newValue < value)) {
+                    value = newValue;
+                }
+            }
+        }
+
+        public Long get() {
+            return value;
+        }
     }
 
     /**
-     * 批量插入新订单（无锁，适合新订单场景）
+     * UPSERT单个订单（插入或更新）
      * 
-     * @param newOrders    新订单列表
-     * @param erpStoreCode ERP门店编码
+     * 优势:
+     * 1. 一次SQL完成插入或更新，不需要先查询
+     * 2. 基于唯一索引保证幂等性
+     * 3. 天然支持并发，不需要分布式锁
      */
-    private void batchInsertNewOrders(List<OrderListRespDTO.OrderDetail> newOrders, String erpStoreCode) {
-        if (newOrders.isEmpty()) {
-            return;
-        }
-
-        log.info("【批量插入】开始批量插入{}个新订单", newOrders.size());
-
-        // 按 50 个为一组批量插入
-        int batchSize = 50;
-        for (int i = 0; i < newOrders.size(); i += batchSize) {
-            List<OrderListRespDTO.OrderDetail> batch = newOrders.subList(
-                    i, Math.min(i + batchSize, newOrders.size()));
-
-            // 批量插入订单主表
-            for (OrderListRespDTO.OrderDetail order : batch) {
-                OrderDO orderDO = buildOrderDO(order, erpStoreCode);
-                orderMapper.insert(orderDO);
-            }
-
-            // 批量插入平台表
-            for (OrderListRespDTO.OrderDetail order : batch) {
-                upsertPlatform(order);
-            }
-
-            // 批量插入商品明细表
-            for (OrderListRespDTO.OrderDetail order : batch) {
-                replaceItems(order, erpStoreCode);
-            }
-
-            // 批量插入优惠表
-            for (OrderListRespDTO.OrderDetail order : batch) {
-                replaceDiscounts(order);
-            }
-
-            log.info("【批量插入】已完成 {}/{} 个订单", Math.min(i + batchSize, newOrders.size()), newOrders.size());
-        }
-
-        log.info("【批量插入】完成{}个新订单插入", newOrders.size());
-    }
-
-    /**
-     * 处理单个订单（抽取原有逻辑，用于降级和已存在订单处理）
-     */
-    private void processSingleOrder(OrderListRespDTO.OrderDetail orderDetail,
-            String platformStoreId, String merchantCode, String erpStoreCode, boolean overwrite) {
-
-        final String orderId = orderDetail.getOrderId();
-        try {
-            RetryUtil.executeWithRetry(() -> {
-                saveSingleOrder(orderDetail, erpStoreCode, overwrite);
-                return null;
-            }, "订单落库-" + orderId, 1, 100, 500);
-        } catch (Exception e) {
-            log.error("【订单落库失败】orderId={}，快速失败入队，错误: {}", orderId, e.getMessage());
-            EleOrderFailRecord record = saveFailRecordReturn(orderId, orderDetail.getChannelOrderId(),
-                    "SYNC", "DB_INSERT", e.getMessage(), orderDetail, null, 0, null, "PENDING_RETRY",
-                    platformStoreId, merchantCode, erpStoreCode);
-
-            EleOrderRetryTaskSubmitter.RetryTask retryTask = new EleOrderRetryTaskSubmitter.RetryTask(
-                    orderId, orderDetail.getChannelOrderId(),
-                    platformStoreId, merchantCode, erpStoreCode,
-                    record.getId(), orderDetail);
-            List<EleOrderRetryTaskSubmitter.RetryTask> tasks = new ArrayList<>();
-            tasks.add(retryTask);
-            retryTaskSubmitter.submitRetryTasks(tasks);
-        }
-    }
-
-    private void saveSingleOrder(OrderListRespDTO.OrderDetail orderDetail, String erpStoreCode, boolean overwrite) {
+    private void upsertOrder(OrderListRespDTO.OrderDetail orderDetail, String platformStoreId,
+            String merchantCode, String erpStoreCode) {
         String orderId = orderDetail.getOrderId();
 
         if (shutdownStateManager.isShuttingDown()) {
@@ -1027,97 +1305,111 @@ public class EleOrderServiceImpl implements EleOrderService {
             throw new EleOrderSyncException("【订单同步】应用正在关闭，跳过订单处理，orderId=" + orderId);
         }
 
-        shutdownStateManager.taskStarted(orderId);
-        LockResult lockResult = tryAcquireLock(orderId);
+        // 1. 构建订单DO
+        OrderDO orderDO = buildOrderDO(orderDetail, erpStoreCode);
 
+        // 2. UPSERT订单主表（INSERT ... ON DUPLICATE KEY UPDATE）
+        orderMapper.upsertOrder(orderDO);
+
+        // 3. UPSERT平台信息
+        upsertPlatform(orderDetail);
+
+        // 4. 子订单和优惠信息已分别存储到 order_item_table 和 order_discount_table，无需在主表存储JSON
+    }
+
+    /**
+     * 更新同步日志（包含失败详情）
+     */
+    private void updateSyncLogWithFailedDetails(String platformStoreId, String merchantCode, String erpStoreCode,
+            int totalCount, int successCount, List<String> failedOrderIds,
+            Long syncTime, Integer threadCount) {
         try {
-            doSaveSingleOrder(orderDetail, erpStoreCode, overwrite);
-        } finally {
-            if (lockResult.isLocked()) {
-                eleOrderLockService.unlockOrder(orderId);
-            }
-            shutdownStateManager.taskFinished();
-        }
-    }
+            EleOrderSyncLog syncLog = eleOrderSyncLogMapper.selectByStoreId(platformStoreId);
 
-    private void saveSingleOrder(OrderListRespDTO.OrderDetail orderDetail, String erpStoreCode) {
-        saveSingleOrder(orderDetail, erpStoreCode, false);
-    }
+            if (syncLog == null) {
+                syncLog = new EleOrderSyncLog();
+                syncLog.setPlatformStoreId(platformStoreId);
+                syncLog.setMerchantCode(merchantCode);
+                syncLog.setErpStoreCode(erpStoreCode);
+                syncLog.setCreateTime(System.currentTimeMillis());
+                syncLog.setSyncCount(totalCount);
+                syncLog.setTotalPulled(totalCount);
+                syncLog.setSuccessCount(successCount);
+                syncLog.setFailCount(failedOrderIds.size());
+                syncLog.setFailedOrderCount(failedOrderIds.size());
+                syncLog.setSyncTime(syncTime);
+                syncLog.setSyncEndTime(LocalDateTime.now());
 
-    private LockResult tryAcquireLock(String orderId) {
-        try {
-            boolean locked = eleOrderLockService.tryLockOrderWithWatchdog(orderId, 30);
-            if (!locked) {
-                throw new EleOrderSyncException("【订单锁】获取锁失败，订单正在被其他线程处理，orderId=" + orderId);
-            }
-            return new LockResult(true);
-        } catch (RedissonShutdownException e) {
-            log.warn("【订单锁】应用关闭中，Redisson 已停止，跳过订单同步，orderId={}", orderId);
-            throw new EleOrderSyncException("【订单锁】应用正在关闭，Redisson 已停止，orderId=" + orderId, e);
-        } catch (EleOrderSyncException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("【订单锁】Redis异常，orderId={}", orderId, e);
-            throw new EleOrderSyncException("【订单锁】Redis连接异常，无法获取分布式锁，orderId=" + orderId, e);
-        }
-    }
+                if (failedOrderIds.isEmpty()) {
+                    syncLog.setStatus(1);
+                    syncLog.setPartialFailed(0);
+                    syncLog.setErrorMsg(null);
+                } else if (successCount > 0) {
+                    syncLog.setStatus(0);
+                    syncLog.setPartialFailed(1);
+                    syncLog.setFailedOrderIds(objectMapper.writeValueAsString(failedOrderIds));
+                    syncLog.setErrorMsg("部分订单保存失败，共" + failedOrderIds.size() + "个");
+                } else {
+                    syncLog.setStatus(0);
+                    syncLog.setPartialFailed(0);
+                    syncLog.setErrorMsg("所有订单保存失败");
+                }
 
-    private static class LockResult {
-        private final boolean locked;
-
-        public LockResult(boolean locked) {
-            this.locked = locked;
-        }
-
-        public boolean isLocked() {
-            return locked;
-        }
-    }
-
-    private void doSaveSingleOrder(OrderListRespDTO.OrderDetail orderDetail, String erpStoreCode, boolean overwrite) {
-        List<OrderDO> existingList = orderMapper.selectList(new LambdaQueryWrapperX<OrderDO>()
-                .eq(OrderDO::getOrderId, orderDetail.getOrderId())
-                .eq(OrderDO::getDeleted, false)
-                .last("LIMIT 1"));
-
-        if (existingList != null && !existingList.isEmpty()) {
-            if (overwrite) {
-                log.info("【覆盖订单】订单已存在，执行覆盖更新，orderId={}", orderDetail.getOrderId());
-                doUpdateOrder(existingList.get(0), orderDetail, erpStoreCode);
+                eleOrderSyncLogMapper.insert(syncLog);
             } else {
-                log.info("【跳过更新】订单已存在，不修改任何字段，orderId={}", orderDetail.getOrderId());
-                return;
+                syncLog.setSyncBatchId(syncLog.getSyncBatchId());
+                syncLog.setSyncCount(totalCount);
+                syncLog.setTotalPulled(totalCount);
+                syncLog.setSuccessCount(successCount);
+                syncLog.setFailCount(failedOrderIds.size());
+                syncLog.setFailedOrderCount(failedOrderIds.size());
+                syncLog.setSyncTime(syncTime);
+                syncLog.setSyncEndTime(LocalDateTime.now());
+
+                if (failedOrderIds.isEmpty()) {
+                    syncLog.setStatus(1);
+                    syncLog.setPartialFailed(0);
+                    syncLog.setErrorMsg(null);
+                } else if (successCount > 0) {
+                    syncLog.setStatus(0);
+                    syncLog.setPartialFailed(1);
+                    syncLog.setFailedOrderIds(objectMapper.writeValueAsString(failedOrderIds));
+                    syncLog.setErrorMsg("部分订单保存失败，共" + failedOrderIds.size() + "个");
+                } else {
+                    syncLog.setStatus(0);
+                    syncLog.setPartialFailed(0);
+                    syncLog.setErrorMsg("所有订单保存失败");
+                }
+
+                eleOrderSyncLogMapper.updateById(syncLog);
             }
-        } else {
-            OrderDO order = buildOrderDO(orderDetail, erpStoreCode);
-            orderMapper.insert(order);
-            // 已禁用订单状态日志写入：落库状态即为最终状态，无需记录变更日志
-            // Long storeId = parseStoreId(erpStoreCode);
-            // insertStatusLog(storeId, null, null, orderDetail, "SYNC", "首次落库");
+        } catch (Exception e) {
+            log.error("【更新同步日志失败】platformStoreId={}, error={}", platformStoreId, e.getMessage());
         }
-
-        upsertPlatform(orderDetail);
-        replaceItems(orderDetail, erpStoreCode);
-        replaceDiscounts(orderDetail);
     }
 
-    private void doSaveSingleOrder(OrderListRespDTO.OrderDetail orderDetail, String erpStoreCode) {
-        doSaveSingleOrder(orderDetail, erpStoreCode, false);
+    /**
+     * 批量插入新订单（废弃，保留以兼容旧代码）
+     * 
+     * @deprecated 使用 upsertOrder 方法替代
+     */
+    @Deprecated
+    private void batchInsertNewOrders(List<OrderListRespDTO.OrderDetail> newOrders, String erpStoreCode) {
+        // 保留方法签名，但实际不再使用
+        log.warn("【废弃方法】batchInsertNewOrders 已被 upsertOrder 替代");
     }
 
-    private void doUpdateOrder(OrderDO existingOrder, OrderListRespDTO.OrderDetail orderDetail, String erpStoreCode) {
-        OrderDO order = buildOrderDO(orderDetail, erpStoreCode);
-        // 使用包装器根据 orderId 进行更新
-        orderMapper.update(order, new LambdaQueryWrapperX<OrderDO>()
-                .eq(OrderDO::getOrderId, existingOrder.getOrderId()));
-
-        // 已禁用订单状态日志写入：落库状态即为最终状态，无需记录变更日志
-        // Long storeId = parseStoreId(erpStoreCode);
-        // insertStatusLog(storeId, null, null, orderDetail, "SYNC", "覆盖更新");
-
-        upsertPlatform(orderDetail);
-        replaceItems(orderDetail, erpStoreCode);
-        replaceDiscounts(orderDetail);
+    /**
+     * 处理单个订单（废弃，保留以兼容旧代码）
+     * 
+     * @deprecated 使用 upsertOrder 方法替代
+     */
+    @Deprecated
+    private void processSingleOrder(OrderListRespDTO.OrderDetail orderDetail,
+            String platformStoreId, String merchantCode, String erpStoreCode, boolean overwrite) {
+        // 保留方法签名，但实际不再使用
+        log.warn("【废弃方法】processSingleOrder 已被 upsertOrder 替代");
+        upsertOrder(orderDetail, platformStoreId, merchantCode, erpStoreCode);
     }
 
     @Override
@@ -1152,10 +1444,10 @@ public class EleOrderServiceImpl implements EleOrderService {
         order.setChannelSourceId(detail.getChannelSourceId());
         order.setChannelSourceName(detail.getChannelSourceName());
         order.setChannelOrderId(detail.getChannelOrderId());
-        order.setStoreCode(resolveStoreCode(detail, erpStoreCode));
+        order.setStoreCode(StrUtil.trim(detail.getStoreCode()));
         order.setLongitude(detail.getLongitude());
         order.setLatitude(detail.getLatitude());
-        order.setUserId(getUserId(detail.getUserId()));
+        order.setUserId(detail.getUserId());
         order.setRemark(detail.getRemark());
         order.setArriveType(detail.getArriveType());
         order.setCreator("admin_sync");
@@ -1191,7 +1483,8 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    private void saveRemoteOrderDetailToLocal(OrderDetailRespDTO detail, String erpStoreCode) {
+    private void saveRemoteOrderDetailToLocal(OrderDetailRespDTO detail, String platformStoreId,
+            String merchantCode, String erpStoreCode) {
         if (detail == null || detail.getOrderId() == null) {
             return;
         }
@@ -1201,7 +1494,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         OrderListRespDTO.OrderDetail orderDetail = convertToOrderListDetail(detail);
-        saveSingleOrder(orderDetail, erpStoreCode);
+        upsertOrder(orderDetail, platformStoreId, merchantCode, erpStoreCode);
     }
 
     private OrderListRespDTO.OrderDetail convertToOrderListDetail(OrderDetailRespDTO dto) {
@@ -1527,6 +1820,12 @@ public class EleOrderServiceImpl implements EleOrderService {
                     record.getId(), null));
         }
         retryTaskSubmitter.submitRetryTasks(tasks);
+
+        for (EleOrderFailRecord record : pendingRecords) {
+            record.setProcessStatus("RETRYING");
+            record.setUpdateTime(System.currentTimeMillis());
+            eleOrderFailRecordMapper.updateById(record);
+        }
     }
 
     private void clearFailRecordIfSuccess(String orderId) {
@@ -1613,7 +1912,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                     "completed", false);
         }
         try {
-            List<StorePlatformRespVO> stores = storeService.getOpenPlatformStoresByPlatformCode(null);
+            List<StorePlatformRespVO> stores = storeService.getAllPlatformStoresByPlatformCode(null);
             if (stores == null || stores.isEmpty()) {
                 log.info("【手动全量同步-详细】暂无需要同步的门店");
                 return java.util.Map.of(
@@ -1815,7 +2114,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         dto.setChannelSourceId(data.getChannel_source_id());
         dto.setChannelOrderId(data.getChannel_order_id());
         dto.setChannelType(data.getChannel_type());
-        dto.setStoreCode(data.getStore_code());
+        dto.setStoreCode(StrUtil.trim(data.getStore_code()));
         dto.setErpStoreCode(data.getErp_store_code());
         dto.setLongitude(data.getLongitude());
         dto.setLatitude(data.getLatitude());
@@ -1997,7 +2296,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 throw new RuntimeException("转换详情结果为null, orderId=" + orderId);
             }
             if (isTerminalStatus(dto.getStatus())) {
-                saveRemoteOrderDetailToLocal(dto, finalErpStoreCode);
+                saveRemoteOrderDetailToLocal(dto, platformStoreId, finalMerchantCode, finalErpStoreCode);
             } else {
                 log.info("【跳过详情落库】远程详情非目标终态，orderId={}, status={}", dto.getOrderId(), dto.getStatus());
             }
@@ -2080,5 +2379,527 @@ public class EleOrderServiceImpl implements EleOrderService {
         config.put("syncIntervalMs", 15 * 60 * 1000);
         config.put("syncCron", "0 */15 * * * ?");
         return config;
+    }
+
+    /**
+     * 定时检测中间态订单
+     * 
+     * 检测规则:
+     * 1. 失败记录表: status='FAILED' 且 create_time < 24小时前
+     * 2. 同步日志表: partial_failed=1 且 create_time < 1小时前(未补偿)
+     */
+    @Scheduled(cron = "0 0 * * * ?")
+    public void detectIntermediateOrders() {
+        log.info("【中间态检测】开始检测中间态订单...");
+
+        int fixedCount = 0;
+        LocalDateTime oneDayAgo = LocalDateTime.now().minusDays(1);
+        Long oneDayAgoTimestamp = oneDayAgo.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() / 1000;
+
+        // 检测1: 失败超过24小时的FAILED记录
+        List<EleOrderFailRecord> failedRecords = eleOrderFailRecordMapper.selectList(
+                new LambdaQueryWrapperX<EleOrderFailRecord>()
+                        .eq(EleOrderFailRecord::getProcessStatus, "FAILED")
+                        .lt(EleOrderFailRecord::getCreateTime, oneDayAgoTimestamp));
+
+        for (EleOrderFailRecord record : failedRecords) {
+            log.warn("【中间态检测】发现长期失败订单，orderId={}, 失败时间={}", record.getOrderId(), record.getCreateTime());
+            try {
+                retryFailedOrder(record);
+                fixedCount++;
+            } catch (Exception e) {
+                log.error("【中间态修复】修复失败，orderId={}, error={}", record.getOrderId(), e.getMessage());
+            }
+        }
+
+        // 检测2: 部分失败超过1小时的同步日志（未补偿）
+        LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
+        List<EleOrderSyncLog> partialLogs = eleOrderSyncLogMapper.selectList(
+                new LambdaQueryWrapperX<EleOrderSyncLog>()
+                        .eq(EleOrderSyncLog::getPartialFailed, 1)
+                        .lt(EleOrderSyncLog::getSyncEndTime, oneHourAgo));
+
+        for (EleOrderSyncLog logEntry : partialLogs) {
+            log.warn("【中间态检测】发现未补偿的部分失败同步，platformStoreId={}, 同步时间={}",
+                    logEntry.getPlatformStoreId(), logEntry.getSyncEndTime());
+            try {
+                compensatePartialFailed(logEntry);
+                fixedCount++;
+            } catch (Exception e) {
+                log.error("【中间态修复】补偿失败，platformStoreId={}, error={}",
+                        logEntry.getPlatformStoreId(), e.getMessage());
+            }
+        }
+
+        log.info("【中间态检测】检测完成，共修复{}个中间态订单", fixedCount);
+    }
+
+    /**
+     * 重试长期失败的订单
+     */
+    private void retryFailedOrder(EleOrderFailRecord record) {
+        try {
+            // 更新状态为RETRYING
+            record.setProcessStatus("RETRYING");
+            record.setRetryCount(record.getRetryCount() + 1);
+            record.setUpdateTime(System.currentTimeMillis());
+            eleOrderFailRecordMapper.updateById(record);
+
+            // 从API重新拉取订单详情并保存
+            EleOrderRetryTaskSubmitter.RetryTask retryTask = new EleOrderRetryTaskSubmitter.RetryTask(
+                    record.getOrderId(), record.getChannelOrderId(),
+                    record.getPlatformStoreId(), record.getMerchantCode(), record.getErpStoreCode(),
+                    record.getId(), null);
+            List<EleOrderRetryTaskSubmitter.RetryTask> tasks = new ArrayList<>();
+            tasks.add(retryTask);
+            retryTaskSubmitter.submitRetryTasks(tasks);
+
+            // 标记成功
+            record.setProcessStatus("SUCCESS");
+            eleOrderFailRecordMapper.updateById(record);
+        } catch (Exception e) {
+            record.setProcessStatus("FAILED");
+            record.setFailMessage("重试失败: " + e.getMessage());
+            eleOrderFailRecordMapper.updateById(record);
+            throw e;
+        }
+    }
+
+    /**
+     * 补偿部分失败的同步
+     */
+    private void compensatePartialFailed(EleOrderSyncLog logEntry) {
+        if (StrUtil.isBlank(logEntry.getFailedOrderIds())) {
+            return;
+        }
+
+        try {
+            List<String> failedOrderIds = objectMapper.readValue(
+                    logEntry.getFailedOrderIds(),
+                    new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {
+                    });
+
+            log.info("【补偿任务】门店{}, 补偿{}个失败订单", logEntry.getPlatformStoreId(), failedOrderIds.size());
+
+            // 逐个重试失败订单
+            for (String orderId : failedOrderIds) {
+                try {
+                    EleOrderFailRecord record = eleOrderFailRecordMapper.selectOne(
+                            new LambdaQueryWrapperX<EleOrderFailRecord>()
+                                    .eq(EleOrderFailRecord::getOrderId, orderId)
+                                    .orderByDesc(EleOrderFailRecord::getCreateTime)
+                                    .last("LIMIT 1"));
+
+                    if (record != null) {
+                        retryFailedOrder(record);
+                    }
+                } catch (Exception e) {
+                    log.error("【补偿任务】单个订单补偿失败，orderId={}", orderId);
+                }
+            }
+
+            log.info("【补偿任务】门店{}补偿完成", logEntry.getPlatformStoreId());
+        } catch (Exception e) {
+            log.error("【补偿任务】解析失败订单列表失败，syncLogId={}", logEntry.getId());
+        }
+    }
+
+    /**
+     * 保存订单并跟踪失败订单（新增方法，替代原有saveOrUpdateBatch）
+     */
+    private Long saveOrUpdateBatchWithFailureTracking(List<OrderListRespDTO.OrderDetail> orders, String platformStoreId,
+            String merchantCode, String erpStoreCode, List<FailedOrderInfo> failedOrders) {
+        if (orders == null || orders.isEmpty()) {
+            return null;
+        }
+
+        List<OrderListRespDTO.OrderDetail> terminalOrders = orders.stream()
+                .filter(this::isTerminalOrder)
+                .collect(Collectors.toList());
+
+        if (terminalOrders.isEmpty()) {
+            return null;
+        }
+
+        int totalCount = terminalOrders.size();
+        int threadCount = calculateWriteThreadCount(totalCount);
+
+        log.info("【订单保存】开始保存{}个终态订单，动态分配{}线程", totalCount, threadCount);
+
+        if (threadCount <= 1 || totalCount <= 50) {
+            return saveOrdersSingleThread(terminalOrders, platformStoreId, merchantCode, erpStoreCode, failedOrders);
+        } else {
+            return saveOrdersMultiThread(terminalOrders, platformStoreId, merchantCode, erpStoreCode, threadCount,
+                    failedOrders);
+        }
+    }
+
+    /**
+     * 执行补偿任务（在订单拉取线程结束后调用）
+     */
+    private CompensationResult executeCompensationTasks(List<FailedOrderInfo> failedOrders, String platformStoreId,
+            String merchantCode, String erpStoreCode) {
+        if (failedOrders.isEmpty()) {
+            log.info("【补偿任务】门店{}无失败订单，跳过补偿", platformStoreId);
+            return CompensationResult.success();
+        }
+
+        log.info("【补偿任务】门店{}开始执行补偿，失败订单数={}", platformStoreId, failedOrders.size());
+
+        CompensationResult result = new CompensationResult();
+        result.setTotalCount(failedOrders.size());
+        result.setAllCompleted(false);
+
+        List<CompletableFuture<CompensationTaskResult>> futures = new ArrayList<>();
+
+        for (FailedOrderInfo failedInfo : failedOrders) {
+            CompletableFuture<CompensationTaskResult> future = CompletableFuture.supplyAsync(() -> {
+                return compensateSingleOrder(failedInfo, platformStoreId, merchantCode, erpStoreCode);
+            }, compensateExecutor);
+
+            futures.add(future);
+        }
+
+        try {
+            CompletableFuture<Void> allFutures = CompletableFuture.allOf(
+                    futures.toArray(new CompletableFuture[0]));
+
+            allFutures.get(5, TimeUnit.MINUTES);
+
+            for (CompletableFuture<CompensationTaskResult> future : futures) {
+                CompensationTaskResult taskResult = future.get();
+                result.addResult(taskResult);
+            }
+
+            result.setAllCompleted(true);
+
+        } catch (Exception e) {
+            log.error("【补偿任务】门店{}补偿异常", platformStoreId, e);
+            result.setAllCompleted(false);
+        }
+
+        log.info("【补偿任务】门店{}补偿完成，成功={}, 仍失败={}",
+                platformStoreId, result.getSuccessCount(), result.getFailedCount());
+
+        return result;
+    }
+
+    /**
+     * 补偿单个订单
+     */
+    private CompensationTaskResult compensateSingleOrder(FailedOrderInfo failedInfo, String platformStoreId,
+            String merchantCode, String erpStoreCode) {
+        CompensationTaskResult taskResult = new CompensationTaskResult();
+        taskResult.setOrderId(failedInfo.getOrderId());
+        taskResult.setPlatformStoreId(platformStoreId);
+        taskResult.setMerchantCode(merchantCode);
+        taskResult.setErpStoreCode(erpStoreCode);
+
+        try {
+            OrderDetailRespDTO detail = getOrderDetailRemote(
+                    platformStoreId, merchantCode, erpStoreCode, failedInfo.getOrderId());
+
+            if (detail == null) {
+                taskResult.setSuccess(false);
+                taskResult.setErrorMessage("订单详情不存在");
+                return taskResult;
+            }
+
+            OrderMessage message = buildMessage(
+                    convertToOrderListDetail(detail),
+                    platformStoreId, merchantCode, erpStoreCode);
+
+            consumeOrderMessage(message);
+
+            taskResult.setSuccess(true);
+            taskResult.setErrorMessage(null);
+
+            log.info("【补偿成功】orderId={}", failedInfo.getOrderId());
+
+        } catch (Exception e) {
+            taskResult.setSuccess(false);
+            taskResult.setErrorMessage(e.getMessage());
+            taskResult.setException(e);
+
+            log.error("【补偿失败】orderId={}, error={}", failedInfo.getOrderId(), e.getMessage());
+        }
+
+        return taskResult;
+    }
+
+    /**
+     * 处理补偿结果
+     * - 成功的订单：不处理
+     * - 仍失败的订单：写入失败日志表 + 立即告警
+     */
+    private void handleCompensationResults(CompensationResult result) {
+        if (result == null || result.getFailedCount() == 0) {
+            log.info("【补偿结果】所有订单补偿成功");
+            return;
+        }
+
+        for (CompensationTaskResult taskResult : result.getFailedTasks()) {
+            String orderId = taskResult.getOrderId();
+            String errorMessage = taskResult.getErrorMessage();
+
+            EleOrderFailRecord record = saveFailRecordReturn(
+                    orderId,
+                    null,
+                    "SYNC",
+                    "COMPENSATION_FAILED",
+                    errorMessage,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "PENDING_MANUAL",
+                    taskResult.getPlatformStoreId(),
+                    taskResult.getMerchantCode(),
+                    taskResult.getErpStoreCode());
+
+            sendImmediateAlert(record, taskResult);
+
+            log.error("【补偿失败告警】orderId={}, error={}, recordId={}",
+                    orderId, errorMessage, record.getId());
+        }
+    }
+
+    /**
+     * 立即发送告警（只要补偿失败就告警，无阈值）
+     */
+    private void sendImmediateAlert(EleOrderFailRecord record, CompensationTaskResult taskResult) {
+        try {
+            String traceId = TracerUtils.getTraceId();
+
+            String alertMessage = String.format(
+                    "【订单同步告警】\n" +
+                            "门店：%s\n" +
+                            "订单：%s\n" +
+                            "失败阶段：COMPENSATION_FAILED\n" +
+                            "失败原因：%s\n" +
+                            "记录ID：%d\n" +
+                            "TraceId：%s\n" +
+                            "处理建议：订单已重试3次仍失败，请人工介入处理",
+                    record.getPlatformStoreId(),
+                    record.getOrderId(),
+                    record.getFailMessage(),
+                    record.getId(),
+                    StrUtil.isNotBlank(traceId) ? traceId : "无");
+
+            log.error("【订单告警】{}", alertMessage);
+
+        } catch (Exception e) {
+            log.error("【发送告警失败】orderId={}, error={}", record.getOrderId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 手动重试失败记录（使用retryExecutor异步执行）
+     */
+    private void retryFailRecordForSingleOrder(EleOrderFailRecord record, boolean overwrite) {
+        record.setRetryCount(record.getRetryCount() == null ? 1 : record.getRetryCount() + 1);
+        record.setProcessStatus("RETRYING");
+        record.setUpdateTime(System.currentTimeMillis());
+        eleOrderFailRecordMapper.updateById(record);
+
+        retryExecutor.execute(() -> {
+            try {
+                OrderDetailRespDTO detail = getOrderDetailRemote(
+                        record.getPlatformStoreId(), record.getMerchantCode(), record.getErpStoreCode(),
+                        record.getOrderId());
+                consumeOrderMessage(buildMessage(convertToOrderListDetail(detail), record.getPlatformStoreId(),
+                        record.getMerchantCode(), record.getErpStoreCode()), overwrite);
+                record.setProcessStatus("SUCCESS");
+                record.setUpdateTime(System.currentTimeMillis());
+                eleOrderFailRecordMapper.updateById(record);
+                log.info("【手动重试成功】orderId={}", record.getOrderId());
+            } catch (Exception e) {
+                record.setProcessStatus("FAILED");
+                record.setFailMessage(e.getMessage().length() > 1000
+                        ? e.getMessage().substring(0, 1000)
+                        : e.getMessage());
+                record.setUpdateTime(System.currentTimeMillis());
+                eleOrderFailRecordMapper.updateById(record);
+                log.error("【手动重试失败】orderId={}, error={}", record.getOrderId(), e.getMessage());
+            }
+        });
+    }
+
+    private long getTotalCountByStatus(String platformStoreId, String merchantCode, String erpStoreCode,
+                                        Long startTime, Long endTime) {
+        long totalCount = 0;
+        Integer[] targetStatuses = { 1, 2, 3, 4, 5, 6, -1 };
+
+        for (Integer status : targetStatuses) {
+            try {
+                OrderListReqDTO req = new OrderListReqDTO();
+                req.setPlatformStoreId(platformStoreId);
+                req.setMerchantCode(merchantCode);
+                req.setErpStoreCode(erpStoreCode);
+                req.setStartTime(startTime);
+                req.setEndTime(endTime);
+                req.setStatus(status);
+                req.setPageSize(1);
+                req.setScrollId(null);
+
+                ORDER_LIST_RATE_LIMITER.acquire();
+                OrderListRespDTO result = getOrderList(req);
+
+                if (result != null && result.getTotal() != null) {
+                    totalCount += result.getTotal();
+                }
+            } catch (Exception e) {
+                log.warn("【动态窗口】获取状态{}的总数失败，platformStoreId={}", status, platformStoreId, e);
+            }
+        }
+
+        return totalCount;
+    }
+
+    private int calculateWindowCount(long totalCount) {
+        if (totalCount < 100) {
+            return 1;
+        }
+        if (totalCount < 500) {
+            return 2;
+        }
+        if (totalCount < 2000) {
+            return Math.min(4, (int) Math.ceil((double) totalCount / 500));
+        }
+        if (totalCount < 5000) {
+            return Math.min(6, (int) Math.ceil((double) totalCount / 800));
+        }
+
+        return Math.max(6, Math.min(10, (int) Math.ceil((double) totalCount / 1000)));
+    }
+
+    private List<OrderListRespDTO.OrderDetail> pullAllOrdersWithWindows(
+            String platformStoreId, String merchantCode, String erpStoreCode,
+            Long startTime, Long endTime, int windowCount) {
+
+        List<TimeWindow> windows = splitTimeWindows(startTime, endTime, windowCount);
+        log.info("【动态窗口】门店{}拆分{}个时间窗口", platformStoreId, windows.size());
+
+        List<OrderListRespDTO.OrderDetail> allOrders = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger successWindows = new AtomicInteger(0);
+        AtomicInteger failWindows = new AtomicInteger(0);
+        CountDownLatch latch = new CountDownLatch(windows.size());
+
+        for (int i = 0; i < windows.size(); i++) {
+            TimeWindow window = windows.get(i);
+            final int windowIndex = i + 1;
+            compensateExecutor.execute(() -> {
+                boolean locked = false;
+                try {
+                    locked = eleOrderLockService.tryLockSyncWindow(
+                            platformStoreId, window.getStart(), window.getEnd(),
+                            0, windowLockLeaseMinutes);
+
+                    if (!locked) {
+                        log.warn("【动态窗口】窗口{}/{}获取锁失败，platformStoreId={}, window=[{}-{}]",
+                                windowIndex, windows.size(), platformStoreId, window.getStart(), window.getEnd());
+                        failWindows.incrementAndGet();
+                        return;
+                    }
+
+                    log.info("【动态窗口】开始拉取窗口{}/{}，platformStoreId={}, 时间范围: {} ~ {}",
+                            windowIndex, windows.size(), platformStoreId,
+                            new Date(window.getStart() * 1000),
+                            new Date(window.getEnd() * 1000));
+
+                    List<OrderListRespDTO.OrderDetail> windowOrders = pullAllOrders(
+                            platformStoreId, merchantCode, erpStoreCode,
+                            window.getStart(), window.getEnd());
+
+                    allOrders.addAll(windowOrders);
+                    successWindows.incrementAndGet();
+
+                    log.info("【动态窗口】窗口{}/{}完成，platformStoreId={}, 拉取{}条",
+                            windowIndex, windows.size(), platformStoreId, windowOrders.size());
+                } catch (Exception e) {
+                    failWindows.incrementAndGet();
+                    log.error("【动态窗口】窗口{}/{}拉取失败，platformStoreId={}",
+                            windowIndex, windows.size(), platformStoreId, e);
+                } finally {
+                    if (locked) {
+                        eleOrderLockService.unlockSyncWindow(
+                                platformStoreId, window.getStart(), window.getEnd());
+                    }
+                    latch.countDown();
+                }
+            });
+        }
+
+        try {
+            long timeoutMinutes = Math.max(5, (windowCount * 30L) / 60);
+            boolean completed = latch.await(timeoutMinutes, TimeUnit.MINUTES);
+            if (!completed) {
+                log.warn("【动态窗口】部分窗口超时，未完成窗口数: {}/{}", latch.getCount(), windows.size());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("【动态窗口】等待被中断，platformStoreId={}", platformStoreId, e);
+        }
+
+        List<OrderListRespDTO.OrderDetail> deduplicatedOrders = allOrders.stream()
+                .collect(Collectors.toMap(
+                        OrderListRespDTO.OrderDetail::getOrderId,
+                        order -> order,
+                        (existing, replacement) -> existing
+                ))
+                .values()
+                .stream()
+                .sorted((o1, o2) -> {
+                    if (o1.getCreateTime() == null && o2.getCreateTime() == null) return 0;
+                    if (o1.getCreateTime() == null) return 1;
+                    if (o2.getCreateTime() == null) return -1;
+                    return Long.compare(o1.getCreateTime(), o2.getCreateTime());
+                })
+                .collect(Collectors.toList());
+
+        log.info("【动态窗口】门店{}所有窗口完成，成功{}/{}个，失败{}个，去重后共{}条",
+                platformStoreId, successWindows.get(), windows.size(), failWindows.get(), deduplicatedOrders.size());
+
+        return deduplicatedOrders;
+    }
+
+    private List<TimeWindow> splitTimeWindows(long startTime, long endTime, int windowCount) {
+        List<TimeWindow> windows = new ArrayList<>();
+        long totalDuration = endTime - startTime;
+        long windowDuration = totalDuration / windowCount;
+
+        for (int i = 0; i < windowCount; i++) {
+            long windowStart = startTime + (i * windowDuration);
+            long windowEnd;
+
+            if (i == windowCount - 1) {
+                windowEnd = endTime;
+            } else {
+                windowEnd = windowStart + windowDuration;
+            }
+
+            windows.add(new TimeWindow(windowStart, windowEnd));
+        }
+
+        log.info("【动态窗口】拆分{}个窗口，时间范围: {} ~ {}", windowCount,
+                new Date(startTime * 1000), new Date(endTime * 1000));
+        for (int i = 0; i < windows.size(); i++) {
+            TimeWindow w = windows.get(i);
+            log.info("【动态窗口】窗口{}/{}: {} ~ {}", i + 1, windows.size(),
+                    new Date(w.getStart() * 1000), new Date(w.getEnd() * 1000));
+        }
+
+        return windows;
+    }
+
+    @lombok.Data
+    private static class TimeWindow {
+        private final long start;
+        private final long end;
+
+        public TimeWindow(long start, long end) {
+            this.start = start;
+            this.end = end;
+        }
     }
 }

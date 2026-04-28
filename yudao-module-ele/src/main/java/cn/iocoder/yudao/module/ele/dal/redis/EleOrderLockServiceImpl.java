@@ -155,6 +155,48 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
     }
 
     @Override
+    public boolean tryLockSyncWindow(String platformStoreId, long windowStart, long windowEnd, int waitSeconds, int leaseMinutes) {
+        if (!isRedissonAvailable()) {
+            log.error("【分布式锁】Redisson 已关闭，无法获取时间窗口锁，platformStoreId={}, window=[{}-{}]",
+                    platformStoreId, windowStart, windowEnd);
+            throw new RedissonShutdownException("Redisson is shutdown");
+        }
+
+        RLock lock = getSyncWindowLock(platformStoreId, windowStart, windowEnd);
+        try {
+            boolean acquired = lock.tryLock(waitSeconds, leaseMinutes, TimeUnit.MINUTES);
+            if (acquired) {
+                log.info("【分布式锁】门店{}时间窗口[{}-{}]锁获取成功，租期{}分钟",
+                        platformStoreId, windowStart, windowEnd, leaseMinutes);
+            } else {
+                log.warn("【分布式锁】门店{}时间窗口[{}-{}]锁获取失败，窗口正在同步中",
+                        platformStoreId, windowStart, windowEnd);
+            }
+            return acquired;
+        } catch (RedissonShutdownException e) {
+            log.error("【分布式锁】Redisson 已关闭，无法获取时间窗口锁，platformStoreId={}, window=[{}-{}]",
+                    platformStoreId, windowStart, windowEnd);
+            throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("【分布式锁】门店{}时间窗口[{}-{}]获取锁被中断", platformStoreId, windowStart, windowEnd);
+            return false;
+        }
+    }
+
+    @Override
+    public void unlockSyncWindow(String platformStoreId, long windowStart, long windowEnd) {
+        RLock lock = getSyncWindowLock(platformStoreId, windowStart, windowEnd);
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
+            log.info("【分布式锁】门店{}时间窗口[{}-{}]锁释放成功", platformStoreId, windowStart, windowEnd);
+        } else {
+            log.warn("【分布式锁】门店{}时间窗口[{}-{}]锁未被当前线程持有，跳过释放",
+                    platformStoreId, windowStart, windowEnd);
+        }
+    }
+
+    @Override
     public void lockStoreGoodsFullSyncTask(String lockKey, int waitSeconds, int leaseMinutes) {
         RLock lock = getStoreGoodsFullSyncTaskLock(lockKey);
         boolean acquired = acquireLock(lock, waitSeconds, leaseMinutes, "门店商品全量同步任务", lockKey);
@@ -195,6 +237,11 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
     private RLock getOrderLock(String orderId) {
         return redissonClient.getLock(
                 String.format(EleLockKeyConstants.ORDER_ITEM_LOCK, orderId));
+    }
+
+    private RLock getSyncWindowLock(String platformStoreId, long windowStart, long windowEnd) {
+        return redissonClient.getLock(
+                String.format(EleLockKeyConstants.ORDER_SYNC_WINDOW_LOCK, platformStoreId, windowStart, windowEnd));
     }
 
     private RLock getStoreGoodsFullSyncTaskLock(String lockKey) {

@@ -45,7 +45,7 @@ public class EleOrderSyncController {
     @PostMapping("/sync-all")
     @Operation(summary = "手动触发全部门店并行订单同步")
     public CommonResult<Map<String, Object>> syncAllStores() {
-        List<StorePlatformRespVO> stores = storeService.getOpenPlatformStoresByPlatformCode(null);
+        List<StorePlatformRespVO> stores = storeService.getAllPlatformStoresByPlatformCode(null);
         if (stores == null || stores.isEmpty()) {
             return CommonResult.success(Map.of(
                     "message", "暂无需要同步的门店",
@@ -72,7 +72,7 @@ public class EleOrderSyncController {
     public CommonResult<Map<String, Object>> syncAllStoresByRange(
             @Parameter(description = "起始时间（秒级时间戳）", required = true) @RequestParam Long startTime,
             @Parameter(description = "结束时间（秒级时间戳）", required = true) @RequestParam Long endTime) {
-        List<StorePlatformRespVO> stores = storeService.getOpenPlatformStoresByPlatformCode(null);
+        List<StorePlatformRespVO> stores = storeService.getAllPlatformStoresByPlatformCode(null);
         if (stores == null || stores.isEmpty()) {
             return CommonResult.success(Map.of(
                     "message", "暂无需要同步的门店",
