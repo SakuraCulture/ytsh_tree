@@ -313,6 +313,64 @@ class SpuTableServiceImplTest extends BaseDbUnitTest {
         assertEquals(0L, pageResult.getTotal());
     }
 
+    @Test
+    void productSpecTemplate_shouldRoundTripJsonStringValues() {
+        spuTableMapper.insert(SpuTableDO.builder()
+                .productSpuId(2030L)
+                .productSpuCode("SPU-2030")
+                .productSpuName("SPU2030")
+                .productBrand("品牌A")
+                .categoryId(1L)
+                .productOrigin("中国")
+                .productManufacturer("厂商A")
+                .productSpecTemplate("标准规格")
+                .productSpuStatus(1)
+                .build());
+        spuTableMapper.insert(SpuTableDO.builder()
+                .productSpuId(2031L)
+                .productSpuCode("SPU-2031")
+                .productSpuName("SPU2031")
+                .productBrand("品牌A")
+                .categoryId(1L)
+                .productOrigin("中国")
+                .productManufacturer("厂商A")
+                .productSpecTemplate("123")
+                .productSpuStatus(1)
+                .build());
+        spuTableMapper.insert(SpuTableDO.builder()
+                .productSpuId(2032L)
+                .productSpuCode("SPU-2032")
+                .productSpuName("SPU2032")
+                .productBrand("品牌A")
+                .categoryId(1L)
+                .productOrigin("中国")
+                .productManufacturer("厂商A")
+                .productSpecTemplate("\"标准规格\"")
+                .productSpuStatus(1)
+                .build());
+        spuTableMapper.insert(SpuTableDO.builder()
+                .productSpuId(2033L)
+                .productSpuCode("SPU-2033")
+                .productSpuName("SPU2033")
+                .productBrand("品牌A")
+                .categoryId(1L)
+                .productOrigin("中国")
+                .productManufacturer("厂商A")
+                .productSpecTemplate("")
+                .productSpuStatus(1)
+                .build());
+
+        SpuTableDO textSpu = spuTableMapper.selectById(2030L);
+        SpuTableDO numericTextSpu = spuTableMapper.selectById(2031L);
+        SpuTableDO quotedTextSpu = spuTableMapper.selectById(2032L);
+        SpuTableDO emptyTextSpu = spuTableMapper.selectById(2033L);
+
+        assertEquals("标准规格", textSpu.getProductSpecTemplate());
+        assertEquals("123", numericTextSpu.getProductSpecTemplate());
+        assertEquals("\"标准规格\"", quotedTextSpu.getProductSpecTemplate());
+        assertEquals("", emptyTextSpu.getProductSpecTemplate());
+    }
+
     private Long createSpu(Long spuId) {
         spuTableMapper.insert(SpuTableDO.builder()
                 .productSpuId(spuId)

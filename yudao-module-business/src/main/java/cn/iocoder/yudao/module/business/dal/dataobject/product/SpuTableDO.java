@@ -1,18 +1,24 @@
 package cn.iocoder.yudao.module.business.dal.dataobject.product;
 
-import lombok.*;
-import java.util.*;
-import java.time.LocalDateTime;
-import java.time.LocalDateTime;
-import com.baomidou.mybatisplus.annotation.*;
 import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
+import cn.iocoder.yudao.module.business.dal.type.JsonStringTypeHandler;
+import com.baomidou.mybatisplus.annotation.KeySequence;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 /**
  * SPU基础分类 DO
  *
  * @author 芋道源码
  */
-@TableName("product_spu_table")
+@TableName(value = "product_spu_table", autoResultMap = true)
 @KeySequence("product_spu_table_seq") // 用于 Oracle、PostgreSQL、Kingbase、DB2、H2 数据库的主键自增。如果是 MySQL 等数据库，可不写。
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -54,6 +60,7 @@ public class SpuTableDO extends BaseDO {
     /**
      * 规格模板
      */
+    @TableField(typeHandler = JsonStringTypeHandler.class)
     private String productSpecTemplate;
     /**
      * 商品主图URL

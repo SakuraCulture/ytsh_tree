@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS `product_spu_table` (
     `category_id` bigint DEFAULT NULL,
     `product_origin` varchar(255) DEFAULT NULL,
     `product_manufacturer` varchar(255) DEFAULT NULL,
-    `product_spec_template` varchar(500) DEFAULT NULL,
+    `product_spec_template` json DEFAULT NULL,
     `product_image_url` varchar(500) DEFAULT NULL,
     `product_detail_images` clob DEFAULT NULL,
     `product_description` clob DEFAULT NULL,
