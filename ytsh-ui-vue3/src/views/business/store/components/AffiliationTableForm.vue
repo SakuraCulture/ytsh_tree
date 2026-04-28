@@ -24,6 +24,7 @@
 </template>
 <script setup lang="ts">
 import { TableApi } from '@/api/business/store'
+import { emptyToNull } from './formUtils'
 
 const props = defineProps<{
   storeId: number | string // 门店ID（主表的关联字段，支持String和Number类型）
@@ -70,7 +71,7 @@ const validate = () => {
 
 /** 表单值 */
 const getData = () => {
-  return formData.value
+  return emptyToNull(formData.value, ['businessMode', 'storeType'])
 }
 
 defineExpose({ validate, getData })

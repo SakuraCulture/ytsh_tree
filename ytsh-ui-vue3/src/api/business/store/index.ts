@@ -83,6 +83,11 @@ export interface Table {
           address: string; // 详细地址
           area: string; // 门店区域(EAST华东/NORTH华北/SOUTH华南/WEST华西/CENTRAL华中)
           storeStatus: number; // 状态(0停用1正常)
+          spaceTable?: SpaceTable | null
+          affiliationTable?: AffiliationTable | null
+          statusTable?: StatusTable | null
+          franchiseeTable?: FranchiseeTable | null
+          contactTables?: ContactTable[]
           spacetable?: SpaceTable
           affiliationtable?: AffiliationTable
           statustable?: StatusTable

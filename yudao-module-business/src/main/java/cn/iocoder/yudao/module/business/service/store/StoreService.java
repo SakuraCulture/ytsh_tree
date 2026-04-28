@@ -179,6 +179,14 @@ public interface StoreService {
      */
     PageResult<StoreDO> getStorePage(StorePageReqVO pageReqVO);
 
+    /**
+     * 获得导入同构的门店 Excel 导出列表。
+     *
+     * @param pageReqVO 分页查询
+     * @return 门店导入导出同构列表
+     */
+    List<StoreImportExcelVO> getStoreImportExcelList(StorePageReqVO pageReqVO);
+
     // ==================== 子表（门店空间） ====================
 
     /**
