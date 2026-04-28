@@ -14,7 +14,6 @@ import jakarta.servlet.http.*;
 import java.util.*;
 import java.io.IOException;
 
-import cn.iocoder.yudao.framework.common.pojo.PageParam;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
@@ -285,13 +284,8 @@ import org.springframework.web.multipart.MultipartFile;
     @ApiAccessLog(operateType = EXPORT)
     public void exportStoreExcel(@Valid StorePageReqVO pageReqVO,
               HttpServletResponse response) throws IOException {
-        pageReqVO.setPageSize(PageParam.PAGE_SIZE_NONE);
-        List<StoreDO> list = storeService.getStorePage(pageReqVO).getList();
-        List<StoreRespVO> respVOList = BeanUtils.toBean(list, StoreRespVO.class);
-        for (int i = 0; i < respVOList.size(); i++) {
-            convertRegionName(respVOList.get(i), list.get(i).getRegionCode());
-        }
-        ExcelUtils.write(response, "门店.xls", "数据", StoreRespVO.class, respVOList);
+        List<StoreImportExcelVO> list = storeService.getStoreImportExcelList(pageReqVO);
+        ExcelUtils.write(response, "门店.xls", "数据", StoreImportExcelVO.class, list);
     }
 
     // ==================== 子表（门店空间） ====================
@@ -460,20 +454,53 @@ import org.springframework.web.multipart.MultipartFile;
     public void importTemplate(@RequestParam(value = "format", required = false, defaultValue = "excel") String format,
                                HttpServletResponse response) throws IOException {
         List<StoreImportExcelVO> list = Arrays.asList(
-                StoreImportExcelVO.builder().storeId("S001").storeName("示例门店").regionCode("110000").address("示例地址").area("EAST").storeStatus(1).build()
+                StoreImportExcelVO.builder()
+                        .storeId("S001")
+                        .storeName("示例门店")
+                        .regionCode("110000")
+                        .address("示例地址")
+                        .area("EAST")
+                        .storeStatus(1)
+                        .buildingArea(new java.math.BigDecimal("120.00"))
+                        .coldStorageArea(new java.math.BigDecimal("0.00"))
+                        .businessMode("DIRECT")
+                        .storeType("O2O")
+                        .currentStatus("NORMAL")
+                        .openDate(java.time.LocalDate.of(2026, 4, 1))
+                        .signDate(java.time.LocalDate.of(2026, 3, 15))
+                        .franchiseeName("示例加盟商")
+                        .franchiseePhone("13800000000")
+                        .franchiseeFee(new java.math.BigDecimal("10000.00"))
+                        .securityDeposit(new java.math.BigDecimal("5000.00"))
+                        .contractStart(java.time.LocalDate.of(2026, 5, 1))
+                        .contractEnd(java.time.LocalDate.of(2027, 4, 30))
+                        .build()
         );
         if ("csv".equalsIgnoreCase(format)) {
             response.setContentType("text/csv;charset=UTF-8");
             response.setHeader("Content-Disposition", "attachment; filename=门店导入模板.csv");
             StringBuilder csvContent = new StringBuilder();
-            csvContent.append("门店编码,门店名称,行政区划,详细地址,门店区域,实体状态\n");
+            csvContent.append("门店编码,门店名称,行政区划代码,详细地址,门店区域,状态(0停用1正常),房屋面积(㎡),冷库面积(㎡),经营方式,门店类型,当前状态,开业日期,签约日期,加盟商名称,加盟联系方式,加盟费,保证金,合同开始日期,合同结束日期\n");
             for (StoreImportExcelVO item : list) {
                 csvContent.append(escapeCsv(item.getStoreId())).append(",")
                         .append(escapeCsv(item.getStoreName())).append(",")
                         .append(escapeCsv(item.getRegionCode())).append(",")
                         .append(escapeCsv(item.getAddress())).append(",")
                         .append(escapeCsv(item.getArea())).append(",")
-                        .append(item.getStoreStatus()).append("\n");
+                        .append(item.getStoreStatus()).append(",")
+                        .append(item.getBuildingArea()).append(",")
+                        .append(item.getColdStorageArea()).append(",")
+                        .append(escapeCsv(item.getBusinessMode())).append(",")
+                        .append(escapeCsv(item.getStoreType())).append(",")
+                        .append(escapeCsv(item.getCurrentStatus())).append(",")
+                        .append(item.getOpenDate()).append(",")
+                        .append(item.getSignDate()).append(",")
+                        .append(escapeCsv(item.getFranchiseeName())).append(",")
+                        .append(escapeCsv(item.getFranchiseePhone())).append(",")
+                        .append(item.getFranchiseeFee()).append(",")
+                        .append(item.getSecurityDeposit()).append(",")
+                        .append(item.getContractStart()).append(",")
+                        .append(item.getContractEnd()).append("\n");
             }
             response.getWriter().write("\uFEFF" + csvContent.toString());
         } else {

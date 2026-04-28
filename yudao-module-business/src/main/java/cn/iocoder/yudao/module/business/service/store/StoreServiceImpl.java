@@ -26,6 +26,7 @@ import cn.iocoder.yudao.module.business.dal.dataobject.store.FranchiseeTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.ContactTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.PlatformTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.PlatformDO;
+import cn.iocoder.yudao.framework.common.pojo.PageParam;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 
@@ -188,6 +189,45 @@ public class StoreServiceImpl implements StoreService {
         return storeMapper.selectPage(pageReqVO);
     }
 
+    @Override
+    public List<StoreImportExcelVO> getStoreImportExcelList(StorePageReqVO pageReqVO) {
+        StorePageReqVO exportReqVO = BeanUtils.toBean(pageReqVO, StorePageReqVO.class);
+        exportReqVO.setPageSize(PageParam.PAGE_SIZE_NONE);
+        List<StoreDO> stores = getStorePage(exportReqVO).getList();
+        if (CollUtil.isEmpty(stores)) {
+            return Collections.emptyList();
+        }
+        return stores.stream().map(store -> {
+            StoreImportExcelVO row = BeanUtils.toBean(store, StoreImportExcelVO.class);
+            SpaceTableDO space = spaceTableMapper.selectByStoreId(store.getStoreId());
+            if (space != null) {
+                row.setBuildingArea(space.getBuildingArea());
+                row.setColdStorageArea(space.getColdStorageArea());
+            }
+            AffiliationTableDO affiliation = affiliationTableMapper.selectByStoreId(store.getStoreId());
+            if (affiliation != null) {
+                row.setBusinessMode(affiliation.getBusinessMode());
+                row.setStoreType(affiliation.getStoreType());
+            }
+            BusinessStatusTableDO status = statusTableMapper.selectByStoreId(store.getStoreId());
+            if (status != null) {
+                row.setCurrentStatus(status.getCurrentStatus());
+                row.setOpenDate(status.getOpenDate());
+                row.setSignDate(status.getSignDate());
+            }
+            FranchiseeTableDO franchisee = franchiseeTableMapper.selectByStoreId(store.getStoreId());
+            if (franchisee != null) {
+                row.setFranchiseeName(franchisee.getFranchiseeName());
+                row.setFranchiseePhone(franchisee.getFranchiseePhone());
+                row.setFranchiseeFee(franchisee.getFranchiseeFee());
+                row.setSecurityDeposit(franchisee.getSecurityDeposit());
+                row.setContractStart(franchisee.getContractStart());
+                row.setContractEnd(franchisee.getContractEnd());
+            }
+            return row;
+        }).collect(Collectors.toList());
+    }
+
     // ==================== 子表（门店空间） ====================
 
     /**
@@ -221,6 +261,7 @@ public class StoreServiceImpl implements StoreService {
      */
     private void updateSpaceTable(String storeId, SpaceTableDO spaceTable) {
         if (spaceTable == null) {
+            deleteSpaceTableByStoreId(storeId);
             return;
         }
         // 【Why - 必须清除审计字段，否则 updateTime 不更新】
@@ -272,6 +313,7 @@ public class StoreServiceImpl implements StoreService {
      */
     private void updateAffiliationTable(String storeId, AffiliationTableDO affiliationTable) {
         if (affiliationTable == null) {
+            deleteAffiliationTableByStoreId(storeId);
             return;
         }
         // 【Why - 必须清除审计字段，否则 updateTime 不更新】
@@ -322,6 +364,7 @@ public class StoreServiceImpl implements StoreService {
      */
     private void updateStatusTable(String storeId, BusinessStatusTableDO statusTable) {
         if (statusTable == null) {
+            deleteStatusTableByStoreId(storeId);
             return;
         }
         // 【Why - 必须清除审计字段，否则 updateTime 不更新】
@@ -372,6 +415,7 @@ public class StoreServiceImpl implements StoreService {
      */
     private void updateFranchiseeTable(String storeId, FranchiseeTableDO franchiseeTable) {
         if (franchiseeTable == null) {
+            deleteFranchiseeTableByStoreId(storeId);
             return;
         }
         // 【Why - 必须清除审计字段，否则 updateTime 不更新】
@@ -409,6 +453,9 @@ public class StoreServiceImpl implements StoreService {
      * 【Why - .clean() 必要性】同上，清除审计字段
      */
     private void createContactTableList(String storeId, List<ContactTableDO> list) {
+        if (CollUtil.isEmpty(list)) {
+            return;
+        }
         list.forEach(o -> o.setStoreId(storeId).clean());
         contactTableMapper.insertBatch(list);
     }
@@ -439,6 +486,9 @@ public class StoreServiceImpl implements StoreService {
      * 建议改为 ObjectUtil.equal(oldVal.getContactId(), newVal.getContactId())
      */
     private void updateContactTableList(String storeId, List<ContactTableDO> list) {
+        if (list == null) {
+            return;
+        }
         // 【Why - 必须清除审计字段，否则 updateTime 不更新】
         list.forEach(o -> o.setStoreId(storeId).clean());
         List<ContactTableDO> oldList = contactTableMapper.selectListByStoreId(storeId);
@@ -648,7 +698,7 @@ public class StoreServiceImpl implements StoreService {
                         statusTableMapper.insert(status);
                     }
 
-                    if (importStore.getFranchiseeName() != null) {
+                    if (hasFranchiseeImportValue(importStore)) {
                         FranchiseeTableDO franchisee = BeanUtils.toBean(importStore, FranchiseeTableDO.class);
                         franchisee.setStoreId(store.getStoreId());
                         franchiseeTableMapper.insert(franchisee);
@@ -704,7 +754,7 @@ public class StoreServiceImpl implements StoreService {
                         }
                     }
 
-                    if (importStore.getFranchiseeName() != null) {
+                    if (hasFranchiseeImportValue(importStore)) {
                         FranchiseeTableDO existFranchisee = franchiseeTableMapper
                                 .selectByStoreId(existStore.getStoreId());
                         FranchiseeTableDO franchisee = BeanUtils.toBean(importStore, FranchiseeTableDO.class);
@@ -737,6 +787,12 @@ public class StoreServiceImpl implements StoreService {
         // 【同步缓存】导入完成后刷新 Redis
         storePlatformCacheService.syncStorePlatformInfoToRedis();
         return respVO;
+    }
+
+    private boolean hasFranchiseeImportValue(StoreImportExcelVO importStore) {
+        return importStore.getFranchiseeName() != null || importStore.getFranchiseePhone() != null
+                || importStore.getFranchiseeFee() != null || importStore.getSecurityDeposit() != null
+                || importStore.getContractStart() != null || importStore.getContractEnd() != null;
     }
 
     @Override
