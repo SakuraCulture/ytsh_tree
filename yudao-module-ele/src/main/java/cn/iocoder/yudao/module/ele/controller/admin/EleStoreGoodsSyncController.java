@@ -11,6 +11,7 @@ import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsSyncReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsTestModeRespVO;
 import cn.iocoder.yudao.module.ele.service.EleStoreGoodsSyncLogService;
 import cn.iocoder.yudao.module.ele.service.EleStoreGoodsSyncService;
+import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsPageSyncResult;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsQueryReqBO;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsSyncReqBO;
 import cn.iocoder.yudao.module.ele.service.dto.EleStoreGoodsQueryRespDTO;
@@ -60,8 +61,8 @@ public class EleStoreGoodsSyncController {
     @PostMapping("/query-sync")
     @Operation(summary = "查询并同步门店商品")
     @PreAuthorize("@ss.hasPermission('ele:order:sync')")
-    public CommonResult<Integer> queryAndSyncStoreGoods(@Valid @RequestBody EleStoreGoodsQueryReqVO reqVO,
-                                                        @RequestParam(defaultValue = "false") Boolean testMode) {
+    public CommonResult<EleStoreGoodsPageSyncResult> queryAndSyncStoreGoods(@Valid @RequestBody EleStoreGoodsQueryReqVO reqVO,
+                                                                            @RequestParam(defaultValue = "false") Boolean testMode) {
         EleStoreGoodsQueryReqBO reqBO = BeanUtils.toBean(reqVO, EleStoreGoodsQueryReqBO.class);
         return CommonResult.success(eleStoreGoodsSyncService.queryAndSyncStoreGoods(reqBO, testMode));
     }

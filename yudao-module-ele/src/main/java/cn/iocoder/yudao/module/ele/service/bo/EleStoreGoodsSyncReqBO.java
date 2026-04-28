@@ -25,11 +25,19 @@ public class EleStoreGoodsSyncReqBO {
 
     private String platformStoreId;
 
+    private String storeId;
+
     private String skuCode;
 
     private String subSkuCode;
 
     private String spuCode;
+
+    private String title;
+
+    private String mainPic;
+
+    private String specification;
 
     private String goodsLevel;
 

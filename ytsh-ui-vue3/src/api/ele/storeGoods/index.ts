@@ -117,6 +117,72 @@ export interface StoreGoodsGovernancePoolPageRespVO {
   total?: number
 }
 
+export interface StoreGoodsPageSyncResultVO {
+  pageNo?: number
+  pageSize?: number
+  total?: number
+  syncCount?: number
+  successCount?: number
+  failCount?: number
+  governanceCount?: number
+  shadowCount?: number
+}
+
+export interface StoreGoodsPreviewRowVO {
+  rowKey: string
+  title?: string
+  spuCode?: string
+  skuCode?: string
+  subSkuCode?: string
+  specification?: string
+  salePrice?: number
+  status?: number
+}
+
+export interface StoreGoodsShadowReqVO {
+  merchantCode?: string
+  erpStoreCode?: string
+  platformStoreId?: string
+  storeId?: string
+  skuCode?: string
+  title?: string
+  matchStatus?: string
+  pageNo?: number
+  pageSize?: number
+}
+
+export interface StoreGoodsShadowRespVO {
+  id?: number
+  platformId?: number
+  merchantCode?: string
+  erpStoreCode?: string
+  platformStoreId?: string
+  storeId?: string
+  spuCode?: string
+  skuCode?: string
+  subSkuCode?: string
+  title?: string
+  mainPic?: string
+  specification?: string
+  salePrice?: number
+  posStatus?: string
+  isActive?: number
+  matchStatus?: string
+  matchedProductSkuId?: string
+  mergedStoreProductId?: string
+  conflictReason?: string
+  rawPayload?: string
+  lastSyncTime?: string
+  matchedTime?: string
+  mergedTime?: string
+  createTime?: string
+}
+
+export interface StoreGoodsShadowPageRespVO {
+  list?: StoreGoodsShadowRespVO[]
+  total?: number
+}
+
 export interface StoreGoodsFullSyncCurrentReqVO {
   merchantCode: string
   erpStoreCode: string
@@ -210,7 +276,7 @@ export const queryStoreGoods = async (data: StoreGoodsQueryReqVO) => {
 }
 
 export const queryAndSyncStoreGoods = async (data: StoreGoodsQueryReqVO, testMode = false) => {
-  return await request.post<number>({
+  return await request.post<StoreGoodsPageSyncResultVO>({
     url: '/ele/store-goods/query-sync',
     data,
     params: { testMode }
@@ -249,6 +315,28 @@ export const markGovernancePoolIgnored = async (id: number) => {
   return await request.put<boolean>({ url: `/ele/store-goods/governance-pool/${id}/ignored` })
 }
 
+export const getShadowPage = async (params: StoreGoodsShadowReqVO) => {
+  return await request.get<StoreGoodsShadowPageRespVO>({
+    url: '/ele/store-goods/shadow/page',
+    params
+  })
+}
+
+export const getShadow = async (id: number) => {
+  return await request.get<StoreGoodsShadowRespVO>({ url: `/ele/store-goods/shadow/${id}` })
+}
+
+export const ignoreShadow = async (id: number) => {
+  return await request.put<boolean>({ url: `/ele/store-goods/shadow/${id}/ignored` })
+}
+
+export const mergeShadow = async (id: number, data: { matchedProductSkuId: string }) => {
+  return await request.put<boolean>({
+    url: `/ele/store-goods/shadow/${id}/merge`,
+    data
+  })
+}
+
 export const createCurrentStoreFullSync = async (data: StoreGoodsFullSyncCurrentReqVO) => {
   return await request.post<number>({ url: '/ele/store-goods/full-sync/current', data })
 }
@@ -261,21 +349,33 @@ export const getFullSyncTaskPage = async (params: StoreGoodsFullSyncTaskReqVO) =
   return await request.get<StoreGoodsFullSyncTaskPageRespVO>({ url: '/ele/store-goods/full-sync/page', params })
 }
 
-export const getFullSyncTask = async (id: number) => {
-  return await request.get<StoreGoodsFullSyncTaskRespVO>({ url: `/ele/store-goods/full-sync/${id}` })
+const normalizeFullSyncTaskId = (id: number | string | undefined) => {
+  const normalized = typeof id === 'number' ? id : Number(id)
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw new Error('任务ID无效，请刷新任务列表后重试')
+  }
+  return normalized
 }
 
-export const getFullSyncTaskStores = async (id: number, params: StoreGoodsFullSyncTaskStoreReqVO) => {
+export const getFullSyncTask = async (id: number | string) => {
+  const taskId = normalizeFullSyncTaskId(id)
+  return await request.get<StoreGoodsFullSyncTaskRespVO>({ url: `/ele/store-goods/full-sync/${taskId}` })
+}
+
+export const getFullSyncTaskStores = async (id: number | string, params: StoreGoodsFullSyncTaskStoreReqVO) => {
+  const taskId = normalizeFullSyncTaskId(id)
   return await request.get<StoreGoodsFullSyncTaskStorePageRespVO>({
-    url: `/ele/store-goods/full-sync/${id}/stores`,
+    url: `/ele/store-goods/full-sync/${taskId}/stores`,
     params
   })
 }
 
-export const cancelFullSyncTask = async (id: number) => {
-  return await request.post<boolean>({ url: `/ele/store-goods/full-sync/${id}/cancel` })
+export const cancelFullSyncTask = async (id: number | string) => {
+  const taskId = normalizeFullSyncTaskId(id)
+  return await request.post<boolean>({ url: `/ele/store-goods/full-sync/${taskId}/cancel` })
 }
 
-export const retryFailedFullSyncTask = async (id: number) => {
-  return await request.post<boolean>({ url: `/ele/store-goods/full-sync/${id}/retry-failed` })
+export const retryFailedFullSyncTask = async (id: number | string) => {
+  const taskId = normalizeFullSyncTaskId(id)
+  return await request.post<boolean>({ url: `/ele/store-goods/full-sync/${taskId}/retry-failed` })
 }

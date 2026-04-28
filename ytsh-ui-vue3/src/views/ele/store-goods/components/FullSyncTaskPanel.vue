@@ -16,7 +16,7 @@
           <el-button type="success" :loading="creatingAllOpen" @click="createAllOpenTask">
             所有开业门店同步
           </el-button>
-          <el-button @click="loadTasks">刷新</el-button>
+          <el-button @click="loadTasks()">刷新</el-button>
         </div>
       </div>
 
@@ -76,7 +76,7 @@
       />
     </div>
 
-    <el-dialog v-model="detailVisible" title="全量同步任务详情" width="920px" destroy-on-close>
+    <el-dialog v-model="detailVisible" title="全量同步任务详情" width="920px" destroy-on-close @closed="handleDetailClosed">
       <el-descriptions :column="2" border>
         <el-descriptions-item label="任务编号">{{ currentTask?.taskNo || '--' }}</el-descriptions-item>
         <el-descriptions-item label="范围">{{ formatScope(currentTask?.scope) }}</el-descriptions-item>
@@ -87,7 +87,10 @@
         <el-descriptions-item label="错误原因" :span="2">{{ currentTask?.errorMsg || '--' }}</el-descriptions-item>
       </el-descriptions>
 
-      <div class="detail-title">门店明细</div>
+      <div class="detail-title">
+        门店明细
+        <span v-if="currentTask && canCancel(currentTask.status)" class="detail-tip">执行中，明细会自动刷新</span>
+      </div>
       <el-table
         :data="storeList"
         v-loading="storeLoading"
@@ -130,11 +133,9 @@ import {
   getFullSyncTask,
   getFullSyncTaskPage,
   getFullSyncTaskStores,
-  type StoreGoodsFullSyncAllOpenReqVO,
   type StoreGoodsFullSyncCurrentReqVO,
   type StoreGoodsFullSyncTaskRespVO,
   type StoreGoodsFullSyncTaskStoreRespVO,
-  type StoreGoodsFullSyncTaskStoreReqVO,
   type StoreGoodsFullSyncTaskReqVO
 } from '@/api/ele/storeGoods'
 
@@ -147,7 +148,9 @@ const currentTask = ref<StoreGoodsFullSyncTaskRespVO>()
 const storeList = ref<StoreGoodsFullSyncTaskStoreRespVO[]>([])
 const detailVisible = ref(false)
 const storeLoading = ref(false)
-let pollTimer: ReturnType<typeof window.setTimeout> | undefined
+const currentDetailTaskId = ref<number>()
+let pollTimer: number | undefined
+let detailPollTimer: number | undefined
 
 const queryParams = reactive<StoreGoodsFullSyncTaskReqVO>({
   pageNo: 1,
@@ -163,6 +166,15 @@ const clearPollTimer = () => {
   }
 }
 
+const clearDetailPollTimer = () => {
+  if (detailPollTimer) {
+    window.clearTimeout(detailPollTimer)
+    detailPollTimer = undefined
+  }
+}
+
+const canCancel = (status?: string) => ['PENDING', 'RUNNING'].includes(status || '')
+
 const hasRunningTask = () => taskList.value.some((task) => canCancel(task.status))
 
 const schedulePolling = () => {
@@ -171,6 +183,16 @@ const schedulePolling = () => {
   pollTimer = window.setTimeout(() => {
     loadTasks(false)
   }, 5000)
+}
+
+const scheduleDetailPolling = () => {
+  clearDetailPollTimer()
+  if (!detailVisible.value || !currentTask.value || !canCancel(currentTask.value.status) || !currentDetailTaskId.value) {
+    return
+  }
+  detailPollTimer = window.setTimeout(() => {
+    refreshDetail(false)
+  }, 3000)
 }
 
 const loadTasks = async (showLoading = true) => {
@@ -198,6 +220,28 @@ const loadTasks = async (showLoading = true) => {
   } finally {
     if (showLoading) {
       loading.value = false
+    }
+  }
+}
+
+const refreshDetail = async (showLoading = true) => {
+  if (!currentDetailTaskId.value) return
+  if (showLoading) {
+    storeLoading.value = true
+  }
+  try {
+    currentTask.value = await getFullSyncTask(currentDetailTaskId.value)
+    const data = await getFullSyncTaskStores(currentDetailTaskId.value, { pageNo: 1, pageSize: 100 })
+    storeList.value = data?.list || []
+    scheduleDetailPolling()
+  } catch (error: any) {
+    clearDetailPollTimer()
+    if (showLoading) {
+      ElMessage.error(error?.message || '获取任务详情失败')
+    }
+  } finally {
+    if (showLoading) {
+      storeLoading.value = false
     }
   }
 }
@@ -259,36 +303,47 @@ const createAllOpenTask = async () => {
   }
 }
 
-const showDetail = async (id?: number) => {
-  if (!id) return
-  try {
-    currentTask.value = await getFullSyncTask(id)
-    storeLoading.value = true
-    const data = await getFullSyncTaskStores(id, { pageNo: 1, pageSize: 100 })
-    storeList.value = data?.list || []
-    detailVisible.value = true
-  } catch (error: any) {
-    ElMessage.error(error?.message || '获取任务详情失败')
-  } finally {
-    storeLoading.value = false
+const normalizeTaskId = (id?: number | string) => {
+  const normalized = typeof id === 'number' ? id : Number(id)
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    ElMessage.error('任务ID无效，请刷新任务列表后重试')
+    return undefined
   }
+  return normalized
 }
 
-const cancelTask = async (id?: number) => {
-  if (!id) return
+const showDetail = async (id?: number | string) => {
+  const taskId = normalizeTaskId(id)
+  if (!taskId) return
+  currentDetailTaskId.value = taskId
+  detailVisible.value = true
+  await refreshDetail(true)
+}
+
+const handleDetailClosed = () => {
+  clearDetailPollTimer()
+  currentDetailTaskId.value = undefined
+  currentTask.value = undefined
+  storeList.value = []
+}
+
+const cancelTask = async (id?: number | string) => {
+  const taskId = normalizeTaskId(id)
+  if (!taskId) return
   try {
     await ElMessageBox.confirm('确定取消该任务吗？', '确认取消', { type: 'warning' })
-    await cancelFullSyncTask(id)
+    await cancelFullSyncTask(taskId)
     ElMessage.success('已提交取消请求')
     await loadTasks()
+    if (currentDetailTaskId.value === taskId) {
+      await refreshDetail(true)
+    }
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(error?.message || '取消任务失败')
     }
   }
 }
-
-const canCancel = (status?: string) => ['PENDING', 'RUNNING'].includes(status || '')
 
 const formatScope = (scope?: string) => {
   if (scope === 'CURRENT_STORE') return '当前门店'
@@ -325,6 +380,11 @@ const formatTimestamp = (value?: string) => {
 
 onMounted(() => {
   loadTasks()
+})
+
+onUnmounted(() => {
+  clearPollTimer()
+  clearDetailPollTimer()
 })
 </script>
 
@@ -386,5 +446,14 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 700;
   color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-tip {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
 }
 </style>

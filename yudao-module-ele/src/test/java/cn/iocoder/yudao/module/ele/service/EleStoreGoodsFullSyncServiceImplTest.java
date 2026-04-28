@@ -9,17 +9,21 @@ import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsFullSyncTaskDO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsFullSyncTaskStoreDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsFullSyncTaskMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsFullSyncTaskStoreMapper;
+import cn.iocoder.yudao.module.ele.dal.redis.EleOrderLockService;
 import cn.iocoder.yudao.module.ele.service.executor.EleStoreGoodsFullSyncExecutor;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -38,6 +42,8 @@ class EleStoreGoodsFullSyncServiceImplTest extends BaseMockitoUnitTest {
     private StoreService storeService;
     @Mock
     private EleStoreGoodsFullSyncExecutor fullSyncExecutor;
+    @Mock
+    private EleOrderLockService eleOrderLockService;
 
     @Test
     void createCurrentStoreFullSync_shouldCreateTaskAndStoreThenSubmit() {
@@ -76,6 +82,65 @@ class EleStoreGoodsFullSyncServiceImplTest extends BaseMockitoUnitTest {
         assertEquals("STORE001", taskStore.getPlatformStoreId());
         assertEquals("PENDING", taskStore.getStatus());
         verify(fullSyncExecutor).submit(10L);
+        verify(eleOrderLockService).lockStoreGoodsFullSyncTask("CURRENT_STORE:STORE001", 5, 1);
+        verify(eleOrderLockService).unlockStoreGoodsFullSyncTask("CURRENT_STORE:STORE001");
+    }
+
+    @Test
+    void createCurrentStoreFullSync_shouldSubmitAfterTransactionCommit() {
+        EleStoreGoodsFullSyncCurrentReqVO reqVO = new EleStoreGoodsFullSyncCurrentReqVO();
+        reqVO.setMerchantCode("MERCHANT001");
+        reqVO.setErpStoreCode("STORE001");
+        when(taskMapper.selectRunningCurrentStore("STORE001")).thenReturn(null);
+        doAnswer(invocation -> {
+            EleStoreGoodsFullSyncTaskDO task = invocation.getArgument(0);
+            task.setId(10L);
+            return 1;
+        }).when(taskMapper).insert(any(EleStoreGoodsFullSyncTaskDO.class));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            Long taskId = fullSyncService.createCurrentStoreFullSync(reqVO);
+
+            assertEquals(10L, taskId);
+            verify(fullSyncExecutor, never()).submit(any());
+            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            assertEquals(1, synchronizations.size());
+
+            synchronizations.get(0).afterCommit();
+
+            verify(fullSyncExecutor).submit(10L);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void createCurrentStoreFullSync_shouldUnlockAfterTransactionCompletion() {
+        EleStoreGoodsFullSyncCurrentReqVO reqVO = new EleStoreGoodsFullSyncCurrentReqVO();
+        reqVO.setMerchantCode("MERCHANT001");
+        reqVO.setErpStoreCode("STORE001");
+        when(taskMapper.selectRunningCurrentStore("STORE001")).thenReturn(null);
+        doAnswer(invocation -> {
+            EleStoreGoodsFullSyncTaskDO task = invocation.getArgument(0);
+            task.setId(10L);
+            return 1;
+        }).when(taskMapper).insert(any(EleStoreGoodsFullSyncTaskDO.class));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            fullSyncService.createCurrentStoreFullSync(reqVO);
+
+            verify(eleOrderLockService, never()).unlockStoreGoodsFullSyncTask("CURRENT_STORE:STORE001");
+            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            assertEquals(1, synchronizations.size());
+
+            synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+
+            verify(eleOrderLockService).unlockStoreGoodsFullSyncTask("CURRENT_STORE:STORE001");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test
@@ -93,6 +158,8 @@ class EleStoreGoodsFullSyncServiceImplTest extends BaseMockitoUnitTest {
         verify(taskMapper, never()).insert(any(EleStoreGoodsFullSyncTaskDO.class));
         verify(taskStoreMapper, never()).insert(any(EleStoreGoodsFullSyncTaskStoreDO.class));
         verify(fullSyncExecutor, never()).submit(any());
+        verify(eleOrderLockService).lockStoreGoodsFullSyncTask("CURRENT_STORE:STORE001", 5, 1);
+        verify(eleOrderLockService).unlockStoreGoodsFullSyncTask("CURRENT_STORE:STORE001");
     }
 
     @Test
@@ -132,6 +199,21 @@ class EleStoreGoodsFullSyncServiceImplTest extends BaseMockitoUnitTest {
         assertEquals("STORE002", taskStores.get(1).getStoreId());
         assertEquals("ELE002", taskStores.get(1).getErpStoreCode());
         verify(fullSyncExecutor).submit(20L);
+        verify(eleOrderLockService).lockStoreGoodsFullSyncTask("ALL_OPEN_STORES", 5, 1);
+        verify(eleOrderLockService).unlockStoreGoodsFullSyncTask("ALL_OPEN_STORES");
+    }
+
+    @Test
+    void cancelTask_shouldCancelPendingStoresTogether() {
+        EleStoreGoodsFullSyncTaskDO task = new EleStoreGoodsFullSyncTaskDO();
+        task.setId(30L);
+        task.setStatus("RUNNING");
+        when(taskMapper.selectById(30L)).thenReturn(task);
+
+        fullSyncService.cancelTask(30L);
+
+        verify(taskMapper).updateById(any(EleStoreGoodsFullSyncTaskDO.class));
+        verify(taskStoreMapper).cancelPendingByTaskId(eq(30L), any());
     }
 
     private StorePlatformRespVO openStore(String storeId, String storeName, String platformStoreId, String settlementAccount) {

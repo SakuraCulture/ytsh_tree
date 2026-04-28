@@ -127,21 +127,30 @@
           <span class="summary-value">{{ queryResult?.page || 0 }}</span>
         </div>
         <div class="summary-item">
-          <span class="summary-label">总条数</span>
+          <span class="summary-label">商品总数</span>
           <span class="summary-value">{{ queryResult?.total || 0 }}</span>
         </div>
         <div class="summary-item">
-          <span class="summary-label">每页条数</span>
+          <span class="summary-label">每页商品数</span>
           <span class="summary-value">{{ queryResult?.pageSize || 0 }}</span>
         </div>
         <div class="summary-item">
-          <span class="summary-label">当前SKU数</span>
-          <span class="summary-value">{{ previewRows.length }}</span>
+          <span class="summary-label">当前页商品数</span>
+          <span class="summary-value">{{ currentGoodsCount }}</span>
         </div>
+        <div class="summary-item">
+          <span class="summary-label">当前页SKU数</span>
+          <span class="summary-value">{{ currentSkuCount }}</span>
+        </div>
+      </div>
+
+      <div class="result-tip">
+        分页口径按商品返回；下方表格按 SKU 展开，所以当前页 SKU 数可能大于“每页商品数”。
       </div>
 
       <el-table
         :data="previewRows"
+        :row-key="(row) => row.rowKey"
         v-loading="queryLoading"
         border
         stripe
@@ -297,6 +306,8 @@ import {
   getTestMode,
   queryAndSyncStoreGoods,
   queryStoreGoods,
+  type StoreGoodsPageSyncResultVO,
+  type StoreGoodsPreviewRowVO,
   type StoreGoodsQueryReqVO,
   type StoreGoodsQueryRespVO,
   type StoreGoodsSyncLogRespVO,
@@ -363,9 +374,10 @@ const buildQueryPayload = (): StoreGoodsQueryReqVO | null => {
   }
 }
 
-const previewRows = computed(() => {
-  return (queryResult.value?.goodsList || []).flatMap((goods) =>
-    (goods.skuList || []).map((sku) => ({
+const previewRows = computed<StoreGoodsPreviewRowVO[]>(() => {
+  return (queryResult.value?.goodsList || []).flatMap((goods, goodsIndex) =>
+    (goods.skuList || []).map((sku, skuIndex) => ({
+      rowKey: `${goods.spuCode || goodsIndex}-${sku.skuCode || sku.subSkuCode || skuIndex}`,
       title: goods.title,
       spuCode: goods.spuCode,
       skuCode: sku.skuCode,
@@ -376,6 +388,9 @@ const previewRows = computed(() => {
     }))
   )
 })
+
+const currentGoodsCount = computed(() => queryResult.value?.goodsList?.length || 0)
+const currentSkuCount = computed(() => previewRows.value.length)
 
 const loadStores = async () => {
   storeLoading.value = true
@@ -440,7 +455,9 @@ const handlePreview = async () => {
   queryLoading.value = true
   try {
     queryResult.value = await queryStoreGoods(payload)
-    ElMessage.success(`查询完成，当前返回 ${previewRows.value.length} 条 SKU`)
+    ElMessage.success(
+      `查询完成：当前页 ${currentGoodsCount.value} 个商品，展开后 ${currentSkuCount.value} 条 SKU`
+    )
   } catch (error: any) {
     ElMessage.error(error?.message || '查询商品失败')
   } finally {
@@ -468,8 +485,14 @@ const handleQueryAndSync = async () => {
 
   syncLoading.value = true
   try {
-    const count = await queryAndSyncStoreGoods(payload, syncInTestMode.value)
-    ElMessage.success(`同步提交完成，共处理 ${count || 0} 条 SKU`)
+    const res = (await queryAndSyncStoreGoods(payload, syncInTestMode.value)) as
+      | StoreGoodsPageSyncResultVO
+      | number
+    const syncCount = typeof res === 'number' ? res : res?.syncCount || 0
+    const shadowCount = typeof res === 'number' ? 0 : res?.shadowCount || 0
+    ElMessage.success(
+      `同步完成：本次按商品分页查询，处理 ${syncCount} 条 SKU，影子门店品 ${shadowCount} 条`
+    )
     await handlePreview()
     await loadLogs()
   } catch (error: any) {

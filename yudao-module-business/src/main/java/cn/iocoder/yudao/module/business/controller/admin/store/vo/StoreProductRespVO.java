@@ -37,6 +37,34 @@ public class StoreProductRespVO {
     @ExcelProperty("SKU名称")
     private String skuName;
 
+    @Schema(description = "行来源")
+    @ExcelProperty("行来源")
+    private String rowSource;
+
+    @Schema(description = "影子ID")
+    @ExcelProperty("影子ID")
+    private Long shadowId;
+
+    @Schema(description = "完整性状态")
+    @ExcelProperty("完整性状态")
+    private String completenessStatus;
+
+    @Schema(description = "匹配状态")
+    @ExcelProperty("匹配状态")
+    private String matchStatus;
+
+    @Schema(description = "平台门店ID")
+    @ExcelProperty("平台门店ID")
+    private String platformStoreId;
+
+    @Schema(description = "SPU编码")
+    @ExcelProperty("SPU编码")
+    private String spuCode;
+
+    @Schema(description = "规格")
+    @ExcelProperty("规格")
+    private String specification;
+
     @Schema(description = "商品归属")
     @ExcelProperty("商品归属")
     private String productAttribution;

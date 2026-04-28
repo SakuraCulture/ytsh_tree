@@ -48,11 +48,11 @@ public class ThreadPoolController {
     public CommonResult<List<ThreadPoolStatusRespVO>> getAllPoolStatus() {
         Map<String, ThreadPoolTaskExecutor> pools = threadPoolRegistry.getAllPools();
         List<ThreadPoolStatusRespVO> result = new ArrayList<>();
-        
+
         for (Map.Entry<String, ThreadPoolTaskExecutor> entry : pools.entrySet()) {
             result.add(buildStatusVO(entry.getKey(), entry.getValue()));
         }
-        
+
         return CommonResult.success(result);
     }
 
@@ -90,15 +90,15 @@ public class ThreadPoolController {
     public CommonResult<Map<String, Object>> healthCheck() {
         Map<String, ThreadPoolTaskExecutor> pools = threadPoolRegistry.getAllPools();
         Map<String, Object> healthResult = new LinkedHashMap<>();
-        
+
         int healthyCount = 0;
         int warningCount = 0;
         int criticalCount = 0;
-        
+
         for (Map.Entry<String, ThreadPoolTaskExecutor> entry : pools.entrySet()) {
             String status = checkHealth(entry.getKey(), entry.getValue());
             healthResult.put(entry.getKey(), status);
-            
+
             if (status.contains("HEALTHY")) {
                 healthyCount++;
             } else if (status.contains("CRITICAL")) {
@@ -107,7 +107,7 @@ public class ThreadPoolController {
                 warningCount++;
             }
         }
-        
+
         healthResult.put("_summary", Map.of(
                 "total", pools.size(),
                 "healthy", healthyCount,
@@ -115,14 +115,14 @@ public class ThreadPoolController {
                 "critical", criticalCount,
                 "overall", criticalCount > 0 ? "CRITICAL" : warningCount > 0 ? "WARNING" : "HEALTHY"
         ));
-        
+
         return CommonResult.success(healthResult);
     }
 
     private ThreadPoolStatusRespVO buildStatusVO(String poolName, ThreadPoolTaskExecutor executor) {
         ThreadPoolExecutor inner = executor.getThreadPoolExecutor();
         ThreadPoolStatusRespVO vo = new ThreadPoolStatusRespVO();
-        
+
         vo.setPoolName(poolName);
         vo.setCorePoolSize(executor.getCorePoolSize());
         vo.setMaxPoolSize(executor.getMaxPoolSize());
@@ -133,20 +133,20 @@ public class ThreadPoolController {
         vo.setCompletedTaskCount(inner.getCompletedTaskCount());
         vo.setTaskCount(inner.getTaskCount());
         vo.setRejectedPolicy(inner.getRejectedExecutionHandler().getClass().getSimpleName());
-        
+
         int queueCapacity = executor.getQueueCapacity();
         double queueUsage = queueCapacity > 0 ? (inner.getQueue().size() * 100.0 / queueCapacity) : 0;
         vo.setQueueUsagePercent(Math.round(queueUsage * 10.0) / 10.0);
-        
+
         int poolSize = inner.getPoolSize();
         double activePercent = poolSize > 0 ? (inner.getActiveCount() * 100.0 / poolSize) : 0;
         vo.setActivePercent(Math.round(activePercent * 10.0) / 10.0);
-        
+
         PoolAlarmConfig config = alarmConfigService.getAlarmConfig(poolName);
         String[] health = evaluateHealth(queueUsage, activePercent, config);
         vo.setHealthStatus(health[0]);
         vo.setHealthMessage(health[1]);
-        
+
         return vo;
     }
 
@@ -154,26 +154,25 @@ public class ThreadPoolController {
         if (!config.isEnabled()) {
             return new String[]{"HEALTHY", "报警已禁用"};
         }
-        
-        // 严重告警：队列积压且线程满载，说明处理能力不足
+
         boolean criticalByBoth = queueUsage >= 80 && activePercent >= 90;
         boolean criticalByQueue = queueUsage >= 95;
-        
+
         if (queueUsage >= config.getQueueThresholdPercent() || activePercent >= config.getActiveThresholdPercent()) {
             if (criticalByBoth || criticalByQueue) {
-                return new String[]{"CRITICAL", 
-                    String.format("队列使用%.0f%%(阈值%d%%), 活跃率%.0f%%(阈值%d%%)",
-                        queueUsage, config.getQueueThresholdPercent(),
-                        activePercent, config.getActiveThresholdPercent())};
+                return new String[]{"CRITICAL",
+                        String.format("队列使用%.0f%%(阈值%d%%), 活跃率%.0f%%(阈值%d%%)",
+                                queueUsage, config.getQueueThresholdPercent(),
+                                activePercent, config.getActiveThresholdPercent())};
             }
-            return new String[]{"WARNING", 
-                String.format("队列使用%.0f%%(阈值%d%%), 活跃率%.0f%%(阈值%d%%)",
-                    queueUsage, config.getQueueThresholdPercent(),
-                    activePercent, config.getActiveThresholdPercent())};
+            return new String[]{"WARNING",
+                    String.format("队列使用%.0f%%(阈值%d%%), 活跃率%.0f%%(阈值%d%%)",
+                            queueUsage, config.getQueueThresholdPercent(),
+                            activePercent, config.getActiveThresholdPercent())};
         }
-        
-        return new String[]{"HEALTHY", 
-            String.format("队列使用%.0f%%, 活跃率%.0f%%", queueUsage, activePercent)};
+
+        return new String[]{"HEALTHY",
+                String.format("队列使用%.0f%%, 活跃率%.0f%%", queueUsage, activePercent)};
     }
 
     private String checkHealth(String poolName, ThreadPoolTaskExecutor executor) {
@@ -181,7 +180,7 @@ public class ThreadPoolController {
         int queueCapacity = executor.getQueueCapacity();
         double queueUsage = queueCapacity > 0 ? (inner.getQueue().size() * 100.0 / queueCapacity) : 0;
         double activePercent = inner.getPoolSize() > 0 ? (inner.getActiveCount() * 100.0 / inner.getPoolSize()) : 0;
-        
+
         PoolAlarmConfig config = alarmConfigService.getAlarmConfig(poolName);
         String[] health = evaluateHealth(queueUsage, activePercent, config);
         return health[0] + ": " + health[1];
@@ -209,21 +208,31 @@ public class ThreadPoolController {
 
     @PostMapping("/pool/scale-up")
     @Operation(summary = "手动扩容线程池")
-    public CommonResult<Boolean> scaleUpPool(@RequestParam int targetCoreSize) {
+    public CommonResult<Boolean> scaleUpPool(
+            @RequestParam(defaultValue = "eleOrderSyncExecutor") String poolName,
+            @RequestParam int targetCoreSize) {
         if (targetCoreSize < 1 || targetCoreSize > 50) {
             return CommonResult.error(400, "核心线程数必须在1-50之间");
         }
-        adaptivePoolManager.scaleUp(targetCoreSize);
+        if (!"eleOrderSyncExecutor".equals(poolName) && !"eleStoreGoodsFullSyncExecutor".equals(poolName)) {
+            return CommonResult.error(400, "不支持的线程池: " + poolName);
+        }
+        adaptivePoolManager.scaleUp(poolName, targetCoreSize);
         return CommonResult.success(true);
     }
 
     @PostMapping("/pool/scale-down")
     @Operation(summary = "手动缩容线程池")
-    public CommonResult<Boolean> scaleDownPool(@RequestParam int targetCoreSize) {
+    public CommonResult<Boolean> scaleDownPool(
+            @RequestParam(defaultValue = "eleOrderSyncExecutor") String poolName,
+            @RequestParam int targetCoreSize) {
         if (targetCoreSize < 1 || targetCoreSize > 50) {
             return CommonResult.error(400, "核心线程数必须在1-50之间");
         }
-        adaptivePoolManager.scaleDown(targetCoreSize);
+        if (!"eleOrderSyncExecutor".equals(poolName) && !"eleStoreGoodsFullSyncExecutor".equals(poolName)) {
+            return CommonResult.error(400, "不支持的线程池: " + poolName);
+        }
+        adaptivePoolManager.scaleDown(poolName, targetCoreSize);
         return CommonResult.success(true);
     }
 }

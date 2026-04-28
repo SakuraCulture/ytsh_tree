@@ -8,6 +8,8 @@ public class EleLockKeyConstants {
 
     public static final String ORDER_ITEM_LOCK = "ele:order:item:lock:%s";
 
+    public static final String STORE_GOODS_FULL_SYNC_TASK_LOCK = "ele:store:goods:full-sync:task:lock:%s";
+
     private EleLockKeyConstants() {
     }
 }

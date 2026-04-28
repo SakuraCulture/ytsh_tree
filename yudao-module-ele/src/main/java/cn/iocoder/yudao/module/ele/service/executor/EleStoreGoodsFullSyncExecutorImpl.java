@@ -10,11 +10,17 @@ import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsPageSyncResult;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsQueryReqBO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
 @Component
@@ -25,6 +31,9 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_PARTIAL_FAIL = "PARTIAL_FAIL";
     private static final String STATUS_CANCELLED = "CANCELLED";
+    private static final long AGGREGATE_REFRESH_INTERVAL_MILLIS = 1000L;
+
+    private final ConcurrentMap<Long, Long> aggregateRefreshAtMap = new ConcurrentHashMap<>();
 
     @Resource
     private EleStoreGoodsFullSyncTaskMapper taskMapper;
@@ -32,6 +41,9 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
     private EleStoreGoodsFullSyncTaskStoreMapper taskStoreMapper;
     @Resource
     private EleStoreGoodsSyncService syncService;
+    @Resource
+    @Qualifier("eleStoreGoodsFullSyncExecutor")
+    private ThreadPoolTaskExecutor fullSyncExecutor;
 
     @Override
     @Async
@@ -53,16 +65,39 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         }
 
         updateTaskRunning(taskId);
-        TaskAggregate aggregate = new TaskAggregate();
+        forceRefreshTaskAggregate(taskId);
+        int initialMaxInFlight = resolveMaxInFlight();
+        List<CompletableFuture<Void>> inFlightFutures = new ArrayList<>(Math.min(taskStores.size(), initialMaxInFlight));
         for (EleStoreGoodsFullSyncTaskStoreDO taskStore : taskStores) {
             if (isCancelled(taskId)) {
-                return;
+                break;
             }
-            StoreSyncSummary storeSummary = syncStore(task, taskStore);
-            aggregate.add(storeSummary);
+            waitForAvailableSlot(inFlightFutures, resolveMaxInFlight());
+            try {
+                inFlightFutures.add(CompletableFuture.runAsync(() -> executeStoreTask(task, taskStore), fullSyncExecutor));
+            } catch (Exception ex) {
+                log.error("【饿了么门店商品全量同步】提交门店任务失败, taskId={}, storeId={}", taskId, taskStore.getStoreId(), ex);
+                StoreSyncSummary summary = new StoreSyncSummary();
+                summary.success = false;
+                summary.errorMsg = ex.getMessage();
+                finishStore(taskStore.getId(), STATUS_FAILED, ex.getMessage(), summary);
+                forceRefreshTaskAggregate(taskId);
+            }
         }
+        waitForAll(inFlightFutures);
         if (!isCancelled(taskId)) {
-            finishTask(taskId, aggregate);
+            finishTask(taskId);
+        } else {
+            forceRefreshTaskAggregate(taskId);
+        }
+        clearAggregateRefreshState(taskId);
+    }
+
+    private void executeStoreTask(EleStoreGoodsFullSyncTaskDO task, EleStoreGoodsFullSyncTaskStoreDO taskStore) {
+        try {
+            syncStore(task, taskStore);
+        } finally {
+            forceRefreshTaskAggregate(task.getId());
         }
     }
 
@@ -75,6 +110,7 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
             int totalPage = 1;
             do {
                 if (isCancelled(task.getId())) {
+                    finishStore(taskStore.getId(), STATUS_CANCELLED, null, summary);
                     return summary;
                 }
                 EleStoreGoodsQueryReqBO reqBO = new EleStoreGoodsQueryReqBO();
@@ -86,11 +122,12 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
                 totalPage = calculateTotalPage(pageResult.getTotal(), pageResult.getPageSize());
                 summary.totalPage = totalPage;
                 summary.finishedPage = pageNo;
-                summary.totalSkuCount = value(pageResult.getTotal());
+                summary.totalSkuCount += value(pageResult.getSyncCount());
                 summary.successCount += value(pageResult.getSuccessCount());
                 summary.failCount += value(pageResult.getFailCount());
                 summary.governanceCount += value(pageResult.getGovernanceCount());
                 updateStoreProgress(taskStore.getId(), pageNo, totalPage, pageSize, summary);
+                refreshTaskAggregateIfNeeded(task.getId());
                 pageNo++;
             } while (pageNo <= totalPage);
             finishStore(taskStore.getId(), STATUS_SUCCESS, null, summary);
@@ -107,6 +144,32 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         int normalizedPageSize = pageSize == null || pageSize < 1 ? 20 : pageSize;
         int normalizedTotal = total == null ? 0 : total;
         return Math.max(1, (normalizedTotal + normalizedPageSize - 1) / normalizedPageSize);
+    }
+
+    private int resolveMaxInFlight() {
+        int configuredMaxPoolSize = fullSyncExecutor.getMaxPoolSize();
+        if (configuredMaxPoolSize > 0) {
+            return configuredMaxPoolSize;
+        }
+        int configuredCorePoolSize = fullSyncExecutor.getCorePoolSize();
+        if (configuredCorePoolSize > 0) {
+            return configuredCorePoolSize;
+        }
+        return 1;
+    }
+
+    private void waitForAvailableSlot(List<CompletableFuture<Void>> inFlightFutures, int maxInFlight) {
+        while (inFlightFutures.size() >= maxInFlight) {
+            CompletableFuture.anyOf(inFlightFutures.toArray(new CompletableFuture[0])).join();
+            inFlightFutures.removeIf(CompletableFuture::isDone);
+        }
+    }
+
+    private void waitForAll(List<CompletableFuture<Void>> inFlightFutures) {
+        while (!inFlightFutures.isEmpty()) {
+            CompletableFuture.anyOf(inFlightFutures.toArray(new CompletableFuture[0])).join();
+            inFlightFutures.removeIf(CompletableFuture::isDone);
+        }
     }
 
     private boolean isCancelled(Long taskId) {
@@ -131,7 +194,8 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         taskMapper.updateById(updateObj);
     }
 
-    private void finishTask(Long taskId, TaskAggregate aggregate) {
+    private void finishTask(Long taskId) {
+        TaskAggregate aggregate = buildAggregate(taskId);
         EleStoreGoodsFullSyncTaskDO updateObj = new EleStoreGoodsFullSyncTaskDO();
         updateObj.setId(taskId);
         updateObj.setStatus(aggregate.failedStoreCount == 0 ? STATUS_SUCCESS : STATUS_PARTIAL_FAIL);
@@ -142,6 +206,7 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         updateObj.setSuccessCount(aggregate.successCount);
         updateObj.setFailCount(aggregate.failCount);
         updateObj.setGovernanceCount(aggregate.governanceCount);
+        updateObj.setErrorMsg(aggregate.joinedErrorMsg());
         updateObj.setFinishedAt(LocalDateTime.now());
         taskMapper.updateById(updateObj);
     }
@@ -182,6 +247,52 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         taskStoreMapper.updateById(updateObj);
     }
 
+    private void refreshTaskAggregate(Long taskId) {
+        TaskAggregate aggregate = buildAggregate(taskId);
+        EleStoreGoodsFullSyncTaskDO updateObj = new EleStoreGoodsFullSyncTaskDO();
+        updateObj.setId(taskId);
+        updateObj.setFinishedStoreCount(aggregate.finishedStoreCount);
+        updateObj.setTotalPageCount(aggregate.totalPageCount);
+        updateObj.setFinishedPageCount(aggregate.finishedPageCount);
+        updateObj.setTotalSkuCount(aggregate.totalSkuCount);
+        updateObj.setSuccessCount(aggregate.successCount);
+        updateObj.setFailCount(aggregate.failCount);
+        updateObj.setGovernanceCount(aggregate.governanceCount);
+        updateObj.setErrorMsg(aggregate.joinedErrorMsg());
+        taskMapper.updateById(updateObj);
+        aggregateRefreshAtMap.put(taskId, System.currentTimeMillis());
+    }
+
+    private void refreshTaskAggregateIfNeeded(Long taskId) {
+        Long lastRefreshAt = aggregateRefreshAtMap.get(taskId);
+        long now = System.currentTimeMillis();
+        if (lastRefreshAt != null && now - lastRefreshAt < AGGREGATE_REFRESH_INTERVAL_MILLIS) {
+            return;
+        }
+        forceRefreshTaskAggregate(taskId);
+    }
+
+    private void forceRefreshTaskAggregate(Long taskId) {
+        try {
+            refreshTaskAggregate(taskId);
+        } catch (Exception ex) {
+            log.warn("【饿了么门店商品全量同步】刷新任务聚合失败, taskId={}", taskId, ex);
+        }
+    }
+
+    private void clearAggregateRefreshState(Long taskId) {
+        aggregateRefreshAtMap.remove(taskId);
+    }
+
+    private TaskAggregate buildAggregate(Long taskId) {
+        List<EleStoreGoodsFullSyncTaskStoreDO> stores = taskStoreMapper.selectListByTaskId(taskId);
+        TaskAggregate aggregate = new TaskAggregate();
+        for (EleStoreGoodsFullSyncTaskStoreDO store : stores) {
+            aggregate.add(store);
+        }
+        return aggregate;
+    }
+
     private int value(Integer value) {
         return value == null ? 0 : value;
     }
@@ -206,18 +317,37 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         private int successCount;
         private int failCount;
         private int governanceCount;
+        private final List<String> errorMessages = new ArrayList<>();
 
-        private void add(StoreSyncSummary summary) {
-            finishedStoreCount++;
-            if (!summary.success) {
+        private void add(EleStoreGoodsFullSyncTaskStoreDO store) {
+            String status = store.getStatus();
+            if (STATUS_SUCCESS.equals(status) || STATUS_FAILED.equals(status) || STATUS_PARTIAL_FAIL.equals(status)
+                    || STATUS_CANCELLED.equals(status)) {
+                finishedStoreCount++;
+            }
+            if (STATUS_FAILED.equals(status) || STATUS_PARTIAL_FAIL.equals(status)) {
                 failedStoreCount++;
             }
-            totalPageCount += summary.totalPage;
-            finishedPageCount += summary.finishedPage;
-            totalSkuCount += summary.totalSkuCount;
-            successCount += summary.successCount;
-            failCount += summary.failCount;
-            governanceCount += summary.governanceCount;
+            totalPageCount += valueOf(store.getTotalPage());
+            finishedPageCount += valueOf(store.getCurrentPage());
+            totalSkuCount += valueOf(store.getTotalSkuCount());
+            successCount += valueOf(store.getSuccessCount());
+            failCount += valueOf(store.getFailCount());
+            governanceCount += valueOf(store.getGovernanceCount());
+            if (store.getErrorMsg() != null && !store.getErrorMsg().isBlank()) {
+                errorMessages.add(store.getStoreName() + ": " + store.getErrorMsg());
+            }
+        }
+
+        private String joinedErrorMsg() {
+            if (errorMessages.isEmpty()) {
+                return null;
+            }
+            return String.join(" | ", errorMessages);
+        }
+
+        private int valueOf(Integer value) {
+            return value == null ? 0 : value;
         }
     }
 }

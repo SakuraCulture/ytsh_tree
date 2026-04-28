@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.ele.controller.admin;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsGovernancePoolPageReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsGovernancePoolRespVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsGovernancePoolStatusReqVO;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/ele/store-goods/governance-pool")
 @Validated
+@TenantIgnore
 public class EleStoreGoodsGovernancePoolController {
 
     @Resource

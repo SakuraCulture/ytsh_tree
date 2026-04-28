@@ -23,23 +23,35 @@ public class EleOrderExecutorConfiguration {
             @Value("${ele.order.sync.pool.keep-alive-seconds:60}") int keepAliveSeconds,
             @Value("${ele.order.sync.shutdown.await-termination:true}") boolean awaitTermination,
             @Value("${ele.order.sync.shutdown.await-termination-seconds:60}") int awaitTerminationSeconds) {
+        return buildExecutor(coreSize, maxSize, queueCapacity, keepAliveSeconds, awaitTermination,
+                awaitTerminationSeconds, "ele-order-sync-");
+    }
 
+    @Bean(name = "eleStoreGoodsFullSyncExecutor", destroyMethod = "shutdown")
+    public ThreadPoolTaskExecutor eleStoreGoodsFullSyncExecutor(
+            @Value("${ele.store.goods.full-sync.pool.core-size:12}") int coreSize,
+            @Value("${ele.store.goods.full-sync.pool.max-size:24}") int maxSize,
+            @Value("${ele.store.goods.full-sync.pool.queue-capacity:0}") int queueCapacity,
+            @Value("${ele.store.goods.full-sync.pool.keep-alive-seconds:60}") int keepAliveSeconds,
+            @Value("${ele.store.goods.full-sync.shutdown.await-termination:true}") boolean awaitTermination,
+            @Value("${ele.store.goods.full-sync.shutdown.await-termination-seconds:120}") int awaitTerminationSeconds) {
+        return buildExecutor(coreSize, maxSize, queueCapacity, keepAliveSeconds, awaitTermination,
+                awaitTerminationSeconds, "ele-store-goods-full-sync-");
+    }
+
+    private ThreadPoolTaskExecutor buildExecutor(int coreSize, int maxSize, int queueCapacity,
+                                                 int keepAliveSeconds, boolean awaitTermination,
+                                                 int awaitTerminationSeconds, String threadNamePrefix) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-
         executor.setCorePoolSize(coreSize);
         executor.setMaxPoolSize(maxSize);
         executor.setQueueCapacity(queueCapacity);
         executor.setKeepAliveSeconds(keepAliveSeconds);
-
-        executor.setThreadNamePrefix("ele-order-sync-");
-
+        executor.setThreadNamePrefix(threadNamePrefix);
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-
         executor.setWaitForTasksToCompleteOnShutdown(awaitTermination);
         executor.setAwaitTerminationSeconds(awaitTerminationSeconds);
-
         executor.initialize();
         return executor;
     }
-
 }

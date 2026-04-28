@@ -11,7 +11,7 @@ public interface EleStoreGoodsSyncService {
 
     EleStoreGoodsQueryRespDTO queryStoreGoods(EleStoreGoodsQueryReqBO reqBO);
 
-    Integer queryAndSyncStoreGoods(EleStoreGoodsQueryReqBO reqBO, Boolean testMode);
+    EleStoreGoodsPageSyncResult queryAndSyncStoreGoods(EleStoreGoodsQueryReqBO reqBO, Boolean testMode);
 
     EleStoreGoodsPageSyncResult syncStoreGoodsPage(EleStoreGoodsQueryReqBO reqBO, Boolean testMode);
 }

@@ -1,6 +1,12 @@
 package cn.iocoder.yudao.module.ele.service;
 
+import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.test.core.ut.BaseMockitoUnitTest;
+import cn.iocoder.yudao.module.business.dal.dataobject.product.SkuTableDO;
+import cn.iocoder.yudao.module.business.dal.mysql.product.SkuTableMapper;
+import cn.iocoder.yudao.module.business.service.store.StoreProductSyncWriteService;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsShadowPageReqVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsShadowRespVO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsShadowDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsShadowMapper;
 import cn.iocoder.yudao.module.ele.enums.EleStoreGoodsShadowStatus;
@@ -13,6 +19,7 @@ import org.mockito.Mock;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -31,6 +38,10 @@ class EleStoreGoodsShadowServiceImplTest extends BaseMockitoUnitTest {
 
     @Mock
     private EleStoreGoodsShadowMapper shadowMapper;
+    @Mock
+    private SkuTableMapper skuTableMapper;
+    @Mock
+    private StoreProductSyncWriteService storeProductSyncWriteService;
 
     @Test
     void upsertFromSync_shouldInsertUnmatchedShadowWhenMissing() {
@@ -121,6 +132,7 @@ class EleStoreGoodsShadowServiceImplTest extends BaseMockitoUnitTest {
         shadow.setId(10L);
         shadow.setMatchStatus(EleStoreGoodsShadowStatus.UNMATCHED);
         when(shadowMapper.selectById(10L)).thenReturn(shadow);
+        when(shadowMapper.update(any(EleStoreGoodsShadowDO.class), any(Wrapper.class))).thenReturn(1);
 
         shadowService.markMerged(10L, " 1001 ", " SP0001 ");
 
@@ -131,6 +143,96 @@ class EleStoreGoodsShadowServiceImplTest extends BaseMockitoUnitTest {
     void markMerged_shouldRejectBlankFormalIds() {
         assertThrows(IllegalArgumentException.class, () -> shadowService.markMerged(10L, " ", "SP0001"));
         assertThrows(IllegalArgumentException.class, () -> shadowService.markMerged(10L, "1001", " "));
+        verify(shadowMapper, never()).update(any(EleStoreGoodsShadowDO.class), any(Wrapper.class));
+    }
+
+    @Test
+    void getShadowPage_shouldDelegateMapperPage() {
+        EleStoreGoodsShadowPageReqVO reqVO = new EleStoreGoodsShadowPageReqVO();
+        EleStoreGoodsShadowDO shadow = new EleStoreGoodsShadowDO();
+        shadow.setId(41L);
+        when(shadowMapper.selectPage(any(EleStoreGoodsShadowPageReqVO.class))).thenReturn(new PageResult<>(List.of(shadow), 1L));
+
+        PageResult<EleStoreGoodsShadowRespVO> result = shadowService.getShadowPage(reqVO);
+
+        assertEquals(1L, result.getTotal());
+        assertEquals(41L, result.getList().get(0).getId());
+    }
+
+    @Test
+    void getShadow_shouldReturnMappedResp() {
+        EleStoreGoodsShadowDO shadow = new EleStoreGoodsShadowDO();
+        shadow.setId(42L);
+        shadow.setSkuCode("SKU042");
+        when(shadowMapper.selectById(42L)).thenReturn(shadow);
+
+        EleStoreGoodsShadowRespVO result = shadowService.getShadow(42L);
+
+        assertEquals(42L, result.getId());
+        assertEquals("SKU042", result.getSkuCode());
+    }
+
+    @Test
+    void ignore_shouldMarkShadowIgnored() {
+        EleStoreGoodsShadowDO shadow = new EleStoreGoodsShadowDO();
+        shadow.setId(11L);
+        shadow.setMatchStatus(EleStoreGoodsShadowStatus.UNMATCHED);
+        when(shadowMapper.selectById(11L)).thenReturn(shadow);
+        when(shadowMapper.update(any(EleStoreGoodsShadowDO.class), any(Wrapper.class))).thenReturn(1);
+
+        shadowService.ignore(11L);
+
+        verify(shadowMapper).update(any(EleStoreGoodsShadowDO.class), any(Wrapper.class));
+    }
+
+    @Test
+    void mergeManually_shouldUpsertFormalAndMarkMerged() {
+        EleStoreGoodsShadowDO shadow = new EleStoreGoodsShadowDO();
+        shadow.setId(12L);
+        shadow.setStoreId("STORE001");
+        shadow.setSkuCode("SKU001");
+        shadow.setPosStatus("上架");
+        shadow.setIsActive(1);
+        shadow.setSalePrice(new BigDecimal("19.90"));
+        shadow.setMatchStatus(EleStoreGoodsShadowStatus.UNMATCHED);
+        when(shadowMapper.selectById(12L)).thenReturn(shadow);
+        when(shadowMapper.update(any(EleStoreGoodsShadowDO.class), any(Wrapper.class))).thenReturn(1);
+        SkuTableDO sku = new SkuTableDO();
+        sku.setProductSkuId(1001L);
+        when(skuTableMapper.selectById(1001L)).thenReturn(sku);
+        when(storeProductSyncWriteService.upsertStoreProduct(any())).thenReturn("SP0001");
+
+        shadowService.mergeManually(12L, "1001");
+
+        verify(storeProductSyncWriteService).upsertStoreProduct(any());
+        verify(shadowMapper).update(any(EleStoreGoodsShadowDO.class), any(Wrapper.class));
+    }
+
+    @Test
+    void mergeManually_shouldRejectMissingSku() {
+        EleStoreGoodsShadowDO shadow = new EleStoreGoodsShadowDO();
+        shadow.setId(13L);
+        shadow.setMatchStatus(EleStoreGoodsShadowStatus.UNMATCHED);
+        when(shadowMapper.selectById(13L)).thenReturn(shadow);
+        when(skuTableMapper.selectById(1002L)).thenReturn(null);
+
+        assertThrows(IllegalArgumentException.class, () -> shadowService.mergeManually(13L, "1002"));
+        verify(storeProductSyncWriteService, never()).upsertStoreProduct(any());
+    }
+
+    @Test
+    void mergeManually_shouldNotMarkShadowWhenFormalUpsertFails() {
+        EleStoreGoodsShadowDO shadow = new EleStoreGoodsShadowDO();
+        shadow.setId(14L);
+        shadow.setStoreId("STORE001");
+        shadow.setMatchStatus(EleStoreGoodsShadowStatus.UNMATCHED);
+        when(shadowMapper.selectById(14L)).thenReturn(shadow);
+        SkuTableDO sku = new SkuTableDO();
+        sku.setProductSkuId(1003L);
+        when(skuTableMapper.selectById(1003L)).thenReturn(sku);
+        when(storeProductSyncWriteService.upsertStoreProduct(any())).thenThrow(new RuntimeException("boom"));
+
+        assertThrows(RuntimeException.class, () -> shadowService.mergeManually(14L, "1003"));
         verify(shadowMapper, never()).update(any(EleStoreGoodsShadowDO.class), any(Wrapper.class));
     }
 

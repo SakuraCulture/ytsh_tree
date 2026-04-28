@@ -21,10 +21,17 @@ export interface StoreProductStockRespVO {
 
 /** 门店商品列表信息 */
 export interface StoreProductTable {
-  storeProductId: number | string
+  storeProductId?: number | string
+  shadowId?: number
+  rowSource?: string
+  completenessStatus?: string
+  matchStatus?: string
+  platformStoreId?: string
+  spuCode?: string
+  specification?: string
   storeId: string
   storeName?: string
-  productSkuId: string
+  productSkuId?: string
   skuCode?: string
   skuName?: string
   productAttribution?: string

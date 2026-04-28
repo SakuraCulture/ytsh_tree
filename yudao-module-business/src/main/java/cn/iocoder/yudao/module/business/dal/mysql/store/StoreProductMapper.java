@@ -18,7 +18,25 @@ import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductPa
 public interface StoreProductMapper extends BaseMapperX<StoreProductDO> {
 
     default PageResult<StoreProductDO> selectPage(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
-        return selectPage(reqVO, new LambdaQueryWrapperX<StoreProductDO>()
+        return selectPage(reqVO, buildPageQuery(reqVO, productSkuIds));
+    }
+
+    default long selectCountForPage(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
+        return selectCount(buildPageQuery(reqVO, productSkuIds));
+    }
+
+    default List<StoreProductDO> selectListForPage(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
+        return selectList(buildPageQuery(reqVO, productSkuIds));
+    }
+
+    default List<StoreProductDO> selectListForPage(StoreProductPageReqVO reqVO, List<String> productSkuIds,
+                                                   int offset, int limit) {
+        return selectList(buildPageQuery(reqVO, productSkuIds)
+                .last("LIMIT " + offset + ", " + limit));
+    }
+
+    private LambdaQueryWrapperX<StoreProductDO> buildPageQuery(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
+        return new LambdaQueryWrapperX<StoreProductDO>()
                 .likeIfPresent(StoreProductDO::getStoreProductId, reqVO.getStoreProductId())
                 .eqIfPresent(StoreProductDO::getStoreId, reqVO.getStoreId())
                 .inIfPresent(StoreProductDO::getProductSkuId, productSkuIds)
@@ -27,7 +45,7 @@ public interface StoreProductMapper extends BaseMapperX<StoreProductDO> {
                         reqVO.getPosStatus() == null ? null : String.valueOf(reqVO.getPosStatus()))
                 .eqIfPresent(StoreProductDO::getStoreProductIsActive, reqVO.getEnterShopStatus())
                 .betweenIfPresent(StoreProductDO::getCreateTime, reqVO.getCreateTime())
-                .orderByDesc(StoreProductDO::getStoreProductId));
+                .orderByDesc(StoreProductDO::getStoreProductId);
     }
 
     default StoreProductDO selectByStoreIdAndProductSkuIdAndOwnership(String storeId, String productSkuId, String ownership) {

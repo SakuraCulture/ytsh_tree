@@ -161,7 +161,7 @@
 
   <ContentWrap>
     <el-table
-      row-key="storeProductId"
+      :row-key="getRowKey"
       v-loading="loading"
       :data="list"
       :stripe="true"
@@ -169,12 +169,13 @@
       @selection-change="handleRowCheckboxChange"
       @expand-change="handleExpandChange"
     >
-      <el-table-column type="selection" width="55" />
+      <el-table-column type="selection" width="55" :selectable="isSelectableRow" />
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div class="expand-content">
+          <div v-if="canExpandRow(row)" class="expand-content">
             <StockExpandCard :store-product-id="row.storeProductId" />
           </div>
+          <div v-else class="expand-placeholder">影子商品暂无库存明细</div>
         </template>
       </el-table-column>
       <el-table-column label="门店名称" align="center" prop="storeName" min-width="150" />
@@ -214,24 +215,27 @@
         :formatter="dateFormatter"
         width="180"
       />
-      <el-table-column label="操作" align="center" fixed="right" width="120">
+      <el-table-column label="操作" align="center" fixed="right" width="180">
         <template #default="scope">
-          <el-button
-            link
-            type="primary"
-            @click="openForm('update', scope.row.storeProductId, scope.row)"
-            v-hasPermi="['business:store-product:update']"
-          >
-            编辑
-          </el-button>
-          <el-button
-            link
-            type="danger"
-            @click="handleDelete(scope.row.storeProductId)"
-            v-hasPermi="['business:store-product:delete']"
-          >
-            删除
-          </el-button>
+          <template v-if="isFormalRow(scope.row)">
+            <el-button
+              link
+              type="primary"
+              @click="openForm('update', scope.row.storeProductId, scope.row)"
+              v-hasPermi="['business:store-product:update']"
+            >
+              编辑
+            </el-button>
+            <el-button
+              link
+              type="danger"
+              @click="handleDelete(scope.row.storeProductId!)"
+              v-hasPermi="['business:store-product:delete']"
+            >
+              删除
+            </el-button>
+          </template>
+          <span v-else class="shadow-operation-tip">影子商品请前往治理池处理</span>
         </template>
       </el-table-column>
     </el-table>
@@ -341,12 +345,29 @@ const handleDeleteBatch = async () => {
   } catch {}
 }
 
-const checkedIds = ref<number[] | string[]>([])
-const handleRowCheckboxChange = (records: StoreProductTable[]) => {
-  checkedIds.value = records.map((item) => item.storeProductId!)
+const isShadowRow = (row: StoreProductTable) => row.rowSource === 'SHADOW' || !!row.shadowId
+const isFormalRow = (row: StoreProductTable) => !isShadowRow(row)
+const canExpandRow = (row: StoreProductTable) => isFormalRow(row) && !!row.storeProductId
+const isSelectableRow = (row: StoreProductTable) => isFormalRow(row) && !!row.storeProductId
+const getRowKey = (row: StoreProductTable) => {
+  if (row.storeProductId) {
+    return `formal-${row.storeProductId}`
+  }
+  if (row.shadowId) {
+    return `shadow-${row.shadowId}`
+  }
+  return `fallback-${row.storeId || ''}-${row.skuCode || ''}-${row.createTime || ''}`
 }
 
-const handleExpandChange = (row: any, expandedRows: any[]) => {
+const checkedIds = ref<number[] | string[]>([])
+const handleRowCheckboxChange = (records: StoreProductTable[]) => {
+  checkedIds.value = records.filter(isFormalRow).map((item) => item.storeProductId!)
+}
+
+const handleExpandChange = (row: StoreProductTable) => {
+  if (!canExpandRow(row)) {
+    return
+  }
 }
 
 const handleExport = async () => {
@@ -480,5 +501,15 @@ onMounted(() => {
 
 .expand-content {
   padding: 16px;
+}
+
+.expand-placeholder {
+  padding: 16px;
+  color: #909399;
+}
+
+.shadow-operation-tip {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

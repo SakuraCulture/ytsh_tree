@@ -12,8 +12,10 @@ import cn.iocoder.yudao.module.ele.dal.dataobject.EleApiConfig;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsGovernancePoolDO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsSyncLogDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleApiConfigMapper;
+import cn.iocoder.yudao.module.ele.enums.EleStoreGoodsShadowStatus;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsPageSyncResult;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsQueryReqBO;
+import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsShadowUpsertReqBO;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsSyncReqBO;
 import cn.iocoder.yudao.module.ele.service.client.EleOpenApiClient;
 import cn.iocoder.yudao.module.ele.service.dto.EleStoreGoodsQueryRespDTO;
@@ -30,12 +32,15 @@ import lib.ele.retail.param.SaasGoodsStoreQueryBatchResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -72,11 +77,18 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
     private EleApiConfigMapper eleApiConfigMapper;
     @Resource
     private EleOpenApiClient eleOpenApiClient;
+    @Resource
+    private EleStoreGoodsShadowService shadowService;
+    @Resource
+    private TransactionTemplate transactionTemplate;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void syncStoreGoods(EleStoreGoodsSyncReqBO reqBO) {
-        doSyncStoreGoods(reqBO);
+        SyncOutcome outcome = doSyncStoreGoods(reqBO);
+        if (!outcome.success()) {
+            throw new RuntimeException("skuCode未匹配本地SKU: " + StrUtil.trim(reqBO.getSkuCode()));
+        }
     }
 
     @Override
@@ -115,8 +127,8 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
     }
 
     @Override
-    public Integer queryAndSyncStoreGoods(EleStoreGoodsQueryReqBO reqBO, Boolean testMode) {
-        return syncStoreGoodsPage(reqBO, testMode).getSyncCount();
+    public EleStoreGoodsPageSyncResult queryAndSyncStoreGoods(EleStoreGoodsQueryReqBO reqBO, Boolean testMode) {
+        return syncStoreGoodsPage(reqBO, testMode);
     }
 
     @Override
@@ -130,6 +142,7 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         result.setSuccessCount(0);
         result.setFailCount(0);
         result.setGovernanceCount(0);
+        result.setShadowCount(0);
         if (queryResp == null || CollUtil.isEmpty(queryResp.getGoodsList())) {
             return result;
         }
@@ -140,13 +153,20 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
             }
             for (EleStoreGoodsQueryRespDTO.SkuItem skuItem : goodsItem.getSkuList()) {
                 EleStoreGoodsSyncReqBO syncReqBO = buildSyncReq(reqBO, queryResp, goodsItem, skuItem, testMode);
-                boolean success = doSyncStoreGoods(syncReqBO);
                 result.setSyncCount(result.getSyncCount() + 1);
-                if (success) {
-                    result.setSuccessCount(result.getSuccessCount() + 1);
-                } else {
+                try {
+                    SyncOutcome outcome = executeSyncInTransaction(syncReqBO);
+                    if (outcome.success()) {
+                        result.setSuccessCount(result.getSuccessCount() + 1);
+                    } else if (outcome.shadowed()) {
+                        result.setShadowCount(result.getShadowCount() + 1);
+                        result.setGovernanceCount(result.getGovernanceCount() + 1);
+                    } else {
+                        result.setFailCount(result.getFailCount() + 1);
+                    }
+                } catch (RuntimeException ex) {
+                    log.warn("[Ele商品同步] 分页同步失败，skuCode={}, err={}", syncReqBO.getSkuCode(), ex.getMessage(), ex);
                     result.setFailCount(result.getFailCount() + 1);
-                    result.setGovernanceCount(result.getGovernanceCount() + 1);
                 }
             }
         }
@@ -160,11 +180,15 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         syncReqBO.setApiCode(STORE_GOODS_QUERY_BATCH_API_CODE);
         syncReqBO.setApiName(STORE_GOODS_QUERY_BATCH_API_NAME);
         syncReqBO.setMerchantCode(StrUtil.blankToDefault(goodsItem.getMerchantCode(), queryResp.getMerchantCode()));
-        syncReqBO.setErpStoreCode(StrUtil.blankToDefault(goodsItem.getStoreCode(), queryResp.getStoreCode()));
-        syncReqBO.setPlatformStoreId(syncReqBO.getErpStoreCode());
+        syncReqBO.setErpStoreCode(StrUtil.trim(reqBO.getErpStoreCode()));
+        syncReqBO.setPlatformStoreId(null);
+        syncReqBO.setStoreId(StrUtil.blankToDefault(goodsItem.getStoreCode(), queryResp.getStoreCode()));
         syncReqBO.setSpuCode(goodsItem.getSpuCode());
+        syncReqBO.setTitle(goodsItem.getTitle());
+        syncReqBO.setMainPic(goodsItem.getMainPic());
         syncReqBO.setSkuCode(skuItem.getSkuCode());
         syncReqBO.setSubSkuCode(skuItem.getSubSkuCode());
+        syncReqBO.setSpecification(skuItem.getSpecification());
         syncReqBO.setGoodsLevel(DEFAULT_GOODS_LEVEL);
         syncReqBO.setOperationType(resolveOperationType(skuItem.getStatus()));
         syncReqBO.setStoreProductIsActive(resolveStoreProductIsActive(skuItem.getStatus()));
@@ -180,9 +204,15 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         return syncReqBO;
     }
 
-    private boolean doSyncStoreGoods(EleStoreGoodsSyncReqBO reqBO) {
+    private SyncOutcome executeSyncInTransaction(EleStoreGoodsSyncReqBO reqBO) {
+        return transactionTemplate.execute(status -> doSyncStoreGoods(reqBO));
+    }
+
+    private SyncOutcome doSyncStoreGoods(EleStoreGoodsSyncReqBO reqBO) {
         String merchantCode = StrUtil.trim(reqBO.getMerchantCode());
         String erpStoreCode = resolveErpStoreCode(reqBO);
+        String platformStoreId = StrUtil.trim(reqBO.getPlatformStoreId());
+        String storeId = StrUtil.trim(reqBO.getStoreId());
         String skuCode = StrUtil.trim(reqBO.getSkuCode());
         boolean testMode = Boolean.TRUE.equals(reqBO.getTestMode());
 
@@ -197,27 +227,29 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         }
         validateTestMode(testMode);
 
-        List<StorePlatformRespVO> stores = storeService.getPlatformTableListByPlatformStoreId(ELE_PLATFORM_ID, erpStoreCode);
+        List<StorePlatformRespVO> stores = resolveStores(platformStoreId, storeId);
         if (CollUtil.isEmpty(stores)) {
-            writeFailureLog(reqBO, null, "STORE_NOT_FOUND", appendTestMode(testMode, "未找到门店映射: " + erpStoreCode));
-            throw new RuntimeException("未找到门店映射: " + erpStoreCode);
+            String missingStoreKey = StrUtil.isNotBlank(platformStoreId) ? platformStoreId : storeId;
+            writeFailureLog(reqBO, null, "STORE_NOT_FOUND", appendTestMode(testMode, "未找到门店映射: " + missingStoreKey));
+            throw new RuntimeException("未找到门店映射: " + missingStoreKey);
         }
 
         SkuTableDO sku = skuTableMapper.selectByProductSkuCode(skuCode);
         if (sku == null) {
             for (StorePlatformRespVO store : stores) {
+                shadowService.upsertFromSync(buildShadowReq(reqBO, store), EleStoreGoodsShadowStatus.UNMATCHED, null, null);
                 createGovernanceRecord(reqBO, store, testMode);
                 writeFailureLog(reqBO, store, GOVERNANCE_REASON_SKU_NOT_FOUND,
-                        appendTestMode(testMode, "skuCode未匹配本地SKU: " + skuCode));
+                        appendTestMode(testMode, "skuCode未匹配本地SKU，已写入影子门店品: " + skuCode));
             }
-            return false;
+            return SyncOutcome.shadowedResult();
         }
 
         for (StorePlatformRespVO store : stores) {
             upsertStoreProduct(reqBO, store, sku, testMode);
             writeSuccessLog(reqBO, store, testMode);
         }
-        return true;
+        return SyncOutcome.successResult();
     }
 
     private EleStoreGoodsQueryRespDTO convertQueryResult(BizResultWrapper<SaasGoodsStoreQueryBatchResult> wrapper,
@@ -272,7 +304,7 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         return respDTO;
     }
 
-    private void upsertStoreProduct(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, SkuTableDO sku, boolean testMode) {
+    private String upsertStoreProduct(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, SkuTableDO sku, boolean testMode) {
         StoreProductSyncUpsertReqBO upsertReqBO = new StoreProductSyncUpsertReqBO();
         upsertReqBO.setStoreId(store.getStoreId());
         upsertReqBO.setProductSkuId(String.valueOf(sku.getProductSkuId()));
@@ -287,9 +319,32 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
             upsertReqBO.setStoreProductIsActive(reqBO.getStoreProductIsActive() == null ? 1 : reqBO.getStoreProductIsActive());
             upsertReqBO.setStoreProductPosStatus(reqBO.getStoreProductPosStatus());
         }
-        storeProductSyncWriteService.upsertStoreProduct(upsertReqBO);
+        String storeProductId = storeProductSyncWriteService.upsertStoreProduct(upsertReqBO);
+        shadowService.upsertFromSync(buildShadowReq(reqBO, store), EleStoreGoodsShadowStatus.MERGED,
+                String.valueOf(sku.getProductSkuId()), storeProductId);
         log.info("[Ele商品同步] storeId={}, platformStoreId={}, skuCode={}, operationType={}, testMode={}",
                 store.getStoreId(), store.getPlatformStoreId(), reqBO.getSkuCode(), reqBO.getOperationType(), testMode);
+        return storeProductId;
+    }
+
+    private EleStoreGoodsShadowUpsertReqBO buildShadowReq(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store) {
+        EleStoreGoodsShadowUpsertReqBO shadowReqBO = new EleStoreGoodsShadowUpsertReqBO();
+        shadowReqBO.setPlatformId(ELE_PLATFORM_ID);
+        shadowReqBO.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
+        shadowReqBO.setErpStoreCode(resolveErpStoreCode(reqBO));
+        shadowReqBO.setPlatformStoreId(store == null ? StrUtil.trim(reqBO.getPlatformStoreId()) : store.getPlatformStoreId());
+        shadowReqBO.setStoreId(store == null ? null : store.getStoreId());
+        shadowReqBO.setSpuCode(StrUtil.trim(reqBO.getSpuCode()));
+        shadowReqBO.setSkuCode(StrUtil.trim(reqBO.getSkuCode()));
+        shadowReqBO.setSubSkuCode(StrUtil.trim(reqBO.getSubSkuCode()));
+        shadowReqBO.setTitle(StrUtil.trim(reqBO.getTitle()));
+        shadowReqBO.setMainPic(StrUtil.trim(reqBO.getMainPic()));
+        shadowReqBO.setSpecification(StrUtil.trim(reqBO.getSpecification()));
+        shadowReqBO.setSalePrice(reqBO.getStoreProductPrice());
+        shadowReqBO.setPosStatus(reqBO.getStoreProductPosStatus());
+        shadowReqBO.setIsActive(reqBO.getStoreProductIsActive());
+        shadowReqBO.setRawPayload(StrUtil.blankToDefault(reqBO.getRawPayload(), reqBO.getResponseBody()));
+        return shadowReqBO;
     }
 
     private void createGovernanceRecord(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, boolean testMode) {
@@ -387,6 +442,22 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         return Math.min(pageSize, 20);
     }
 
+    private List<StorePlatformRespVO> resolveStores(String platformStoreId, String storeId) {
+        if (StrUtil.isNotBlank(platformStoreId)) {
+            List<StorePlatformRespVO> stores = storeService.getPlatformTableListByPlatformStoreId(ELE_PLATFORM_ID, platformStoreId);
+            if (CollUtil.isNotEmpty(stores)) {
+                return stores;
+            }
+        }
+        if (StrUtil.isBlank(storeId)) {
+            return Collections.emptyList();
+        }
+        return storeService.getPlatformTableListByStoreId(storeId).stream()
+                .filter(store -> Objects.equals(store.getPlatformId(), ELE_PLATFORM_ID))
+                .filter(store -> store.getStatus() != null && store.getStatus() == 1)
+                .toList();
+    }
+
     private String resolveErpStoreCode(EleStoreGoodsSyncReqBO reqBO) {
         String erpStoreCode = StrUtil.trim(reqBO.getErpStoreCode());
         if (StrUtil.isNotBlank(erpStoreCode)) {
@@ -413,5 +484,16 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
 
     private String appendTestMode(boolean testMode, String message) {
         return testMode ? TEST_MODE_MARK + " " + message : message;
+    }
+
+    private record SyncOutcome(boolean success, boolean shadowed) {
+
+        static SyncOutcome successResult() {
+            return new SyncOutcome(true, false);
+        }
+
+        static SyncOutcome shadowedResult() {
+            return new SyncOutcome(false, true);
+        }
     }
 }

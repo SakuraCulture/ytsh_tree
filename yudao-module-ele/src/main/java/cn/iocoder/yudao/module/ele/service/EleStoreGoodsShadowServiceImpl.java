@@ -1,6 +1,14 @@
 package cn.iocoder.yudao.module.ele.service;
 
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
+import cn.iocoder.yudao.module.business.dal.dataobject.product.SkuTableDO;
+import cn.iocoder.yudao.module.business.dal.mysql.product.SkuTableMapper;
+import cn.iocoder.yudao.module.business.service.store.StoreProductSyncWriteService;
+import cn.iocoder.yudao.module.business.service.store.bo.StoreProductSyncUpsertReqBO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsShadowPageReqVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsShadowRespVO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsShadowDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsShadowMapper;
 import cn.iocoder.yudao.module.ele.enums.EleStoreGoodsShadowStatus;
@@ -11,21 +19,35 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 @Service
 public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowService {
 
+    private static final Long ELE_PLATFORM_ID = 1L;
+    private static final String OPERATION_DELETE = "DELETE";
+    private static final String DEFAULT_POS_STATUS_OFF_SHELF = "下架";
+    private static final String DEFAULT_OWNERSHIP = "入店";
     private static final Set<String> MATCH_STATUSES = Set.of(
             EleStoreGoodsShadowStatus.UNMATCHED,
             EleStoreGoodsShadowStatus.MATCHED,
             EleStoreGoodsShadowStatus.MERGED,
             EleStoreGoodsShadowStatus.CONFLICT,
             EleStoreGoodsShadowStatus.IGNORED);
+    private static final Set<String> ACTIVE_MATCH_STATUSES = Set.of(
+            EleStoreGoodsShadowStatus.UNMATCHED,
+            EleStoreGoodsShadowStatus.MATCHED,
+            EleStoreGoodsShadowStatus.CONFLICT);
 
     @Resource
     private EleStoreGoodsShadowMapper shadowMapper;
+    @Resource
+    private SkuTableMapper skuTableMapper;
+    @Resource
+    private StoreProductSyncWriteService storeProductSyncWriteService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -62,13 +84,62 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
             throw new IllegalArgumentException("影子门店品不存在");
         }
         LocalDateTime now = LocalDateTime.now();
-        shadowMapper.update(new EleStoreGoodsShadowDO(), new UpdateWrapper<EleStoreGoodsShadowDO>()
+        int updated = shadowMapper.update(new EleStoreGoodsShadowDO(), new UpdateWrapper<EleStoreGoodsShadowDO>()
                 .eq("id", shadowId)
+                .eq("match_status", exist.getMatchStatus())
                 .set("match_status", EleStoreGoodsShadowStatus.MERGED)
                 .set("matched_product_sku_id", StrUtil.trim(matchedProductSkuId))
                 .set("merged_store_product_id", StrUtil.trim(mergedStoreProductId))
                 .set("matched_time", now)
                 .set("merged_time", now));
+        if (updated != 1) {
+            throw new IllegalStateException("影子门店品状态已变化，请刷新后重试");
+        }
+    }
+
+    @Override
+    public PageResult<EleStoreGoodsShadowRespVO> getShadowPage(EleStoreGoodsShadowPageReqVO reqVO) {
+        return BeanUtils.toBean(shadowMapper.selectPage(reqVO), EleStoreGoodsShadowRespVO.class);
+    }
+
+    @Override
+    public EleStoreGoodsShadowRespVO getShadow(Long id) {
+        return BeanUtils.toBean(getRequiredShadow(id), EleStoreGoodsShadowRespVO.class);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void ignore(Long id) {
+        EleStoreGoodsShadowDO exist = getRequiredShadow(id);
+        if (EleStoreGoodsShadowStatus.MERGED.equals(exist.getMatchStatus())) {
+            throw new IllegalArgumentException("已归并影子门店品不允许忽略");
+        }
+        int updated = shadowMapper.update(new EleStoreGoodsShadowDO(), new UpdateWrapper<EleStoreGoodsShadowDO>()
+                .eq("id", id)
+                .eq("match_status", exist.getMatchStatus())
+                .set("match_status", EleStoreGoodsShadowStatus.IGNORED));
+        if (updated != 1) {
+            throw new IllegalStateException("影子门店品状态已变化，请刷新后重试");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void mergeManually(Long id, String matchedProductSkuId) {
+        EleStoreGoodsShadowDO shadow = getRequiredShadow(id);
+        if (!ACTIVE_MATCH_STATUSES.contains(shadow.getMatchStatus())) {
+            throw new IllegalArgumentException("当前影子门店品状态不允许归并");
+        }
+        if (StrUtil.isBlank(matchedProductSkuId)) {
+            throw new IllegalArgumentException("匹配SKU ID不能为空");
+        }
+        Long skuId = parseSkuId(matchedProductSkuId);
+        SkuTableDO sku = skuTableMapper.selectById(skuId);
+        if (sku == null) {
+            throw new IllegalArgumentException("匹配SKU不存在");
+        }
+        String storeProductId = storeProductSyncWriteService.upsertStoreProduct(buildUpsertReq(shadow, sku));
+        markMerged(id, String.valueOf(sku.getProductSkuId()), storeProductId);
     }
 
     private EleStoreGoodsShadowDO insertOrRetryUpdate(EleStoreGoodsShadowUpsertReqBO reqBO, String matchStatus,
@@ -185,6 +256,56 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
             row.setMergedTime(now);
         } else if (StrUtil.isNotBlank(matchedProductSkuId)) {
             row.setMatchedTime(now);
+        }
+    }
+
+    private EleStoreGoodsShadowDO getRequiredShadow(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("影子门店品ID不能为空");
+        }
+        EleStoreGoodsShadowDO shadow = shadowMapper.selectById(id);
+        if (shadow == null) {
+            throw new IllegalArgumentException("影子门店品不存在");
+        }
+        return shadow;
+    }
+
+    private StoreProductSyncUpsertReqBO buildUpsertReq(EleStoreGoodsShadowDO shadow, SkuTableDO sku) {
+        StoreProductSyncUpsertReqBO reqBO = new StoreProductSyncUpsertReqBO();
+        reqBO.setStoreId(StrUtil.trim(shadow.getStoreId()));
+        reqBO.setProductSkuId(String.valueOf(sku.getProductSkuId()));
+        reqBO.setStoreProductOwnership(DEFAULT_OWNERSHIP);
+        reqBO.setStoreProductPrice(shadow.getSalePrice());
+        reqBO.setStoreProductFirstDate(LocalDate.now());
+        reqBO.setStoreProductShelfTime(LocalDateTime.now());
+        if (OPERATION_DELETE.equalsIgnoreCase(StrUtil.blankToDefault(resolveOperationType(shadow.getRawPayload()), ""))) {
+            reqBO.setStoreProductIsActive(0);
+            reqBO.setStoreProductPosStatus(DEFAULT_POS_STATUS_OFF_SHELF);
+        } else {
+            reqBO.setStoreProductIsActive(shadow.getIsActive() == null ? 1 : shadow.getIsActive());
+            reqBO.setStoreProductPosStatus(shadow.getPosStatus());
+        }
+        return reqBO;
+    }
+
+    private String resolveOperationType(String rawPayload) {
+        if (StrUtil.isBlank(rawPayload)) {
+            return null;
+        }
+        if (rawPayload.contains("operationType=DELETE") || rawPayload.contains("\"operationType\":\"DELETE\"")) {
+            return OPERATION_DELETE;
+        }
+        if (rawPayload.contains("operationType=UPDATE") || rawPayload.contains("\"operationType\":\"UPDATE\"")) {
+            return "UPDATE";
+        }
+        return null;
+    }
+
+    private Long parseSkuId(String matchedProductSkuId) {
+        try {
+            return Long.valueOf(StrUtil.trim(matchedProductSkuId));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("匹配SKU ID格式不正确", ex);
         }
     }
 }

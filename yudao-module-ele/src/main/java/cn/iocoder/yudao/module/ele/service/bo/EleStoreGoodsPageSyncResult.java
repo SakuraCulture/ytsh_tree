@@ -12,4 +12,5 @@ public class EleStoreGoodsPageSyncResult {
     private Integer successCount;
     private Integer failCount;
     private Integer governanceCount;
+    private Integer shadowCount;
 }

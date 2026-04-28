@@ -33,6 +33,15 @@ public class StoreProductPageReqVO extends PageParam {
     @Schema(description = "POS状态")
     private Integer posStatus;
 
+    @Schema(description = "行来源")
+    private String rowSource;
+
+    @Schema(description = "完整性状态")
+    private String completenessStatus;
+
+    @Schema(description = "匹配状态")
+    private String matchStatus;
+
     @Schema(description = "入店状态(0否1是)", example = "1")
     private Integer enterShopStatus;
 

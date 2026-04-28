@@ -42,7 +42,7 @@ import { StoreProductStockRespVO } from '@/api/business/store-product'
 defineOptions({ name: 'StockExpandCard' })
 
 const props = defineProps<{
-  storeProductId: number | string
+  storeProductId?: number | string
 }>()
 
 const stockData = ref<StoreProductStockRespVO | null>(null)

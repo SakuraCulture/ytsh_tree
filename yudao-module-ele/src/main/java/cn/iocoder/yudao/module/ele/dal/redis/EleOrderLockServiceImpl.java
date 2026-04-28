@@ -134,7 +134,7 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
             log.error("【分布式锁】Redisson 已关闭，无法获取订单锁，orderId={}", orderId);
             throw new RedissonShutdownException("Redisson is shutdown");
         }
-        
+
         RLock lock = getOrderLock(orderId);
         try {
             boolean acquired = lock.tryLock(waitSeconds, TimeUnit.SECONDS);
@@ -151,6 +151,25 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
             Thread.currentThread().interrupt();
             log.warn("【分布式锁】订单{}获取锁被中断", orderId);
             return false;
+        }
+    }
+
+    @Override
+    public void lockStoreGoodsFullSyncTask(String lockKey, int waitSeconds, int leaseMinutes) {
+        RLock lock = getStoreGoodsFullSyncTaskLock(lockKey);
+        boolean acquired = acquireLock(lock, waitSeconds, leaseMinutes, "门店商品全量同步任务", lockKey);
+        if (!acquired) {
+            throw new RuntimeException("门店商品全量同步任务正在创建中: " + lockKey);
+        }
+        log.info("【分布式锁】门店商品全量同步任务{}锁获取成功", lockKey);
+    }
+
+    @Override
+    public void unlockStoreGoodsFullSyncTask(String lockKey) {
+        RLock lock = getStoreGoodsFullSyncTaskLock(lockKey);
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
+            log.info("【分布式锁】门店商品全量同步任务{}锁释放成功", lockKey);
         }
     }
 
@@ -176,5 +195,10 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
     private RLock getOrderLock(String orderId) {
         return redissonClient.getLock(
                 String.format(EleLockKeyConstants.ORDER_ITEM_LOCK, orderId));
+    }
+
+    private RLock getStoreGoodsFullSyncTaskLock(String lockKey) {
+        return redissonClient.getLock(
+                String.format(EleLockKeyConstants.STORE_GOODS_FULL_SYNC_TASK_LOCK, lockKey));
     }
 }

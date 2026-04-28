@@ -68,21 +68,21 @@
       <artifactId>ocean.client.java.biz</artifactId>
       <version>1.0.0</version>
       <scope>system</scope>
-      <systemPath>C:\Users\ytsh01\Desktop\ant_dev\yudao-module-ele/src/main/resources/lib/ocean.client.java.biz.jar</systemPath>
+      <systemPath>C:\Users\ytsh01\Desktop\ant_dev\.claude\worktrees\ele-store-goods-shadow-sync\yudao-module-ele/src/main/resources/lib/ocean.client.java.biz.jar</systemPath>
     </dependency>
     <dependency>
       <groupId>com.alibaba</groupId>
       <artifactId>fastjson</artifactId>
       <version>1.2.48</version>
       <scope>system</scope>
-      <systemPath>C:\Users\ytsh01\Desktop\ant_dev\yudao-module-ele/src/main/resources/lib/fastjson-1.2.48.jar</systemPath>
+      <systemPath>C:\Users\ytsh01\Desktop\ant_dev\.claude\worktrees\ele-store-goods-shadow-sync\yudao-module-ele/src/main/resources/lib/fastjson-1.2.48.jar</systemPath>
     </dependency>
     <dependency>
       <groupId>commons-logging</groupId>
       <artifactId>commons-logging</artifactId>
       <version>1.1.1</version>
       <scope>system</scope>
-      <systemPath>C:\Users\ytsh01\Desktop\ant_dev\yudao-module-ele/src/main/resources/lib/commons-logging-1.1.1.jar</systemPath>
+      <systemPath>C:\Users\ytsh01\Desktop\ant_dev\.claude\worktrees\ele-store-goods-shadow-sync\yudao-module-ele/src/main/resources/lib/commons-logging-1.1.1.jar</systemPath>
     </dependency>
   </dependencies>
   <repositories>

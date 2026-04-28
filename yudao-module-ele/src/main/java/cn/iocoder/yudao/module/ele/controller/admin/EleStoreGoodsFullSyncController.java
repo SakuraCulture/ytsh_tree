@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.ele.controller.admin;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsFullSyncAllOpenReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsFullSyncCurrentReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsFullSyncTaskPageReqVO;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/ele/store-goods/full-sync")
 @Validated
+@TenantIgnore
 public class EleStoreGoodsFullSyncController {
 
     @Resource

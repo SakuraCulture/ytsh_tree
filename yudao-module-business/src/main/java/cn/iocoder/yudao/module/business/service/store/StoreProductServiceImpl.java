@@ -24,6 +24,7 @@ import cn.iocoder.yudao.module.business.dal.mysql.store.StoreProductMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.StoreStockMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.StoreMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.product.SkuTableMapper;
+import cn.iocoder.yudao.module.business.service.store.bo.StoreProductShadowRowBO;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
@@ -84,6 +85,8 @@ public class StoreProductServiceImpl implements StoreProductService {
     private StoreMapper storeMapper;
     @Resource
     private SkuTableMapper skuTableMapper;
+    @Resource
+    private StoreProductShadowQueryService shadowQueryService;
 
     /**
      * 入店归属常量
@@ -286,26 +289,41 @@ public class StoreProductServiceImpl implements StoreProductService {
     @Override
     public PageResult<StoreProductRespVO> getStoreProductPage(StoreProductPageReqVO pageReqVO) {
         List<String> productSkuIds = getProductSkuIds(pageReqVO);
-        if (hasSkuFilter(pageReqVO) && CollUtil.isEmpty(productSkuIds)) {
-            return new PageResult<>(Collections.emptyList(), 0L);
+        boolean formalOnly = "FORMAL".equalsIgnoreCase(pageReqVO.getRowSource());
+        boolean shadowOnly = "SHADOW".equalsIgnoreCase(pageReqVO.getRowSource())
+                || "MASTER_MISSING".equalsIgnoreCase(pageReqVO.getCompletenessStatus());
+
+        boolean formalSkuFilterMiss = hasSkuFilter(pageReqVO) && CollUtil.isEmpty(productSkuIds);
+        if (formalOnly && formalSkuFilterMiss) {
+            return PageResult.empty();
         }
 
-        PageResult<StoreProductDO> pageResult = storeProductMapper.selectPage(pageReqVO, productSkuIds);
-        if (CollUtil.isEmpty(pageResult.getList())) {
-            return new PageResult<>(Collections.emptyList(), pageResult.getTotal());
+        if (formalOnly) {
+            PageResult<StoreProductDO> formalPage = storeProductMapper.selectPage(pageReqVO, productSkuIds);
+            return new PageResult<>(buildFormalRows(formalPage.getList()), formalPage.getTotal());
         }
 
-        // 批量查询关联数据，避免 N+1 问题
-        Map<String, StoreDO> storeMap = getStoreMap(pageResult.getList().stream()
-                .map(StoreProductDO::getStoreId)
-                .collect(Collectors.toSet()));
-        Map<String, SkuTableDO> skuMap = getSkuMap(pageResult.getList().stream()
-                .map(StoreProductDO::getProductSkuId)
-                .collect(Collectors.toSet()));
-        List<StoreProductRespVO> respList = pageResult.getList().stream()
-                .map(item -> buildRespVO(item, storeMap, skuMap))
-                .collect(Collectors.toList());
-        return new PageResult<>(respList, pageResult.getTotal());
+        int pageSize = getPageSize(pageReqVO);
+        int offset = getPageOffset(pageReqVO, pageSize);
+        if (shadowOnly) {
+            long shadowTotal = shadowQueryService.countActiveShadowRows(pageReqVO, false);
+            List<StoreProductRespVO> shadowRows = buildShadowRows(pageReqVO, false, offset, pageSize);
+            return new PageResult<>(shadowRows, shadowTotal);
+        }
+
+        long formalTotal = formalSkuFilterMiss ? 0L : storeProductMapper.selectCountForPage(pageReqVO, productSkuIds);
+        long shadowTotal = shadowQueryService.countActiveShadowRows(pageReqVO, true);
+        List<StoreProductRespVO> mergedRows = new ArrayList<>(pageSize);
+        if (!formalSkuFilterMiss && offset < formalTotal) {
+            int formalLimit = Math.min(pageSize, (int) (formalTotal - offset));
+            mergedRows.addAll(buildFormalRows(storeProductMapper.selectListForPage(pageReqVO, productSkuIds, offset, formalLimit)));
+        }
+        int remaining = pageSize - mergedRows.size();
+        if (remaining > 0) {
+            int shadowOffset = Math.max(0, offset - (int) formalTotal);
+            mergedRows.addAll(buildShadowRows(pageReqVO, true, shadowOffset, remaining));
+        }
+        return new PageResult<>(mergedRows, formalTotal + shadowTotal);
     }
 
     /**
@@ -552,6 +570,9 @@ public class StoreProductServiceImpl implements StoreProductService {
         respVO.setEnterShopStatus(storeProduct.getStoreProductIsActive());
         respVO.setFirstEnterShopDate(storeProduct.getStoreProductFirstDate());
         respVO.setCreateTime(storeProduct.getCreateTime());
+        respVO.setRowSource("FORMAL");
+        respVO.setCompletenessStatus("COMPLETE");
+        respVO.setMatchStatus("MERGED");
 
         // 填充门店信息
         StoreDO store = storeMap.get(storeProduct.getStoreId());
@@ -564,6 +585,78 @@ public class StoreProductServiceImpl implements StoreProductService {
         if (sku != null) {
             respVO.setSkuCode(sku.getProductSkuCode());
             respVO.setSkuName(sku.getProductSkuName());
+        }
+        return respVO;
+    }
+
+    private List<StoreProductRespVO> buildFormalRows(StoreProductPageReqVO pageReqVO, List<String> productSkuIds) {
+        return buildFormalRows(storeProductMapper.selectListForPage(pageReqVO, productSkuIds));
+    }
+
+    private List<StoreProductRespVO> buildFormalRows(List<StoreProductDO> formalList) {
+        if (CollUtil.isEmpty(formalList)) {
+            return Collections.emptyList();
+        }
+        Map<String, StoreDO> storeMap = getStoreMap(formalList.stream()
+                .map(StoreProductDO::getStoreId)
+                .collect(Collectors.toSet()));
+        Map<String, SkuTableDO> skuMap = getSkuMap(formalList.stream()
+                .map(StoreProductDO::getProductSkuId)
+                .collect(Collectors.toSet()));
+        return formalList.stream()
+                .map(item -> buildRespVO(item, storeMap, skuMap))
+                .collect(Collectors.toList());
+    }
+
+    private List<StoreProductRespVO> buildShadowRows(StoreProductPageReqVO pageReqVO, Set<String> formalRowKeys) {
+        return buildShadowRows(shadowQueryService.listActiveShadowRows(pageReqVO, formalRowKeys));
+    }
+
+    private List<StoreProductRespVO> buildShadowRows(StoreProductPageReqVO pageReqVO, boolean excludeFormalRows,
+                                                     int offset, int limit) {
+        return buildShadowRows(shadowQueryService.listActiveShadowRows(pageReqVO, excludeFormalRows, offset, limit));
+    }
+
+    private List<StoreProductRespVO> buildShadowRows(List<StoreProductShadowRowBO> shadowList) {
+        if (CollUtil.isEmpty(shadowList)) {
+            return Collections.emptyList();
+        }
+        Map<String, StoreDO> storeMap = getStoreMap(shadowList.stream()
+                .map(StoreProductShadowRowBO::getStoreId)
+                .collect(Collectors.toSet()));
+        return shadowList.stream()
+                .map(item -> buildShadowRespVO(item, storeMap))
+                .collect(Collectors.toList());
+    }
+
+    private int getPageSize(StoreProductPageReqVO pageReqVO) {
+        return pageReqVO.getPageSize() == null || pageReqVO.getPageSize() < 1 ? 10 : pageReqVO.getPageSize();
+    }
+
+    private int getPageOffset(StoreProductPageReqVO pageReqVO, int pageSize) {
+        int pageNo = pageReqVO.getPageNo() == null || pageReqVO.getPageNo() < 1 ? 1 : pageReqVO.getPageNo();
+        return (pageNo - 1) * pageSize;
+    }
+
+    private StoreProductRespVO buildShadowRespVO(StoreProductShadowRowBO shadow, Map<String, StoreDO> storeMap) {
+        StoreProductRespVO respVO = new StoreProductRespVO();
+        respVO.setRowSource("SHADOW");
+        respVO.setShadowId(shadow.getShadowId());
+        respVO.setStoreId(shadow.getStoreId());
+        respVO.setPlatformStoreId(shadow.getPlatformStoreId());
+        respVO.setSkuCode(shadow.getSkuCode());
+        respVO.setSkuName(shadow.getProductName());
+        respVO.setSpuCode(shadow.getSpuCode());
+        respVO.setSpecification(shadow.getSpecification());
+        respVO.setStoreRetailPrice(shadow.getPrice());
+        respVO.setPosStatus(shadow.getPosStatus());
+        respVO.setEnterShopStatus(shadow.getIsActive());
+        respVO.setCompletenessStatus("MASTER_MISSING");
+        respVO.setMatchStatus(shadow.getMatchStatus());
+        respVO.setCreateTime(shadow.getCreateTime());
+        StoreDO store = storeMap.get(shadow.getStoreId());
+        if (store != null) {
+            respVO.setStoreName(store.getStoreName());
         }
         return respVO;
     }

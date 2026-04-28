@@ -19,4 +19,8 @@ public interface EleOrderLockService {
     boolean tryLockOrderWithWatchdog(String orderId, int waitSeconds);
 
     void unlockOrder(String orderId);
+
+    void lockStoreGoodsFullSyncTask(String lockKey, int waitSeconds, int leaseMinutes);
+
+    void unlockStoreGoodsFullSyncTask(String lockKey);
 }

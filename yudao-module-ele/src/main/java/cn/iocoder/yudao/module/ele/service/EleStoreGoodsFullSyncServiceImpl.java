@@ -17,10 +17,13 @@ import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsFullSyncTaskDO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsFullSyncTaskStoreDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsFullSyncTaskMapper;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsFullSyncTaskStoreMapper;
+import cn.iocoder.yudao.module.ele.dal.redis.EleOrderLockService;
 import cn.iocoder.yudao.module.ele.service.executor.EleStoreGoodsFullSyncExecutor;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -35,6 +38,8 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_CANCELLED = "CANCELLED";
     private static final Integer DEFAULT_PAGE_SIZE = 20;
+    private static final int CREATE_LOCK_WAIT_SECONDS = 5;
+    private static final int CREATE_LOCK_LEASE_MINUTES = 1;
 
     @Resource
     private EleStoreGoodsFullSyncTaskMapper taskMapper;
@@ -44,46 +49,60 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
     private StoreService storeService;
     @Resource
     private EleStoreGoodsFullSyncExecutor fullSyncExecutor;
+    @Resource
+    private EleOrderLockService eleOrderLockService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createCurrentStoreFullSync(EleStoreGoodsFullSyncCurrentReqVO reqVO) {
         String merchantCode = StrUtil.trim(reqVO.getMerchantCode());
         String erpStoreCode = StrUtil.trim(reqVO.getErpStoreCode());
-        EleStoreGoodsFullSyncTaskDO runningTask = taskMapper.selectRunningCurrentStore(erpStoreCode);
-        if (runningTask != null) {
-            return runningTask.getId();
-        }
+        String lockKey = buildCurrentStoreTaskLockKey(erpStoreCode);
+        eleOrderLockService.lockStoreGoodsFullSyncTask(lockKey, CREATE_LOCK_WAIT_SECONDS, CREATE_LOCK_LEASE_MINUTES);
+        try {
+            EleStoreGoodsFullSyncTaskDO runningTask = taskMapper.selectRunningCurrentStore(erpStoreCode);
+            if (runningTask != null) {
+                return runningTask.getId();
+            }
 
-        EleStoreGoodsFullSyncTaskDO task = createTask(SCOPE_CURRENT_STORE, merchantCode, erpStoreCode,
-                Boolean.TRUE.equals(reqVO.getTestMode()), 1);
-        taskMapper.insert(task);
-        taskStoreMapper.insert(createCurrentTaskStore(task, merchantCode, erpStoreCode));
-        fullSyncExecutor.submit(task.getId());
-        return task.getId();
+            EleStoreGoodsFullSyncTaskDO task = createTask(SCOPE_CURRENT_STORE, merchantCode, erpStoreCode,
+                    Boolean.TRUE.equals(reqVO.getTestMode()), 1);
+            taskMapper.insert(task);
+            taskStoreMapper.insert(createCurrentTaskStore(task, merchantCode, erpStoreCode));
+            submitAndUnlockAfterTransaction(task.getId(), lockKey);
+            return task.getId();
+        } finally {
+            unlockIfNoTransactionSynchronization(lockKey);
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createAllOpenStoresFullSync(EleStoreGoodsFullSyncAllOpenReqVO reqVO) {
-        EleStoreGoodsFullSyncTaskDO runningTask = taskMapper.selectRunningAllOpenStores();
-        if (runningTask != null) {
-            return runningTask.getId();
-        }
+        String lockKey = buildAllOpenStoresTaskLockKey();
+        eleOrderLockService.lockStoreGoodsFullSyncTask(lockKey, CREATE_LOCK_WAIT_SECONDS, CREATE_LOCK_LEASE_MINUTES);
+        try {
+            EleStoreGoodsFullSyncTaskDO runningTask = taskMapper.selectRunningAllOpenStores();
+            if (runningTask != null) {
+                return runningTask.getId();
+            }
 
-        List<StorePlatformRespVO> stores = storeService.getOpenPlatformStores(ELE_PLATFORM_ID);
-        if (CollUtil.isEmpty(stores)) {
-            throw new RuntimeException("没有可同步的饿了么开业门店");
-        }
+            List<StorePlatformRespVO> stores = storeService.getOpenPlatformStores(ELE_PLATFORM_ID);
+            if (CollUtil.isEmpty(stores)) {
+                throw new RuntimeException("没有可同步的饿了么开业门店");
+            }
 
-        EleStoreGoodsFullSyncTaskDO task = createTask(SCOPE_ALL_OPEN_STORES, null, null,
-                reqVO != null && Boolean.TRUE.equals(reqVO.getTestMode()), stores.size());
-        taskMapper.insert(task);
-        for (StorePlatformRespVO store : stores) {
-            taskStoreMapper.insert(createOpenStoreTaskStore(task, store));
+            EleStoreGoodsFullSyncTaskDO task = createTask(SCOPE_ALL_OPEN_STORES, null, null,
+                    reqVO != null && Boolean.TRUE.equals(reqVO.getTestMode()), stores.size());
+            taskMapper.insert(task);
+            for (StorePlatformRespVO store : stores) {
+                taskStoreMapper.insert(createOpenStoreTaskStore(task, store));
+            }
+            submitAndUnlockAfterTransaction(task.getId(), lockKey);
+            return task.getId();
+        } finally {
+            unlockIfNoTransactionSynchronization(lockKey);
         }
-        fullSyncExecutor.submit(task.getId());
-        return task.getId();
     }
 
     @Override
@@ -112,11 +131,13 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
         if (!STATUS_PENDING.equals(task.getStatus()) && !STATUS_RUNNING.equals(task.getStatus())) {
             throw new RuntimeException("只有待执行或执行中的任务可以取消");
         }
+        LocalDateTime cancelledAt = LocalDateTime.now();
         EleStoreGoodsFullSyncTaskDO updateObj = new EleStoreGoodsFullSyncTaskDO();
         updateObj.setId(id);
         updateObj.setStatus(STATUS_CANCELLED);
-        updateObj.setFinishedAt(LocalDateTime.now());
+        updateObj.setFinishedAt(cancelledAt);
         taskMapper.updateById(updateObj);
+        taskStoreMapper.cancelPendingByTaskId(id, cancelledAt);
     }
 
     private EleStoreGoodsFullSyncTaskDO createTask(String scope, String merchantCode, String erpStoreCode,
@@ -174,5 +195,37 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
         taskStore.setGovernanceCount(0);
         taskStore.setRetryCount(0);
         return taskStore;
+    }
+
+    private void submitAndUnlockAfterTransaction(Long taskId, String lockKey) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            fullSyncExecutor.submit(taskId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                fullSyncExecutor.submit(taskId);
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                eleOrderLockService.unlockStoreGoodsFullSyncTask(lockKey);
+            }
+        });
+    }
+
+    private void unlockIfNoTransactionSynchronization(String lockKey) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            eleOrderLockService.unlockStoreGoodsFullSyncTask(lockKey);
+        }
+    }
+
+    private String buildCurrentStoreTaskLockKey(String erpStoreCode) {
+        return SCOPE_CURRENT_STORE + ":" + erpStoreCode;
+    }
+
+    private String buildAllOpenStoresTaskLockKey() {
+        return SCOPE_ALL_OPEN_STORES;
     }
 }
