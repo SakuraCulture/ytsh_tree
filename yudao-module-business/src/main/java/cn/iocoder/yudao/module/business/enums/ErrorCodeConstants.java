@@ -90,4 +90,14 @@ public interface ErrorCodeConstants {
     ErrorCode TAG_VALUE_NOT_PRODUCT_DOMAIN = new ErrorCode(1_030_003_003, "标签值不属于 PRODUCT 域");
     ErrorCode TAG_VALUE_DISABLED = new ErrorCode(1_030_003_004, "标签值已停用");
     ErrorCode TAG_SOURCE_REF_REQUIRED = new ErrorCode(1_030_003_005, "RULE 来源的 sourceRef 不能为空");
+
+    // ========== 仓库门店供货关系 1-030-200-000 ==========
+    ErrorCode WAREHOUSE_STORE_SUPPLY_NOT_EXISTS = new ErrorCode(1_030_200_000, "仓库门店供货关系不存在");
+    ErrorCode WAREHOUSE_STORE_SUPPLY_DUPLICATE = new ErrorCode(1_030_200_001, "门店已存在该仓供货关系");
+
+    // ========== 仓库线路管理 1-030-201-000 ==========
+    ErrorCode WAREHOUSE_LINE_NOT_EXISTS = new ErrorCode(1_030_201_000, "仓库线路不存在");
+    ErrorCode WAREHOUSE_LINE_CODE_DUPLICATE = new ErrorCode(1_030_201_001, "该仓库下已存在相同线路编码");
+    ErrorCode WAREHOUSE_LINE_STORE_NOT_ELIGIBLE = new ErrorCode(1_030_201_002, "门店未建立启用中的仓库供货关系，不能加入该线路");
+    ErrorCode WAREHOUSE_LINE_WEEKDAY_CONFLICT = new ErrorCode(1_030_201_003, "同仓同星期下门店不能同时归属两条启用线路");
 }

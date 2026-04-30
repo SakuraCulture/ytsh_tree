@@ -329,6 +329,37 @@
               </el-card>
             </el-col>
           </el-row>
+          <el-row :gutter="0">
+            <el-col :span="24">
+              <el-card shadow="hover" class="sub-table-card">
+                <template #header>
+                  <div class="card-header">
+                    <Icon icon="ep:share" class="mr-5px" />
+                    <span>供货与线路信息</span>
+                  </div>
+                </template>
+                <div v-if="expandData[row.storeId]?.supplyLineSummary" class="sub-table-content">
+                  <div class="detail-item">
+                    <span class="label">主仓:</span>
+                    <span>{{ expandData[row.storeId].supplyLineSummary.primaryWarehouseName || '-' }}</span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="label">可服务仓:</span>
+                    <span>
+                      {{ (expandData[row.storeId].supplyLineSummary.supplies || []).map((item) => `${item.warehouseName}${item.isPrimary === 1 ? '（主仓）' : ''}`).join('、') || '-' }}
+                    </span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="label">线路信息:</span>
+                    <span>
+                      {{ (expandData[row.storeId].supplyLineSummary.lines || []).map((item) => `${item.warehouseName}/${item.lineName}（${item.orderWeekdays || '-'}）`).join('；') || '-' }}
+                    </span>
+                  </div>
+                </div>
+                <div v-else class="no-data">暂无数据</div>
+              </el-card>
+            </el-col>
+          </el-row>
         </div>
       </template>
     </el-table-column>
@@ -542,13 +573,14 @@ const loadExpandData = async (storeId: string) => {
     return
   }
   try {
-    const [space, affiliation, status, franchisee, contacts, platforms] = await Promise.all([
+    const [space, affiliation, status, franchisee, contacts, platforms, supplyLineSummary] = await Promise.all([
       TableApi.getSpaceTableByStoreId(storeId),
       TableApi.getAffiliationTableByStoreId(storeId),
       TableApi.getStatusTableByStoreId(storeId),
       TableApi.getFranchiseeTableByStoreId(storeId),
       TableApi.getContactTableListByStoreId(storeId),
-      TableApi.getPlatformTableListByStoreId(storeId)
+      TableApi.getPlatformTableListByStoreId(storeId),
+      TableApi.getSupplyLineSummaryByStoreId(storeId)
     ])
     expandData.value[storeId] = {
       space,
@@ -556,7 +588,8 @@ const loadExpandData = async (storeId: string) => {
       status,
       franchisee,
       contacts,
-      platforms
+      platforms,
+      supplyLineSummary
     }
   } catch {
   }

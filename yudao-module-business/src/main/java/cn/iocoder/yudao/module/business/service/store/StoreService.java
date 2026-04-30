@@ -335,6 +335,8 @@ public interface StoreService {
      */
     List<StoreSimpleRespVO> getStoreSimpleList(Long platformId);
 
+    StoreSupplyLineRespVO getStoreSupplyLineSummary(String storeId);
+
     /**
      * 根据平台门店ID获取门店平台关联信息
      *

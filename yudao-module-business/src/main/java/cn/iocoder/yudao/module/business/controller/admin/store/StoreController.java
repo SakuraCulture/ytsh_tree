@@ -399,6 +399,14 @@ import org.springframework.web.multipart.MultipartFile;
         return success(storeService.getPlatformTableListByStoreId(storeId));
     }
 
+    @GetMapping("/supply-line/get-by-store-id")
+    @Operation(summary = "获得门店供货与线路汇总")
+    @Parameter(name = "storeId", description = "门店ID", required = true)
+    @PreAuthorize("@ss.hasPermission('business:table:query')")
+    public CommonResult<StoreSupplyLineRespVO> getStoreSupplyLineSummary(@RequestParam("storeId") String storeId) {
+        return success(storeService.getStoreSupplyLineSummary(storeId));
+    }
+
     /**
      * 获取已开店门店的平台信息列表(从Redis获取)
      *

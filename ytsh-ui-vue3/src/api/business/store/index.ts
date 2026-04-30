@@ -74,6 +74,30 @@ export interface PlatformTable {
           status: number; // 状态
 }
 
+export interface StoreSupplyLineRespVO {
+          storeId: string
+          storeName?: string
+          primaryWarehouseId?: string
+          primaryWarehouseName?: string
+          supplies?: Array<{
+                    warehouseId: string
+                    warehouseName?: string
+                    isPrimary?: number
+                    supplyStatus?: number
+                    remark?: string
+          }>
+          lines?: Array<{
+                    lineId: number
+                    warehouseId?: string
+                    warehouseName?: string
+                    lineCode?: string
+                    lineName?: string
+                    orderWeekdays?: string
+                    lineStatus?: number
+                    sortNo?: number
+          }>
+}
+
 /** 门店信息 */
 export interface Table {
           storeId: string; // 门店ID
@@ -198,5 +222,10 @@ export const TableApi = {
   // 获得门店平台关联列表
   getPlatformTableListByStoreId: async (storeId) => {
     return await request.get({ url: `/business/table/platform-table/list-by-store-id?storeId=` + storeId })
+  },
+
+  // 获得门店供货与线路汇总
+  getSupplyLineSummaryByStoreId: async (storeId: string) => {
+    return await request.get({ url: `/business/table/supply-line/get-by-store-id`, params: { storeId } })
   }
 }

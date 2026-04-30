@@ -284,25 +284,63 @@ CREATE TABLE `warehouse_inout_summary_table` (
   KEY `idx_period` (`period_type`, `period_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仓库进销汇总表';
 
--- 11. 门店SKU供货关系表 (warehouse_store_supply_table)
-DROP TABLE IF EXISTS `warehouse_store_supply_table`;
-CREATE TABLE `warehouse_store_supply_table` (
-  `supply_id` bigint NOT NULL AUTO_INCREMENT COMMENT '供货关系ID（主键）',
-  `store_product_id` bigint DEFAULT NULL COMMENT '门店商品ID',
-  `warehouse_id` varchar(50) DEFAULT NULL COMMENT '供货仓库ID',
-  `supply_is_primary` tinyint DEFAULT NULL COMMENT '是否主供货仓(0否1是)',
-  `supply_is_active` tinyint DEFAULT NULL COMMENT '是否供货(0否1是)',
-  `supply_status` varchar(20) DEFAULT NULL COMMENT '供货状态',
+-- 11. 仓库门店供货关系表 (warehouse_store_supply)
+DROP TABLE IF EXISTS `warehouse_store_supply`;
+CREATE TABLE `warehouse_store_supply` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `warehouse_id` varchar(64) NOT NULL COMMENT '仓库ID',
+  `store_id` varchar(64) NOT NULL COMMENT '门店ID',
+  `is_primary` tinyint NOT NULL DEFAULT 0 COMMENT '是否主仓(0否1是)',
+  `supply_status` tinyint NOT NULL DEFAULT 1 COMMENT '供货状态(0停用1启用)',
+  `remark` varchar(255) DEFAULT NULL COMMENT '备注',
   `creator` varchar(64) DEFAULT '' COMMENT '创建者',
-  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updater` varchar(64) DEFAULT '' COMMENT '更新者',
-  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `deleted` tinyint(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除',
-  `tenant_id` bigint NOT NULL DEFAULT 1 COMMENT '租户编号',
-  PRIMARY KEY (`supply_id`),
-  KEY `idx_store_product_id` (`store_product_id`),
-  KEY `idx_warehouse_id` (`warehouse_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='门店SKU供货关系表';
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_warehouse_store_supply_pair` (`warehouse_id`, `store_id`, `deleted`),
+  KEY `idx_warehouse_store_supply_warehouse_id` (`warehouse_id`),
+  KEY `idx_warehouse_store_supply_store_id` (`store_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仓库门店供货关系表';
+
+-- 12. 仓库线路表 (warehouse_line)
+DROP TABLE IF EXISTS `warehouse_line`;
+CREATE TABLE `warehouse_line` (
+  `line_id` bigint NOT NULL AUTO_INCREMENT COMMENT '线路ID',
+  `warehouse_id` varchar(64) NOT NULL COMMENT '仓库ID',
+  `line_code` varchar(64) NOT NULL COMMENT '线路编码',
+  `line_name` varchar(128) NOT NULL COMMENT '线路名称',
+  `order_weekdays` varchar(32) NOT NULL COMMENT '可下单星期，逗号分隔',
+  `line_status` tinyint NOT NULL DEFAULT 1 COMMENT '线路状态(0停用1启用)',
+  `remark` varchar(255) DEFAULT NULL COMMENT '备注',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`line_id`),
+  UNIQUE KEY `uk_warehouse_line_code` (`warehouse_id`, `line_code`, `deleted`),
+  KEY `idx_warehouse_line_warehouse_id` (`warehouse_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仓库线路表';
+
+-- 13. 仓库线路门店关联表 (warehouse_line_store)
+DROP TABLE IF EXISTS `warehouse_line_store`;
+CREATE TABLE `warehouse_line_store` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `line_id` bigint NOT NULL COMMENT '线路ID',
+  `store_id` varchar(64) NOT NULL COMMENT '门店ID',
+  `sort_no` int DEFAULT 0 COMMENT '线路内排序',
+  `creator` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_warehouse_line_store_pair` (`line_id`, `store_id`, `deleted`),
+  KEY `idx_warehouse_line_store_line_id` (`line_id`),
+  KEY `idx_warehouse_line_store_store_id` (`store_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仓库线路门店关联表';
 
 
 -- ============================================
@@ -365,3 +403,47 @@ VALUES (5115, '仓库导出', 'business:warehouse:export', 3, 5, 5101, '', '#', 
 
 INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
 VALUES (5116, '仓库导入', 'business:warehouse:import', 3, 6, 5101, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+-- 门店供货关系管理
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5220, '门店供货关系管理', '', 2, 9, 5100, 'warehouse-store-supply', 'ep:connection', 'business/warehouse/storeSupply/index', 'WarehouseStoreSupply', 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5221, '门店供货关系查询', 'business:warehouse-store-supply:query', 3, 1, 5220, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5222, '门店供货关系创建', 'business:warehouse-store-supply:create', 3, 2, 5220, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5223, '门店供货关系更新', 'business:warehouse-store-supply:update', 3, 3, 5220, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5224, '门店供货关系删除', 'business:warehouse-store-supply:delete', 3, 4, 5220, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5225, '门店供货关系导出', 'business:warehouse-store-supply:export', 3, 5, 5220, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5226, '门店供货关系导入', 'business:warehouse-store-supply:import', 3, 6, 5220, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+-- 线路管理
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5230, '线路管理', '', 2, 10, 5100, 'warehouse-line', 'ep:share', 'business/warehouse/line/index', 'WarehouseLine', 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5231, '线路查询', 'business:warehouse-line:query', 3, 1, 5230, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5232, '线路创建', 'business:warehouse-line:create', 3, 2, 5230, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5233, '线路更新', 'business:warehouse-line:update', 3, 3, 5230, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5234, '线路删除', 'business:warehouse-line:delete', 3, 4, 5230, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5235, '线路导出', 'business:warehouse-line:export', 3, 5, 5230, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');
+
+INSERT INTO `system_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `component_name`, `status`, `visible`, `keep_alive`, `always_show`, `creator`, `create_time`, `updater`, `update_time`, `deleted`)
+VALUES (5236, '线路导入', 'business:warehouse-line:import', 3, 6, 5230, '', '#', '', NULL, 0, b'1', b'1', b'1', 'admin', NOW(), 'admin', NOW(), b'0');

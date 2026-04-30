@@ -18,6 +18,7 @@ import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreImportExc
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreSimpleRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformInfoRespVO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreSupplyLineRespVO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.SpaceTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.AffiliationTableDO;
@@ -26,6 +27,10 @@ import cn.iocoder.yudao.module.business.dal.dataobject.store.FranchiseeTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.ContactTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.PlatformTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.PlatformDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.warehouse.WarehouseDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.warehouse.WarehouseLineDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.warehouse.WarehouseLineStoreDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.warehouse.WarehouseStoreSupplyDO;
 import cn.iocoder.yudao.framework.common.pojo.PageParam;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
@@ -38,6 +43,10 @@ import cn.iocoder.yudao.module.business.dal.mysql.store.FranchiseeTableMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.ContactTableMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.PlatformTableMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.PlatformMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.warehouse.WarehouseLineMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.warehouse.WarehouseLineStoreMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.warehouse.WarehouseMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.warehouse.WarehouseStoreSupplyMapper;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.module.business.service.store.StorePlatformCacheService;
 
@@ -72,6 +81,14 @@ public class StoreServiceImpl implements StoreService {
     private PlatformTableMapper platformTableMapper;
     @Resource
     private PlatformMapper platformMapper;
+    @Resource
+    private WarehouseMapper warehouseMapper;
+    @Resource
+    private WarehouseStoreSupplyMapper warehouseStoreSupplyMapper;
+    @Resource
+    private WarehouseLineMapper warehouseLineMapper;
+    @Resource
+    private WarehouseLineStoreMapper warehouseLineStoreMapper;
     @Resource
     private StorePlatformCacheService storePlatformCacheService;
 
@@ -840,6 +857,72 @@ public class StoreServiceImpl implements StoreService {
             result.add(vo);
         }
         return result;
+    }
+
+    @Override
+    public StoreSupplyLineRespVO getStoreSupplyLineSummary(String storeId) {
+        StoreDO store = storeMapper.selectById(storeId);
+        if (store == null) {
+            return null;
+        }
+        StoreSupplyLineRespVO respVO = new StoreSupplyLineRespVO();
+        respVO.setStoreId(store.getStoreId());
+        respVO.setStoreName(store.getStoreName());
+
+        List<WarehouseStoreSupplyDO> supplies = warehouseStoreSupplyMapper.selectListByStoreId(storeId);
+        Set<String> warehouseIds = new LinkedHashSet<>(supplies.stream()
+                .map(WarehouseStoreSupplyDO::getWarehouseId)
+                .filter(StrUtil::isNotBlank)
+                .collect(Collectors.toSet()));
+        List<WarehouseLineStoreDO> bindings = warehouseLineStoreMapper.selectList(
+                new LambdaQueryWrapperX<WarehouseLineStoreDO>()
+                        .eq(WarehouseLineStoreDO::getStoreId, storeId)
+                        .orderByAsc(WarehouseLineStoreDO::getSortNo)
+                        .orderByAsc(WarehouseLineStoreDO::getId));
+        Map<Long, WarehouseLineDO> lineMap = warehouseLineMapper.selectListByLineIds(
+                bindings.stream().map(WarehouseLineStoreDO::getLineId).collect(Collectors.toSet())
+        ).stream().collect(Collectors.toMap(WarehouseLineDO::getLineId, java.util.function.Function.identity(), (a, b) -> a));
+        lineMap.values().stream().map(WarehouseLineDO::getWarehouseId).filter(StrUtil::isNotBlank).forEach(warehouseIds::add);
+        Map<String, WarehouseDO> warehouseMap = warehouseMapper.selectListByWarehouseIds(warehouseIds)
+                .stream().collect(Collectors.toMap(WarehouseDO::getWarehouseId, java.util.function.Function.identity(), (a, b) -> a));
+
+        respVO.setSupplies(supplies.stream().map(item -> {
+            StoreSupplyLineRespVO.SupplyItem supply = new StoreSupplyLineRespVO.SupplyItem();
+            supply.setWarehouseId(item.getWarehouseId());
+            supply.setIsPrimary(item.getIsPrimary());
+            supply.setSupplyStatus(item.getSupplyStatus());
+            supply.setRemark(item.getRemark());
+            WarehouseDO warehouse = warehouseMap.get(item.getWarehouseId());
+            if (warehouse != null) {
+                supply.setWarehouseName(warehouse.getWarehouseName());
+            }
+            if (Integer.valueOf(1).equals(item.getIsPrimary())) {
+                respVO.setPrimaryWarehouseId(item.getWarehouseId());
+                respVO.setPrimaryWarehouseName(supply.getWarehouseName());
+            }
+            return supply;
+        }).collect(Collectors.toList()));
+
+        respVO.setLines(bindings.stream().map(item -> {
+            WarehouseLineDO line = lineMap.get(item.getLineId());
+            StoreSupplyLineRespVO.LineItem lineItem = new StoreSupplyLineRespVO.LineItem();
+            lineItem.setLineId(item.getLineId());
+            lineItem.setSortNo(item.getSortNo());
+            if (line != null) {
+                lineItem.setWarehouseId(line.getWarehouseId());
+                lineItem.setLineCode(line.getLineCode());
+                lineItem.setLineName(line.getLineName());
+                lineItem.setOrderWeekdays(line.getOrderWeekdays());
+                lineItem.setLineStatus(line.getLineStatus());
+                WarehouseDO warehouse = warehouseMap.get(line.getWarehouseId());
+                if (warehouse != null) {
+                    lineItem.setWarehouseName(warehouse.getWarehouseName());
+                }
+            }
+            return lineItem;
+        }).collect(Collectors.toList()));
+
+        return respVO;
     }
 
     /**
