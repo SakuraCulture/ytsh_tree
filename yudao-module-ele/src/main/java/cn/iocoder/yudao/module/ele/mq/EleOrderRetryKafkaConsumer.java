@@ -48,7 +48,7 @@ public class EleOrderRetryKafkaConsumer {
 
     private static final String RETRY_LOCK_PREFIX = "ele:order:retry:";
 
-    @KafkaListener(topics = "${ele.kafka.retry.topic:ele-order-retry}", groupId = "${ele.kafka.retry.consumer.group-id:ele-order-retry-consumer}", concurrency = "${ele.kafka.retry.consumer.concurrency:5}")
+    @KafkaListener(topics = "${ele.kafka.retry.topic:ele-order-retry}", groupId = "${ele.kafka.retry.consumer.group-id:ele-order-retry-consumer}", containerFactory = "eleOrderRetryKafkaListenerContainerFactory")
     public void consumeRetryMessage(
             @Payload OrderRetryMessage message,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
@@ -112,7 +112,7 @@ public class EleOrderRetryKafkaConsumer {
         }
     }
 
-    @KafkaListener(topics = "${ele.kafka.retry.dlq-topic:ele-order-retry-dlq}", groupId = "${ele.kafka.retry.consumer.dlq-group-id:ele-order-retry-dlq-consumer}", concurrency = "1")
+    @KafkaListener(topics = "${ele.kafka.retry.dlq-topic:ele-order-retry-dlq}", groupId = "${ele.kafka.retry.consumer.dlq-group-id:ele-order-retry-dlq-consumer}", containerFactory = "eleOrderRetryDlqKafkaListenerContainerFactory")
     public void consumeDeadLetterMessage(
             @Payload OrderRetryMessage message,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,

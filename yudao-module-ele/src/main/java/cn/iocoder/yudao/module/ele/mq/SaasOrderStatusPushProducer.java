@@ -1,6 +1,6 @@
 package cn.iocoder.yudao.module.ele.mq;
 
-import cn.iocoder.yudao.module.ele.service.dto.OrderMessage;
+import cn.iocoder.yudao.module.ele.service.dto.OrderStatusPushMessage;
 import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,18 +11,17 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.CompletableFuture;
 
 @Component
-public class EleOrderKafkaProducer {
+public class SaasOrderStatusPushProducer {
 
     @Resource
-    @Qualifier("eleOrderKafkaTemplate")
-    private KafkaTemplate<String, OrderMessage> kafkaTemplate;
+    @Qualifier("saasPushKafkaTemplate")
+    private KafkaTemplate<String, OrderStatusPushMessage> kafkaTemplate;
 
-    @Value("${ele.kafka.topic.realtime:ele-order-realtime}")
+    @Value("${ele.saas.push.kafka.topic:order-status-change}")
     private String topic;
 
-    public CompletableFuture<SendResult<String, OrderMessage>> sendOrderMessage(OrderMessage message) {
+    public CompletableFuture<SendResult<String, OrderStatusPushMessage>> sendPushMessage(OrderStatusPushMessage message) {
         String orderId = message.getOrderId();
-        CompletableFuture<SendResult<String, OrderMessage>> future = kafkaTemplate.send(topic, orderId, message);
-        return future;
+        return kafkaTemplate.send(topic, orderId, message);
     }
 }

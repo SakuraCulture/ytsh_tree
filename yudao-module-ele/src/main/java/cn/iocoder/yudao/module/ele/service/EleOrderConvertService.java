@@ -54,6 +54,7 @@ public class EleOrderConvertService {
                         platform.getDeliveryPlatform() == null ? null : String.valueOf(platform.getDeliveryPlatform()));
                 detail.setDeliveryType(platform.getDeliveryType());
                 detail.setPlatformCommissionFee(yuanToFen(platform.getPlatformCommissionFee()));
+                detail.setChannelType(platform.getPlatformType());
             }
             return detail;
         }).collect(Collectors.toList());
@@ -129,6 +130,7 @@ public class EleOrderConvertService {
                     platform.getDeliveryPlatform() == null ? null : String.valueOf(platform.getDeliveryPlatform()));
             dto.setDeliveryType(platform.getDeliveryType());
             dto.setPlatformCommissionFee(yuanToFen(platform.getPlatformCommissionFee()));
+            dto.setChannelType(platform.getPlatformType());
         }
 
         dto.setSubOrders(convertItems(orderItemMapper.selectByOrderIds(List.of(order.getOrderId()))));

@@ -19,7 +19,7 @@ public class EleOrderKafkaConsumer {
     @KafkaListener(
             topics = "${ele.kafka.topic.realtime:ele-order-realtime}",
             groupId = "${ele.kafka.consumer.group-id:ele-order-realtime-consumer}",
-            containerFactory = "kafkaListenerContainerFactory"
+            containerFactory = "eleOrderKafkaListenerContainerFactory"
     )
     public void consumeOrderMessage(
             @Payload OrderMessage message,

@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.ele.service.push;
 
 import cn.iocoder.yudao.framework.common.enums.UserTypeEnum;
 import cn.iocoder.yudao.framework.websocket.core.sender.WebSocketMessageSender;
+import cn.iocoder.yudao.module.ele.websocket.message.OrderRemindMessage;
 import cn.iocoder.yudao.module.ele.websocket.message.OrderStatusChangeMessage;
 import cn.iocoder.yudao.module.system.api.user.AdminUserApi;
 import cn.iocoder.yudao.module.system.api.user.dto.AdminUserRespDTO;
@@ -69,6 +70,48 @@ public class OrderStatusPushService {
             }
         } catch (Exception e) {
             log.error("【订单推送】推送失败", e);
+        }
+    }
+
+    public void pushOrderRemind(String orderId, String channelOrderId, String storeName,
+                                String buyerName, Integer remindCount) {
+        try {
+            List<Long> userIds = adminUserApi.getUserList(List.of(1L, 2L, 3L)).stream()
+                    .map(AdminUserRespDTO::getId)
+                    .toList();
+
+            for (Long userId : userIds) {
+                try {
+                    AdminUserRespDTO user = adminUserApi.getUser(userId);
+                    if (user == null) {
+                        continue;
+                    }
+
+                    Boolean pushEnabled = getOrderPushEnabled(user);
+                    if (!Boolean.TRUE.equals(pushEnabled)) {
+                        continue;
+                    }
+
+                    OrderRemindMessage message = new OrderRemindMessage();
+                    message.setOrderId(orderId);
+                    message.setChannelOrderId(channelOrderId);
+                    message.setStoreName(storeName);
+                    message.setBuyerName(buyerName);
+                    message.setRemindCount(remindCount != null ? remindCount : 1);
+                    message.setTimestamp(System.currentTimeMillis());
+
+                    webSocketMessageSender.sendObject(UserTypeEnum.ADMIN.getValue(),
+                            userId, "order-remind-push", message);
+
+                    log.info("【催单推送】用户{}收到订单{}催单通知，remindCount={}",
+                            userId, orderId, message.getRemindCount());
+
+                } catch (Exception e) {
+                    log.error("【催单推送】发送给单个用户失败，userId={}", userId, e);
+                }
+            }
+        } catch (Exception e) {
+            log.error("【催单推送】推送失败", e);
         }
     }
 

@@ -144,6 +144,8 @@ public class EleOrderServiceImpl implements EleOrderService {
     private EleOpenApiClient eleOpenApiClient;
     @Resource
     private ShutdownStateManager shutdownStateManager;
+    @Resource
+    private EleOrderTrackingService eleOrderTrackingService;
 
     @Value("${ele.order.sync.window.min-count:10}")
     private int windowMinCount;
@@ -496,7 +498,7 @@ public class EleOrderServiceImpl implements EleOrderService {
 
         try {
             long totalCount = getTotalCountByStatus(platformStoreId, merchantCode, erpStoreCode, startTime, endTime);
-            log.info("【动态窗口】门店{}试探完成，时间范围[{}-{}]内总订单数: {}条", 
+            log.info("【动态窗口】门店{}试探完成，时间范围[{}-{}]内总订单数: {}条",
                     platformStoreId, startTime, endTime, totalCount);
 
             int windowCount = calculateWindowCount(totalCount);
@@ -508,7 +510,8 @@ public class EleOrderServiceImpl implements EleOrderService {
                 allOrders = pullAllOrders(platformStoreId, merchantCode, erpStoreCode, startTime, endTime);
             } else {
                 log.info("【动态窗口】门店{}数据量>=10条，启动{}个窗口并行拉取", platformStoreId, windowCount);
-                allOrders = pullAllOrdersWithWindows(platformStoreId, merchantCode, erpStoreCode, startTime, endTime, windowCount);
+                allOrders = pullAllOrdersWithWindows(platformStoreId, merchantCode, erpStoreCode, startTime, endTime,
+                        windowCount);
             }
 
             List<FailedOrderInfo> failedOrders = Collections.synchronizedList(new ArrayList<>());
@@ -973,7 +976,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         int originalCount = allOrders.size();
-        
+
         log.info("【拉取订单】platformStoreId={}, 共{}条（全部状态）", platformStoreId, originalCount);
         for (OrderListRespDTO.OrderDetail order : allOrders) {
             log.info("【拉取订单】订单详情: orderId={}, channelOrderId={}, status={}, deliveryStatus={}, totalFee={}, payFee={}",
@@ -1081,7 +1084,7 @@ public class EleOrderServiceImpl implements EleOrderService {
     /**
      * 根据订单量计算写入线程数
      */
-    private int calculateWriteThreadCount(int orderCount) {
+    int calculateWriteThreadCount(int orderCount) {
         if (orderCount < 100)
             return 1;
         if (orderCount < 500)
@@ -1296,7 +1299,7 @@ public class EleOrderServiceImpl implements EleOrderService {
      * 2. 基于唯一索引保证幂等性
      * 3. 天然支持并发，不需要分布式锁
      */
-    private void upsertOrder(OrderListRespDTO.OrderDetail orderDetail, String platformStoreId,
+    void upsertOrder(OrderListRespDTO.OrderDetail orderDetail, String platformStoreId,
             String merchantCode, String erpStoreCode) {
         String orderId = orderDetail.getOrderId();
 
@@ -1314,7 +1317,9 @@ public class EleOrderServiceImpl implements EleOrderService {
         // 3. UPSERT平台信息
         upsertPlatform(orderDetail);
 
-        // 4. 子订单和优惠信息已分别存储到 order_item_table 和 order_discount_table，无需在主表存储JSON
+        // 4. 保存子订单和优惠信息
+        replaceItems(orderDetail, erpStoreCode);
+        replaceDiscounts(orderDetail);
     }
 
     /**
@@ -1421,6 +1426,20 @@ public class EleOrderServiceImpl implements EleOrderService {
     public void consumeOrderMessage(OrderMessage message, boolean overwrite) {
         saveOrUpdateBatch(List.of(convertMessageToOrderDetail(message)), message.getPlatformStoreId(),
                 message.getMerchantCode(), message.getErpStoreCode(), overwrite);
+
+        Integer status = message.getStatus();
+        if (status != null && status != -1 && status != 6) {
+            eleOrderTrackingService.startTracking(
+                    message.getOrderId(),
+                    message.getPlatformStoreId(),
+                    message.getMerchantCode(),
+                    message.getErpStoreCode(),
+                    message.getChannelOrderId(),
+                    status,
+                    message.getCreateTime() != null ? message.getCreateTime() : System.currentTimeMillis() / 1000);
+        } else if (status != null) {
+            eleOrderTrackingService.updateTracking(message.getOrderId(), status);
+        }
     }
 
     private OrderDO buildOrderDO(OrderListRespDTO.OrderDetail detail, String erpStoreCode) {
@@ -2513,23 +2532,15 @@ public class EleOrderServiceImpl implements EleOrderService {
             return null;
         }
 
-        List<OrderListRespDTO.OrderDetail> terminalOrders = orders.stream()
-                .filter(this::isTerminalOrder)
-                .collect(Collectors.toList());
-
-        if (terminalOrders.isEmpty()) {
-            return null;
-        }
-
-        int totalCount = terminalOrders.size();
+        int totalCount = orders.size();
         int threadCount = calculateWriteThreadCount(totalCount);
 
-        log.info("【订单保存】开始保存{}个终态订单，动态分配{}线程", totalCount, threadCount);
+        log.info("【订单保存】开始保存{}个订单（含所有状态），动态分配{}线程", totalCount, threadCount);
 
         if (threadCount <= 1 || totalCount <= 50) {
-            return saveOrdersSingleThread(terminalOrders, platformStoreId, merchantCode, erpStoreCode, failedOrders);
+            return saveOrdersSingleThread(orders, platformStoreId, merchantCode, erpStoreCode, failedOrders);
         } else {
-            return saveOrdersMultiThread(terminalOrders, platformStoreId, merchantCode, erpStoreCode, threadCount,
+            return saveOrdersMultiThread(orders, platformStoreId, merchantCode, erpStoreCode, threadCount,
                     failedOrders);
         }
     }
@@ -2726,7 +2737,7 @@ public class EleOrderServiceImpl implements EleOrderService {
     }
 
     private long getTotalCountByStatus(String platformStoreId, String merchantCode, String erpStoreCode,
-                                        Long startTime, Long endTime) {
+            Long startTime, Long endTime) {
         long totalCount = 0;
         Integer[] targetStatuses = { 1, 2, 3, 4, 5, 6, -1 };
 
@@ -2845,14 +2856,16 @@ public class EleOrderServiceImpl implements EleOrderService {
                 .collect(Collectors.toMap(
                         OrderListRespDTO.OrderDetail::getOrderId,
                         order -> order,
-                        (existing, replacement) -> existing
-                ))
+                        (existing, replacement) -> existing))
                 .values()
                 .stream()
                 .sorted((o1, o2) -> {
-                    if (o1.getCreateTime() == null && o2.getCreateTime() == null) return 0;
-                    if (o1.getCreateTime() == null) return 1;
-                    if (o2.getCreateTime() == null) return -1;
+                    if (o1.getCreateTime() == null && o2.getCreateTime() == null)
+                        return 0;
+                    if (o1.getCreateTime() == null)
+                        return 1;
+                    if (o2.getCreateTime() == null)
+                        return -1;
                     return Long.compare(o1.getCreateTime(), o2.getCreateTime());
                 })
                 .collect(Collectors.toList());

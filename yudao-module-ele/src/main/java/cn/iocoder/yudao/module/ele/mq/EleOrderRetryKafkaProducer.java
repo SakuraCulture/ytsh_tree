@@ -1,9 +1,10 @@
 package cn.iocoder.yudao.module.ele.mq;
 
 import cn.iocoder.yudao.module.ele.service.dto.OrderRetryMessage;
+import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
@@ -16,7 +17,8 @@ public class EleOrderRetryKafkaProducer {
 
     private static final Logger log = LoggerFactory.getLogger(EleOrderRetryKafkaProducer.class);
 
-    @Autowired
+    @Resource
+    @Qualifier("eleOrderRetryKafkaTemplate")
     private KafkaTemplate<String, OrderRetryMessage> kafkaTemplate;
 
     @Value("${ele.kafka.retry.topic:ele-order-retry}")

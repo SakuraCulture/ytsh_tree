@@ -1,5 +1,7 @@
 package cn.iocoder.yudao.module.ele.dal.dataobject;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -12,6 +14,10 @@ import java.math.BigDecimal;
 @TableName("order_item_table")
 @Data
 public class OrderItemDO {
+
+    /** 明细ID */
+    @TableId(type = IdType.AUTO)
+    private Long itemId;
 
     /** 子订单ID */
     private String subOrderId;

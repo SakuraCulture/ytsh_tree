@@ -31,20 +31,27 @@ public interface OrderMapper extends BaseMapperX<OrderDO> {
     }
 
     @Update("INSERT INTO order_table (order_id, order_status, create_time, pay_time, buyer_name, buyer_phone, " +
-            "buyer_address, delivery_status, total_fee, pay_fee, discount_fee, post_fee, package_fee, " +
-            "channel_source_id, channel_source_name, channel_order_id, store_code, longitude, latitude, remark, " +
+            "buyer_address, delivery_name, delivery_phone, delivery_status, delivery_fee, " +
+            "total_fee, pay_fee, discount_fee, post_fee, package_fee, " +
+            "channel_source_id, channel_source_name, channel_order_id, store_code, longitude, latitude, " +
+            "user_id, arrive_type, remark, " +
             "creator, update_time, deleted) " +
             "VALUES (#{orderId}, #{orderStatus}, #{createTime}, #{payTime}, #{buyerName}, #{buyerPhone}, " +
-            "#{buyerAddress}, #{deliveryStatus}, #{totalFee}, #{payFee}, #{discountFee}, #{postFee}, #{packageFee}, " +
+            "#{buyerAddress}, #{deliveryName}, #{deliveryPhone}, #{deliveryStatus}, #{deliveryFee}, " +
+            "#{totalFee}, #{payFee}, #{discountFee}, #{postFee}, #{packageFee}, " +
             "#{channelSourceId}, #{channelSourceName}, #{channelOrderId}, #{storeCode}, #{longitude}, #{latitude}, " +
-            "#{remark}, #{creator}, #{updateTime}, #{deleted}) " +
+            "#{userId}, #{arriveType}, #{remark}, " +
+            "#{creator}, #{updateTime}, #{deleted}) " +
             "ON DUPLICATE KEY UPDATE " +
             "order_status = VALUES(order_status), " +
             "pay_time = VALUES(pay_time), " +
             "buyer_name = VALUES(buyer_name), " +
             "buyer_phone = VALUES(buyer_phone), " +
             "buyer_address = VALUES(buyer_address), " +
+            "delivery_name = VALUES(delivery_name), " +
+            "delivery_phone = VALUES(delivery_phone), " +
             "delivery_status = VALUES(delivery_status), " +
+            "delivery_fee = VALUES(delivery_fee), " +
             "total_fee = VALUES(total_fee), " +
             "pay_fee = VALUES(pay_fee), " +
             "discount_fee = VALUES(discount_fee), " +
@@ -56,6 +63,8 @@ public interface OrderMapper extends BaseMapperX<OrderDO> {
             "store_code = VALUES(store_code), " +
             "longitude = VALUES(longitude), " +
             "latitude = VALUES(latitude), " +
+            "user_id = VALUES(user_id), " +
+            "arrive_type = VALUES(arrive_type), " +
             "remark = VALUES(remark), " +
             "updater = VALUES(creator), " +
             "update_time = VALUES(update_time)")
