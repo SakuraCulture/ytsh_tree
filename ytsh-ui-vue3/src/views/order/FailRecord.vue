@@ -92,6 +92,56 @@
           </el-row>
         </el-form>
 
+        <!-- 定时器控制区域 -->
+        <div class="timer-section">
+          <el-divider>定时自动拉取</el-divider>
+          <el-form :inline="true" class="timer-form">
+            <el-form-item label="开始时间">
+              <el-date-picker
+                v-model="timerStartTime"
+                type="datetime"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                placeholder="选择开始时间"
+                :disabled-date="disabledStartDate"
+              />
+            </el-form-item>
+            <el-form-item label="间隔时间">
+              <el-select v-model="timerInterval" placeholder="选择间隔" style="width: 140px">
+                <el-option label="5分钟" :value="5 * 60 * 1000" />
+                <el-option label="10分钟" :value="10 * 60 * 1000" />
+                <el-option label="15分钟" :value="15 * 60 * 1000" />
+                <el-option label="30分钟" :value="30 * 60 * 1000" />
+                <el-option label="1小时" :value="60 * 60 * 1000" />
+                <el-option label="2小时" :value="2 * 60 * 60 * 1000" />
+                <el-option label="3小时" :value="3 * 60 * 60 * 1000" />
+                <el-option label="5小时" :value="5 * 60 * 60 * 1000" />
+                <el-option label="12小时" :value="12 * 60 * 60 * 1000" />
+                <el-option label="24小时" :value="24 * 60 * 60 * 1000" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button 
+                v-if="!timerRunning" 
+                type="warning" 
+                plain 
+                @click="startTimer"
+                :disabled="!timerStartTime || !timerInterval"
+              >
+                <Icon icon="ep:video-play" class="mr-5px" />启动定时器
+              </el-button>
+              <el-button v-else type="danger" plain @click="stopTimer">
+                <Icon icon="ep:video-pause" class="mr-5px" />停止定时器
+              </el-button>
+            </el-form-item>
+            <el-form-item v-if="timerRunning">
+              <el-tag type="success" effect="dark">
+                <Icon icon="ep:clock" class="mr-5px" />
+                运行中 | 下次执行: {{ nextRunTime }}
+              </el-tag>
+            </el-form-item>
+          </el-form>
+        </div>
+
         <!-- 操作按钮区 -->
         <div class="action-buttons">
           <div class="primary-actions">
@@ -421,6 +471,12 @@ const detailVisible = ref(false)
 const detailTitle = ref('')
 const detailContent = ref('')
 
+const timerStartTime = ref<string | null>(null)
+const timerInterval = ref<number | null>(null)
+const timerRunning = ref(false)
+const timerId = ref<number | null>(null)
+const nextRunTime = ref<string>('')
+
 const queryParams = reactive({
   pageNo: 1,
   pageSize: 10,
@@ -667,9 +723,57 @@ const formatJson = (content: string) => {
   }
 }
 
+const disabledStartDate = (time: Date) => {
+  return time.getTime() < Date.now() - 24 * 60 * 60 * 1000
+}
+
+const calculateNextRunTime = (currentTime: Date) => {
+  const next = new Date(currentTime.getTime() + timerInterval.value!)
+  nextRunTime.value = dayjs(next).format('YYYY-MM-DD HH:mm:ss')
+}
+
+const executeTimerTask = () => {
+  getList()
+  calculateNextRunTime(new Date())
+}
+
+const startTimer = () => {
+  if (!timerStartTime.value || !timerInterval.value) {
+    message.warning('请设置开始时间和间隔时间')
+    return
+  }
+  
+  const startTime = dayjs(timerStartTime.value).valueOf()
+  const now = Date.now()
+  const delay = Math.max(0, startTime - now)
+  
+  message.success(`定时器已启动，将在 ${dayjs(startTime).format('YYYY-MM-DD HH:mm:ss')} 开始执行`)
+  
+  timerId.value = window.setTimeout(() => {
+    executeTimerTask()
+    timerId.value = window.setInterval(executeTimerTask, timerInterval.value!)
+    timerRunning.value = true
+  }, delay)
+}
+
+const stopTimer = () => {
+  if (timerId.value) {
+    clearTimeout(timerId.value)
+    clearInterval(timerId.value)
+    timerId.value = null
+  }
+  timerRunning.value = false
+  nextRunTime.value = ''
+  message.info('定时器已停止')
+}
+
 onMounted(() => {
   initVisibleColumns()
   getList()
+})
+
+onUnmounted(() => {
+  stopTimer()
 })
 </script>
 
@@ -739,6 +843,28 @@ onMounted(() => {
   padding: 16px;
   border-radius: 4px;
   margin-bottom: 8px;
+}
+
+.timer-section {
+  background: #fffbeb;
+  padding: 16px;
+  border-radius: 4px;
+  margin: 16px 0;
+  border: 1px solid #f5dab1;
+}
+
+.timer-form {
+  margin-bottom: 0;
+}
+
+.timer-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.timer-section :deep(.el-divider) {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  color: #e6a23c;
 }
 
 .batch-form {

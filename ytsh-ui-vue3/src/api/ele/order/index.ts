@@ -50,6 +50,7 @@ export interface EleOrderListRespVO {
 
 export interface EleOrderPageReqVO {
   platformStoreId?: string
+  storeId?: string
   status?: number
   startTime?: number
   endTime?: number
@@ -72,4 +73,12 @@ export const getOrderPage = async (params: EleOrderPageReqVO) => {
 
 export const getOrderDetail = async (params: { orderId: string }) => {
   return await request.get<EleOrderItemVO>({ url: '/ele/order/detail', params })
+}
+
+export const getOrderStatusCounts = async (params: {
+  platformStoreId?: string
+  startTime: number
+  endTime: number
+}): Promise<Record<number, number>> => {
+  return await request.get({ url: '/ele/order/status-counts', params })
 }

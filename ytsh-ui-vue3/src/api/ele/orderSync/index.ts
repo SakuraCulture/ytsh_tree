@@ -72,13 +72,45 @@ export interface SyncProgressVO {
   errorMessage?: string
 }
 
+export interface BatchSyncProgressVO {
+  isSyncing: boolean
+  syncStatus: string
+  totalStores: number
+  completedStores: number
+  successStores: number
+  failedStores: number
+  currentSyncingCount: number
+  currentSyncingStores: string[]
+  startTime: number
+}
+
 export interface SyncScheduleConfigVO {
   exists: boolean
   enabled?: boolean
-  intervalMinutes?: number | null
+  scheduleType?: 'time' | 'dayOfMonth' | 'weekDay' | 'interval'
   cronExpression?: string
+  timePoints?: string[]
+  daysOfMonth?: number[]
+  dayOfMonthTime?: string
+  weekDays?: number[]
+  weekDayTime?: string
+  intervalStartTime?: string
+  intervalHours?: number
   jobId?: number
   jobStatus?: number
+}
+
+export interface SyncScheduleConfigReqVO {
+  enabled: boolean
+  scheduleType: 'time' | 'dayOfMonth' | 'weekDay' | 'interval'
+  cronExpression: string
+  timePoints?: string[]
+  daysOfMonth?: number[]
+  dayOfMonthTime?: string
+  weekDays?: number[]
+  weekDayTime?: string
+  intervalStartTime?: string
+  intervalHours?: number
 }
 
 export const getSyncScheduleConfig = async () => {
@@ -87,13 +119,10 @@ export const getSyncScheduleConfig = async () => {
   })
 }
 
-export const updateSyncScheduleConfig = async (data: {
-  intervalMinutes: number
-  enabled: boolean
-}) => {
+export const updateSyncScheduleConfig = async (data: SyncScheduleConfigReqVO) => {
   return await request.put<boolean>({
     url: '/ele/order/sync/schedule-config',
-    params: data
+    data
   })
 }
 
@@ -131,4 +160,8 @@ export const getStoreSyncStats = async (platformStoreId: string) => {
 
 export const getSyncProgress = async (taskId: string) => {
   return await request.get<SyncProgressVO>({ url: '/ele/order/sync/progress', params: { taskId } })
+}
+
+export const getBatchSyncProgress = async () => {
+  return await request.get<BatchSyncProgressVO>({ url: '/ele/order/sync/batch-progress' })
 }
