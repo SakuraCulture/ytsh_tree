@@ -50,7 +50,7 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
  * - 事务要求：增删改操作必须使用 @Transactional(rollbackFor = Exception.class)
  * - 并发约束：storeId 和 storeName 全局唯一，需要先校验再操作
  * - 参数校验：所有入参VO使用 @Valid 注解触发 Bean Validation
- * - 缓存同步：主档变更后必须同步调用 syncStorePlatformInfoToRedis()
+ * - 缓存同步：主档变更后请求刷新门店平台缓存；存在事务时在事务提交后执行
  *
  * 【Pitfalls - 已知陷阱】
  * - storeId 为 String 类型，非自增Long，需注意格式校验
@@ -68,7 +68,7 @@ public interface StoreService {
      * 1. 校验 storeId、storeName 不重复
      * 2. 插入主表 store_table
      * 3. 按需插入 5 个子表（SpaceTable、AffiliationTable、StatusTable、FranchiseeTable、ContactTable）
-     * 4. 事务提交后同步 Redis 缓存
+     * 4. 请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - 必须使用 @Transactional(rollbackFor = Exception.class)
@@ -92,7 +92,7 @@ public interface StoreService {
      * 2. 检查 storeId、storeName 是否被其他门店占用
      * 3. 更新主表
      * 4. 使用 insertOrUpdate 更新子表（依赖 .clean() 方法解决 updateTime 问题）
-     * 5. 事务提交后同步 Redis 缓存
+     * 5. 请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - 子表更新使用 updateTime 字段判断新旧，需调用 .clean() 方法重置审计字段
@@ -113,7 +113,7 @@ public interface StoreService {
      * 1. 校验门店存在性
      * 2. 删除主表记录
      * 3. 级联删除 5 个子表
-     * 4. 同步 Redis 缓存
+     * 4. 请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - 必须级联删除子表，否则产生孤儿数据
@@ -133,7 +133,7 @@ public interface StoreService {
      * 【What】
      * 1. 批量删除主表记录
      * 2. 批量删除所有子表（使用 IN 条件）
-     * 3. 同步 Redis 缓存
+     * 3. 请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - ids 列表不宜过大，建议分批处理（每批 100 条）
@@ -307,7 +307,7 @@ public interface StoreService {
      * 【Constraints】
      * - 必须使用 @Transactional(rollbackFor = Exception.class)
      * - 导入结果返回成功/失败列表，便于定位问题
-     * - 每次导入后同步 Redis 缓存
+     * - 每次导入后请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Pitfalls】
      * - 【教训2024-03】导入时不校验子表ID，导致子表被覆盖而非更新
@@ -321,19 +321,14 @@ public interface StoreService {
     StoreImportRespVO importStoreList(List<StoreImportExcelVO> importList, boolean isUpdateSupport);
 
     /**
-     * 获取门店简单信息列表
-     *
-     * 【What】
-     * 返回门店的简化信息（名称、状态、平台关联），用于下拉选择、列表展示等轻量场景
-     *
-     * 【Constraints】
-     * - 可按 platformId 筛选，未传则返回全部
-     * - 返回结果已去重，同一平台只保留一条关联记录
-     *
-     * @param platformId 平台ID（可选）
-     * @return 门店简单信息列表
+     * 按平台搜索门店简表，用于远程下拉与筛选。
      */
-    List<StoreSimpleRespVO> getStoreSimpleList(Long platformId);
+    List<StoreSimpleRespVO> searchPlatformStoreSimpleList(Long platformId, String keyword, Integer pageNo, Integer pageSize);
+
+    /**
+     * 按平台与平台门店ID批量获取门店简表，用于当前页名称回显。
+     */
+    List<StoreSimpleRespVO> getPlatformStoreSimpleList(Long platformId, List<String> platformStoreIds);
 
     StoreSupplyLineRespVO getStoreSupplyLineSummary(String storeId);
 
@@ -373,7 +368,7 @@ public interface StoreService {
      *
      * 【What】
      * 获取已开店（store_status=0）的门店的平台关联信息
-     * 先查 Redis 缓存，未命中则查询数据库并回填缓存
+     * 先查 Redis 缓存，未命中则查询数据库并直接返回结果
      * platformCode 参数保留，当前实现已不依赖此参数
      *
      * 【Why - 为什么不用 platformCode？】
@@ -397,7 +392,7 @@ public interface StoreService {
      * 获取全部门店的平台关联列表（缓存优先，含开店和关店）
      *
      * 【What】
-     * 先查 Redis 缓存，未命中则查询数据库并回填缓存
+     * 先查 Redis 缓存，未命中则查询数据库并直接返回结果
      * 返回全部门店（不管开店关店），用于订单同步等需要全量门店的场景
      *
      * 【Constraints】
@@ -424,11 +419,11 @@ public interface StoreService {
     List<StorePlatformInfoRespVO> getStorePlatformInfoList();
 
     /**
-     * 手动同步门店平台信息到Redis
+     * 手动同步门店平台信息到 Redis
      *
      * 【What】
-     * 主动刷新 Redis 缓存，确保数据一致性
-     * 在门店增删改、导入完成后调用
+     * 手动触发门店平台缓存同步，保持同步执行语义
+     * 供运维修复、缓存预热或异常排查时调用
      *
      * 【Constraints】
      * - 此方法为同步调用，Redis 操作耗时约 10-50ms

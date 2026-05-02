@@ -10,6 +10,11 @@ export interface StoreSimpleRespVO {
   storeStatus?: number; // 门店状态(0停用1正常)
 }
 
+export interface StorePlatformSimpleBatchReqVO {
+  platformId: number
+  platformStoreIds: string[]
+}
+
 /** 门店空间信息 */
 export interface SpaceTable {
           storeSpaceId: number; // 空间ID
@@ -131,9 +136,17 @@ export const TableApi = {
     return await request.get({ url: `/business/table/list-simple`, params: { keyword } })
   },
 
-  // 获取所有门店简单信息列表
-  getTableAllSimpleList: async (platformId?: number) => {
-    return await request.get({ url: `/business/table/list-all-simple`, params: { platformId } })
+  // 按平台远程搜索门店简表
+  searchPlatformStoreSimpleList: async (platformId: number, keyword?: string, pageNo = 1, pageSize = 20) => {
+    return await request.get({
+      url: `/business/table/platform-info/search-simple`,
+      params: { platformId, keyword, pageNo, pageSize }
+    })
+  },
+
+  // 按平台和平台门店ID批量获取门店简表
+  getPlatformStoreSimpleList: async (data: StorePlatformSimpleBatchReqVO) => {
+    return await request.post({ url: `/business/table/platform-info/list-simple`, data })
   },
 
   // 查询门店详情

@@ -26,9 +26,13 @@
       <el-form-item label="门店" prop="storeId">
         <el-select
           v-model="queryParams.storeId"
-          placeholder="请选择门店"
+          placeholder="请输入门店名称或门店ID"
           filterable
           clearable
+          remote
+          reserve-keyword
+          :remote-method="searchStoreList"
+          :loading="storeLoading"
           class="!w-240px"
         >
           <el-option
@@ -192,6 +196,7 @@ const list = ref<WarehouseStoreSupplyRespVO[]>([])
 const total = ref(0)
 const warehouseList = ref<WarehouseSimpleRespVO[]>([])
 const storeList = ref<StoreSimpleRespVO[]>([])
+const storeLoading = ref(false)
 const queryParams = reactive<WarehouseStoreSupplyPageReqVO>({
   pageNo: 1,
   pageSize: 10,
@@ -216,12 +221,25 @@ const getList = async () => {
 }
 
 const loadOptions = async () => {
-  const [warehouses, stores] = await Promise.all([
-    WarehouseApi.getWarehouseSimpleList(),
-    TableApi.getTableAllSimpleList()
-  ])
+  const warehouses = await WarehouseApi.getWarehouseSimpleList()
   warehouseList.value = warehouses || []
-  storeList.value = stores || []
+}
+
+const searchStoreList = async (keyword: string) => {
+  const normalizedKeyword = keyword.trim()
+  if (!normalizedKeyword) {
+    storeList.value = []
+    return
+  }
+  storeLoading.value = true
+  try {
+    const res = await TableApi.getTableSimpleList(normalizedKeyword)
+    storeList.value = Array.isArray(res) ? res : []
+  } catch {
+    storeList.value = []
+  } finally {
+    storeLoading.value = false
+  }
 }
 
 const handleQuery = () => {
@@ -231,6 +249,7 @@ const handleQuery = () => {
 
 const resetQuery = () => {
   queryFormRef.value?.resetFields()
+  storeList.value = []
   handleQuery()
 }
 

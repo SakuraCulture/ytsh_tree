@@ -67,7 +67,7 @@ import org.springframework.web.multipart.MultipartFile;
  * - 门店编码（storeId）全局唯一，不允许重复
  * - 门店名称全局唯一，用于防重校验
  * - 删除门店时必须级联删除所有子表数据（数据完整性约束）
- * - 门店状态变更时必须同步 Redis 缓存（性能约束）
+ * - 门店状态变更后必须请求刷新门店平台缓存；存在事务时在提交后执行
  *
  * ==============================================================
  * 【Pitfalls - 已知陷阱与教训】
@@ -97,7 +97,7 @@ import org.springframework.web.multipart.MultipartFile;
      * 1. 校验 storeId、storeName 不重复
      * 2. 插入主表 store_table
      * 3. 按需插入子表
-     * 4. 事务提交后同步 Redis 缓存
+     * 4. 请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - storeId 由前端生成，需校验格式
@@ -123,7 +123,7 @@ import org.springframework.web.multipart.MultipartFile;
      * 1. 校验门店存在性
      * 2. 检查 storeId、storeName 是否被其他门店占用
      * 3. 更新主表和子表
-     * 4. 同步 Redis 缓存
+     * 4. 请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - 子表更新使用 insertOrUpdate，依赖 .clean() 方法
@@ -149,7 +149,7 @@ import org.springframework.web.multipart.MultipartFile;
      * 1. 校验门店存在性
      * 2. 删除主表记录
      * 3. 级联删除所有子表
-     * 4. 同步 Redis 缓存
+     * 4. 请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - 必须级联删除子表，否则产生孤儿数据
@@ -172,7 +172,7 @@ import org.springframework.web.multipart.MultipartFile;
     /**
      * 批量删除门店
      *
-     * 【What】批量删除主表和所有子表，同步 Redis 缓存
+     * 【What】批量删除主表和所有子表，并请求刷新门店平台缓存；存在事务时在提交后执行
      *
      * 【Constraints】
      * - ids 列表不宜过大，建议分批处理
@@ -249,25 +249,6 @@ import org.springframework.web.multipart.MultipartFile;
         reqVO.setPageSize(20);
         PageResult<StoreDO> pageResult = storeService.getStorePage(reqVO);
         return success(BeanUtils.toBean(pageResult.getList(), StoreRespVO.class));
-    }
-
-    /**
-     * 获取所有门店简单信息列表
-     *
-     * 【What】返回所有门店的简化信息，支持按平台筛选
-     *
-     * 【Constraints】
-     * - 可按 platformId 筛选，未传则返回全部
-     * - 返回结果包含平台关联信息
-     *
-     * @param platformId 平台ID（可选）
-     * @return 门店简单信息列表
-     */
-    @GetMapping("/list-all-simple")
-    @Operation(summary = "获取所有门店简单信息列表")
-    @PreAuthorize("@ss.hasAnyPermissions('business:table:query', 'business:store-product:query')")
-    public CommonResult<List<StoreSimpleRespVO>> getStoreAllSimpleList(@RequestParam(value = "platformId", required = false) Long platformId) {
-        return success(storeService.getStoreSimpleList(platformId));
     }
 
     /**
@@ -408,6 +389,29 @@ import org.springframework.web.multipart.MultipartFile;
     }
 
     /**
+     * 按平台搜索门店简表。
+     */
+    @GetMapping("/platform-info/search-simple")
+    @Operation(summary = "按平台搜索门店简表")
+    @PreAuthorize("@ss.hasAnyPermissions('business:table:query', 'business:store-product:query')")
+    public CommonResult<List<StoreSimpleRespVO>> searchPlatformStoreSimpleList(@RequestParam("platformId") Long platformId,
+                                                                                @RequestParam(value = "keyword", required = false) String keyword,
+                                                                                @RequestParam(value = "pageNo", defaultValue = "1") Integer pageNo,
+                                                                                @RequestParam(value = "pageSize", defaultValue = "20") Integer pageSize) {
+        return success(storeService.searchPlatformStoreSimpleList(platformId, keyword, pageNo, pageSize));
+    }
+
+    /**
+     * 按平台和平台门店ID批量获取门店简表。
+     */
+    @PostMapping("/platform-info/list-simple")
+    @Operation(summary = "按平台和平台门店ID批量获取门店简表")
+    @PreAuthorize("@ss.hasAnyPermissions('business:table:query', 'business:store-product:query')")
+    public CommonResult<List<StoreSimpleRespVO>> getPlatformStoreSimpleList(@Valid @RequestBody StorePlatformSimpleBatchReqVO reqVO) {
+        return success(storeService.getPlatformStoreSimpleList(reqVO.getPlatformId(), reqVO.getPlatformStoreIds()));
+    }
+
+    /**
      * 获取已开店门店的平台信息列表(从Redis获取)
      *
      * 【What】从 Redis 缓存获取已开店的门店平台关联信息
@@ -426,9 +430,9 @@ import org.springframework.web.multipart.MultipartFile;
     }
 
     /**
-     * 手动同步门店平台信息到Redis
+     * 手动同步门店平台信息到 Redis
      *
-     * 【What】主动刷新 Redis 缓存，确保数据一致性
+     * 【What】手动触发门店平台缓存同步，保持同步执行语义
      *
      * 【Why - 为什么要手动同步？】
      * - 缓存变更可追踪：每次门店增删改后主动刷新
@@ -437,7 +441,7 @@ import org.springframework.web.multipart.MultipartFile;
      * @return 成功标志
      */
     @GetMapping("/platform-info/sync")
-    @Operation(summary = "手动同步门店平台信息到Redis")
+    @Operation(summary = "手动同步门店平台信息到 Redis")
     @PermitAll
     public CommonResult<Boolean> syncStorePlatformInfo() {
         storeService.syncStorePlatformInfo();

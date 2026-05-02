@@ -21,9 +21,12 @@
             <span class="form-label">门店</span>
             <el-select
               v-model="selectedStoreCode"
-              placeholder="请选择门店"
+              placeholder="请输入门店名称或平台门店ID"
               clearable
               filterable
+              remote
+              reserve-keyword
+              :remote-method="searchStoreList"
               :loading="storeLoading"
               class="store-select"
               @change="handleStoreChange"
@@ -187,9 +190,12 @@
           <span class="form-label">门店</span>
           <el-select
             v-model="logFilters.erpStoreCode"
-            placeholder="按 ERP 门店编码筛选"
+            placeholder="请输入门店名称或平台门店ID"
             clearable
             filterable
+            remote
+            reserve-keyword
+            :remote-method="searchStoreList"
             :loading="storeLoading"
             class="store-select"
           >
@@ -315,6 +321,8 @@ import {
 } from '@/api/ele/storeGoods'
 import type { StoreSimpleRespVO } from '@/api/business/store'
 
+const ELE_PLATFORM_ID = 1
+
 defineOptions({ name: 'EleStoreGoodsSync' })
 
 const storeList = ref<StoreSimpleRespVO[]>([])
@@ -392,18 +400,22 @@ const previewRows = computed<StoreGoodsPreviewRowVO[]>(() => {
 const currentGoodsCount = computed(() => queryResult.value?.goodsList?.length || 0)
 const currentSkuCount = computed(() => previewRows.value.length)
 
-const loadStores = async () => {
+const searchStoreList = async (keyword: string) => {
+  const normalizedKeyword = keyword.trim()
+  if (!normalizedKeyword) {
+    storeList.value = []
+    return
+  }
   storeLoading.value = true
   try {
-    const res = await TableApi.getTableAllSimpleList(1)
+    const res = await TableApi.searchPlatformStoreSimpleList(
+      ELE_PLATFORM_ID,
+      normalizedKeyword,
+      1,
+      20
+    )
     const data = Array.isArray(res) ? res : []
     storeList.value = data.sort((a, b) => (b.storeStatus ?? 0) - (a.storeStatus ?? 0))
-    const firstOpenStore = storeList.value.find((item) => item.storeStatus === 1)
-    if (firstOpenStore?.platformStoreId && !queryForm.erpStoreCode) {
-      selectedStoreCode.value = firstOpenStore.platformStoreId
-      queryForm.erpStoreCode = firstOpenStore.platformStoreId
-      logFilters.erpStoreCode = firstOpenStore.platformStoreId
-    }
   } catch {
     storeList.value = []
   } finally {
@@ -556,7 +568,7 @@ const formatTimestamp = (value?: string) => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadStores(), loadTestMode()])
+  await loadTestMode()
   await loadLogs()
 })
 </script>

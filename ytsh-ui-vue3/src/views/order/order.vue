@@ -26,17 +26,21 @@
             <el-form-item label="门店" prop="storeId">
               <el-select
                 v-model="queryParams.storeId"
-                placeholder="请选择门店"
+                placeholder="请输入门店名称或门店编码"
                 clearable
                 filterable
+                remote
+                reserve-keyword
+                :remote-method="searchStoreList"
                 :loading="storeLoading"
                 class="!w-full"
               >
                 <el-option
                   v-for="store in storeList"
-                  :key="store.storeId"
-                  :label="store.storeName"
-                  :value="store.storeId"
+                  :key="getStoreOptionKey(store)"
+                  :label="getStoreOptionLabel(store)"
+                  :value="getStoreOptionValue(store)"
+                  :style="{ color: store.storeStatus === 1 ? '#333' : '#999' }"
                 />
               </el-select>
             </el-form-item>
@@ -129,6 +133,7 @@
                 placeholder="请选择"
                 clearable
                 class="!w-full"
+                @change="handleChannelTypeChange"
               >
                 <el-option label="美团" value="meituan" />
                 <el-option label="饿了么" value="eleme" />
@@ -392,6 +397,17 @@ import { getOrderPage, getOrderStatusCounts } from '@/api/ele/order'
 import { TableApi } from '@/api/business/store'
 import Pagination from '@/components/Pagination/index.vue'
 
+const ELE_PLATFORM_ID = 1
+const MT_PLATFORM_ID = 2
+const CHANNEL_PLATFORM_ID_MAP = {
+  eleme: ELE_PLATFORM_ID,
+  meituan: MT_PLATFORM_ID
+}
+const ORDER_CHANNEL_PLATFORM_ID_MAP = {
+  ELE: ELE_PLATFORM_ID,
+  MT: MT_PLATFORM_ID
+}
+
 export default {
   name: 'Order',
   components: { Pagination },
@@ -410,6 +426,7 @@ export default {
       activeTab: 'all',
       gridColumns: 2,
       storeList: [],
+      currentPageStoreNameMap: {},
       storeLoading: false,
       goodsList: [],
       queryParams: {
@@ -454,9 +471,10 @@ export default {
   },
   computed: {},
   created() {
-    this.loadStoreList()
     this.loadGoodsList()
     this.initDateRange()
+    this.getList()
+    this.loadStatusCounts()
   },
   mounted() {},
   methods: {
@@ -481,27 +499,69 @@ export default {
       this.currentOrder = order
       this.goodsDetailVisible = true
     },
-    loadStoreList() {
+    handleChannelTypeChange() {
+      this.queryParams.storeId = null
+      this.storeList = []
+    },
+    getSearchPlatformIds() {
+      const platformId = CHANNEL_PLATFORM_ID_MAP[this.queryParams.channelType]
+      return platformId ? [platformId] : [ELE_PLATFORM_ID, MT_PLATFORM_ID]
+    },
+    getStoreOptionValue(store) {
+      return store.platformId ? store.platformStoreId : store.storeId
+    },
+    getStoreOptionKey(store) {
+      return `${store.platformId || 'ERP'}-${this.getStoreOptionValue(store) || store.storeName || 'unknown'}`
+    },
+    getStoreOptionLabel(store) {
+      const channelLabelMap = {
+        [ELE_PLATFORM_ID]: '饿了么',
+        [MT_PLATFORM_ID]: '美团'
+      }
+      const optionValue = this.getStoreOptionValue(store)
+      const channelLabel = store.platformId ? channelLabelMap[store.platformId] || '平台门店' : '自有门店'
+      return optionValue ? `${store.storeName}（${channelLabel} / ${optionValue}）` : `${store.storeName}（${channelLabel}）`
+    },
+    async searchStoreList(keyword) {
+      const normalizedKeyword = `${keyword || ''}`.trim()
+      if (!normalizedKeyword) {
+        this.storeList = []
+        return
+      }
       this.storeLoading = true
-      TableApi.getTableAllSimpleList()
-        .then((res) => {
-          const list = Array.isArray(res) ? res : []
-          this.storeList = list.sort((a, b) => {
-            const aStatus = a.storeStatus ?? 0
-            const bStatus = b.storeStatus ?? 0
-            return bStatus - aStatus
+      try {
+        const mergedList = []
+        const seenKeys = new Set()
+        const appendStores = (result) => {
+          const data = Array.isArray(result) ? result : []
+          data.forEach((store) => {
+            const optionKey = this.getStoreOptionKey(store)
+            if (seenKeys.has(optionKey)) {
+              return
+            }
+            seenKeys.add(optionKey)
+            mergedList.push(store)
           })
-          this.queryParams.storeId = null
-          this.getList()
-          this.loadStatusCounts()
-        })
-        .catch(() => {
-          this.storeList = []
-          this.loading = false
-        })
-        .finally(() => {
-          this.storeLoading = false
-        })
+        }
+        if (this.queryParams.channelType === 'self') {
+          appendStores(await TableApi.getTableSimpleList(normalizedKeyword))
+        } else {
+          if (!this.queryParams.channelType) {
+            appendStores(await TableApi.getTableSimpleList(normalizedKeyword).catch(() => []))
+          }
+          const platformResults = await Promise.all(
+            this.getSearchPlatformIds().map((platformId) =>
+              TableApi.searchPlatformStoreSimpleList(platformId, normalizedKeyword, 1, 20).catch(() => [])
+            )
+          )
+          platformResults.forEach((result) => appendStores(result))
+        }
+        this.storeList = mergedList.sort((a, b) => (b.storeStatus ?? 0) - (a.storeStatus ?? 0))
+      } catch {
+        this.storeList = []
+      } finally {
+        this.storeLoading = false
+      }
     },
     loadGoodsList() {
       if (!this.useMockData) {
@@ -735,6 +795,7 @@ export default {
       this.orderList = []
       this.total = 0
       this.goodsList = []
+      this.currentPageStoreNameMap = {}
     },
     getList() {
       this.loading = true
@@ -776,8 +837,9 @@ export default {
         requestParams.status = statusMap[this.activeTab]
       }
       getOrderPage(requestParams)
-        .then((response) => {
+        .then(async (response) => {
           const orderList = Array.isArray(response?.list) ? response.list : []
+          await this.loadCurrentPageStoreNameMap(orderList)
           const normalizedList = orderList.map((item) => this.normalizeOrder(item))
           this.total = response.total || 0
           this.allOrderList = normalizedList
@@ -1130,6 +1192,58 @@ export default {
       }
       return `¥${(Number(value) / 100).toFixed(2)}`
     },
+    getOrderChannelPlatformId(channelType) {
+      return ORDER_CHANNEL_PLATFORM_ID_MAP[channelType] || null
+    },
+    buildStoreNameMapKey(platformId, storeCode) {
+      const normalizedStoreCode = `${storeCode || ''}`.trim()
+      if (!platformId || !normalizedStoreCode) {
+        return ''
+      }
+      return `${platformId}::${normalizedStoreCode}`
+    },
+    async loadCurrentPageStoreNameMap(orderList) {
+      const platformStoreIdsMap = new Map()
+      orderList.forEach((order) => {
+        const platformId = this.getOrderChannelPlatformId(order.channelType)
+        const storeCode = `${order.storeCode || ''}`.trim()
+        if (!platformId || !storeCode) {
+          return
+        }
+        if (!platformStoreIdsMap.has(platformId)) {
+          platformStoreIdsMap.set(platformId, new Set())
+        }
+        platformStoreIdsMap.get(platformId).add(storeCode)
+      })
+      if (!platformStoreIdsMap.size) {
+        this.currentPageStoreNameMap = {}
+        return
+      }
+      const requestList = Array.from(platformStoreIdsMap.entries()).map(([platformId, storeCodeSet]) =>
+        TableApi.getPlatformStoreSimpleList({
+          platformId,
+          platformStoreIds: Array.from(storeCodeSet)
+        }).catch(() => [])
+      )
+      const resultList = await Promise.all(requestList)
+      const storeNameMap = {}
+      resultList.forEach((result) => {
+        const data = Array.isArray(result) ? result : []
+        data.forEach((store) => {
+          const key = this.buildStoreNameMapKey(store.platformId, store.platformStoreId)
+          if (!key || !store.storeName) {
+            return
+          }
+          storeNameMap[key] = store.storeName
+        })
+      })
+      this.currentPageStoreNameMap = storeNameMap
+    },
+    resolveOrderStoreName(item) {
+      const platformId = this.getOrderChannelPlatformId(item.channelType)
+      const mappingKey = this.buildStoreNameMapKey(platformId, item.storeCode)
+      return this.currentPageStoreNameMap[mappingKey] || item.channelSourceName || '--'
+    },
     normalizeOrder(item) {
       const goodsList = Array.isArray(item.subOrders)
         ? item.subOrders.map((sub) => {
@@ -1164,9 +1278,7 @@ export default {
         id: item.orderId,
         orderNo: item.orderId,
         orderSn: item.orderId,
-        storeName: this.storeList.find(
-          (store) => store.platformStoreId === item.storeCode || store.storeId === item.storeCode
-        )?.storeName || item.channelSourceName || '--',
+        storeName: this.resolveOrderStoreName(item),
         channelLabel: this.getChannelLabel(item.channelType),
         deliveryTypeText: this.getDeliveryTypeText(item.deliveryType),
         deliveryPlatformText: this.getDeliveryPlatformText(item),

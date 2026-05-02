@@ -201,6 +201,7 @@ public class StorePlatformCacheService {
         List<PlatformTableDO> platformTables = platformTableMapper.selectList(new LambdaQueryWrapperX<PlatformTableDO>()
                 .in(PlatformTableDO::getStoreId, storeIds)
                 .isNotNull(PlatformTableDO::getPlatformStoreId)
+                .eq(PlatformTableDO::getStatus, 1)
                 .orderByDesc(PlatformTableDO::getStoreId));
         if (CollUtil.isEmpty(platformTables)) {
             log.info("【门店平台信息同步】未查询到平台关联信息，清空Redis缓存");
@@ -208,34 +209,21 @@ public class StorePlatformCacheService {
             return;
         }
 
-        // 3. 构建 storeId -> PlatformTable 映射
-        Map<String, PlatformTableDO> platformTableMap = platformTables.stream()
+        // 3. 构建 storeId -> Store 映射
+        Map<String, StoreDO> storeMap = stores.stream()
                 .filter(item -> StrUtil.isNotBlank(item.getStoreId()))
-                .filter(item -> StrUtil.isNotBlank(item.getPlatformStoreId()))
-                .collect(Collectors.toMap(PlatformTableDO::getStoreId, item -> item, (left, right) -> left,
-                        LinkedHashMap::new));
+                .collect(Collectors.toMap(StoreDO::getStoreId, item -> item, (left, right) -> left, LinkedHashMap::new));
 
-        // 4. 构建 platformId -> Platform 映射
-        Map<Long, PlatformDO> platformMap = new HashMap<>();
-        Set<Long> platformIds = platformTables.stream()
-                .map(PlatformTableDO::getPlatformId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        if (CollUtil.isNotEmpty(platformIds)) {
-            List<PlatformDO> platforms = platformMapper.selectBatchIds(platformIds);
-            for (PlatformDO platform : platforms) {
-                platformMap.put(platform.getPlatformId(), platform);
-            }
-        }
-
-        // 5. 组装结果并写入缓存
+        // 4. 组装结果并写入缓存（按平台关联逐条缓存，而不是每门店只保留一条）
         List<StorePlatformInfoRespVO> result = new ArrayList<>();
-        for (StoreDO store : stores) {
-            PlatformTableDO platformTable = platformTableMap.get(store.getStoreId());
-            if (platformTable == null) {
+        for (PlatformTableDO platformTable : platformTables) {
+            StoreDO store = storeMap.get(platformTable.getStoreId());
+            if (store == null) {
                 continue;
             }
             StorePlatformInfoRespVO vo = new StorePlatformInfoRespVO();
+            vo.setStoreId(store.getStoreId());
+            vo.setPlatformId(platformTable.getPlatformId());
             vo.setPlatformStoreId(StrUtil.trim(platformTable.getPlatformStoreId()));
             vo.setStoreName(StrUtil.trim(store.getStoreName()));
             vo.setStoreStatus(store.getStoreStatus());

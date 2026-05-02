@@ -7,6 +7,12 @@ import lombok.Data;
 @Data
 public class StorePlatformInfoRespVO {
 
+    @Schema(description = "门店ID", requiredMode = Schema.RequiredMode.REQUIRED)
+    private String storeId;
+
+    @Schema(description = "平台ID", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Long platformId;
+
     @Schema(description = "平台门店ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private String platformStoreId;
 

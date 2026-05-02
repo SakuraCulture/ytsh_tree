@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -115,8 +117,7 @@ public class StoreServiceImpl implements StoreService {
         createStatusTable(store.getStoreId(), createReqVO.getStatusTable());
         createFranchiseeTable(store.getStoreId(), createReqVO.getFranchiseeTable());
         createContactTableList(store.getStoreId(), createReqVO.getContactTables());
-        // 同步Redis缓存
-        storePlatformCacheService.syncStorePlatformInfoToRedis();
+        refreshStorePlatformCacheAfterCommit();
         // 返回
         return store.getStoreId();
     }
@@ -150,8 +151,7 @@ public class StoreServiceImpl implements StoreService {
         updateStatusTable(updateReqVO.getStoreId(), updateReqVO.getStatusTable());
         updateFranchiseeTable(updateReqVO.getStoreId(), updateReqVO.getFranchiseeTable());
         updateContactTableList(updateReqVO.getStoreId(), updateReqVO.getContactTables());
-        // 同步Redis缓存
-        storePlatformCacheService.syncStorePlatformInfoToRedis();
+        refreshStorePlatformCacheAfterCommit();
     }
 
     @Override
@@ -168,8 +168,7 @@ public class StoreServiceImpl implements StoreService {
         deleteStatusTableByStoreId(id);
         deleteFranchiseeTableByStoreId(id);
         deleteContactTableByStoreId(id);
-        // 同步Redis缓存
-        storePlatformCacheService.syncStorePlatformInfoToRedis();
+        refreshStorePlatformCacheAfterCommit();
     }
 
     @Override
@@ -184,8 +183,20 @@ public class StoreServiceImpl implements StoreService {
         deleteStatusTableByStoreIds(ids);
         deleteFranchiseeTableByStoreIds(ids);
         deleteContactTableByStoreIds(ids);
-        // 同步Redis缓存
-        storePlatformCacheService.syncStorePlatformInfoToRedis();
+        refreshStorePlatformCacheAfterCommit();
+    }
+
+    private void refreshStorePlatformCacheAfterCommit() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            storePlatformCacheService.syncStorePlatformInfoToRedis();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                storePlatformCacheService.syncStorePlatformInfoToRedis();
+            }
+        });
     }
 
     private StoreDO validateStoreExists(String id) {
@@ -631,8 +642,8 @@ public class StoreServiceImpl implements StoreService {
      * └─────────────────────────────────────────────────────────────┘
      * ↓
      * ┌─────────────────────────────────────────────────────────────┐
-     * │ 第三步：缓存同步 & 返回 │
-     * │ - syncStorePlatformInfoToRedis() │
+     * │ 第三步：请求刷新缓存 & 返回 │
+     * │ - refreshStorePlatformCacheAfterCommit() │
      * │ - 返回导入结果 │
      * └─────────────────────────────────────────────────────────────┘
      *
@@ -801,8 +812,7 @@ public class StoreServiceImpl implements StoreService {
             }
         });
 
-        // 【同步缓存】导入完成后刷新 Redis
-        storePlatformCacheService.syncStorePlatformInfoToRedis();
+        refreshStorePlatformCacheAfterCommit();
         return respVO;
     }
 
@@ -813,50 +823,151 @@ public class StoreServiceImpl implements StoreService {
     }
 
     @Override
-    public List<StoreSimpleRespVO> getStoreSimpleList(Long platformId) {
-        List<StoreDO> storeList = storeMapper.selectListAll();
-        if (CollUtil.isEmpty(storeList)) {
+    public List<StoreSimpleRespVO> searchPlatformStoreSimpleList(Long platformId, String keyword, Integer pageNo, Integer pageSize) {
+        if (platformId == null) {
             return Collections.emptyList();
         }
 
-        List<String> storeIds = storeList.stream()
-                .map(StoreDO::getStoreId)
-                .collect(java.util.stream.Collectors.toList());
+        String normalizedKeyword = StrUtil.trim(keyword);
+        int normalizedPageNo = pageNo == null || pageNo < 1 ? 1 : pageNo;
+        int normalizedPageSize = pageSize == null || pageSize < 1 ? 20 : Math.min(pageSize, 50);
+        Set<String> matchedStoreIds = findMatchedStoreIds(normalizedKeyword);
 
-        Map<String, List<PlatformTableDO>> platformTableMap = new HashMap<>();
-        if (platformId != null) {
-            List<PlatformTableDO> platformTables = platformTableMapper.selectList(
-                    new LambdaQueryWrapperX<PlatformTableDO>()
-                            .in(PlatformTableDO::getStoreId, storeIds)
-                            .eq(PlatformTableDO::getPlatformId, platformId));
-            for (PlatformTableDO pt : platformTables) {
-                platformTableMap.computeIfAbsent(pt.getStoreId(), k -> new ArrayList<>()).add(pt);
+        LambdaQueryWrapperX<PlatformTableDO> wrapper = new LambdaQueryWrapperX<>();
+        wrapper.eq(PlatformTableDO::getPlatformId, platformId)
+                .eq(PlatformTableDO::getStatus, 1)
+                .isNotNull(PlatformTableDO::getPlatformStoreId);
+        wrapper.orderByAsc(PlatformTableDO::getStoreId);
+        if (StrUtil.isNotBlank(normalizedKeyword)) {
+            if (CollUtil.isNotEmpty(matchedStoreIds)) {
+                wrapper.and(query -> query.like(PlatformTableDO::getPlatformStoreId, normalizedKeyword)
+                        .or()
+                        .in(PlatformTableDO::getStoreId, matchedStoreIds));
+            } else {
+                wrapper.like(PlatformTableDO::getPlatformStoreId, normalizedKeyword);
             }
-        } else {
-            List<PlatformTableDO> platformTables = platformTableMapper.selectList(
-                    new LambdaQueryWrapperX<PlatformTableDO>()
-                            .in(PlatformTableDO::getStoreId, storeIds));
-            for (PlatformTableDO pt : platformTables) {
-                platformTableMap.computeIfAbsent(pt.getStoreId(), k -> new ArrayList<>()).add(pt);
+        }
+
+        PageParam pageParam = new PageParam();
+        pageParam.setPageNo(normalizedPageNo);
+        pageParam.setPageSize(normalizedPageSize);
+        PageResult<PlatformTableDO> pageResult = platformTableMapper.selectPage(pageParam, wrapper);
+        if (CollUtil.isEmpty(pageResult.getList())) {
+            return Collections.emptyList();
+        }
+
+        Map<String, StoreDO> storeMap = getStoreMapByIds(pageResult.getList().stream()
+                .map(PlatformTableDO::getStoreId)
+                .collect(Collectors.toCollection(LinkedHashSet::new)));
+        List<StoreSimpleRespVO> result = new ArrayList<>();
+        for (PlatformTableDO platformTable : pageResult.getList()) {
+            StoreDO store = storeMap.get(platformTable.getStoreId());
+            if (store == null) {
+                continue;
+            }
+            result.add(buildStoreSimpleRespVO(store, platformTable));
+        }
+        return result;
+    }
+
+    @Override
+    public List<StoreSimpleRespVO> getPlatformStoreSimpleList(Long platformId, List<String> platformStoreIds) {
+        if (platformId == null || CollUtil.isEmpty(platformStoreIds)) {
+            return Collections.emptyList();
+        }
+
+        LinkedHashSet<String> normalizedIds = platformStoreIds.stream()
+                .map(StrUtil::trim)
+                .filter(StrUtil::isNotBlank)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (CollUtil.isEmpty(normalizedIds)) {
+            return Collections.emptyList();
+        }
+
+        Map<String, StoreSimpleRespVO> resultMap = new LinkedHashMap<>();
+        List<StorePlatformInfoRespVO> cachedList = storePlatformCacheService.getStorePlatformListFromRedis();
+        if (CollUtil.isNotEmpty(cachedList)) {
+            for (StorePlatformInfoRespVO cached : cachedList) {
+                if (!Objects.equals(platformId, cached.getPlatformId())) {
+                    continue;
+                }
+                String normalizedPlatformStoreId = StrUtil.trim(cached.getPlatformStoreId());
+                if (!normalizedIds.contains(normalizedPlatformStoreId) || resultMap.containsKey(normalizedPlatformStoreId)) {
+                    continue;
+                }
+                StoreSimpleRespVO vo = new StoreSimpleRespVO();
+                vo.setStoreId(cached.getStoreId());
+                vo.setStoreName(cached.getStoreName());
+                vo.setPlatformId(cached.getPlatformId());
+                vo.setPlatformStoreId(normalizedPlatformStoreId);
+                vo.setStoreStatus(cached.getStoreStatus());
+                resultMap.put(normalizedPlatformStoreId, vo);
+            }
+        }
+
+        if (resultMap.size() < normalizedIds.size()) {
+            LinkedHashSet<String> missingIds = normalizedIds.stream()
+                    .filter(item -> !resultMap.containsKey(item))
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            if (CollUtil.isNotEmpty(missingIds)) {
+                List<PlatformTableDO> platformTables = platformTableMapper.selectEnabledListByPlatformIdAndPlatformStoreIds(platformId, missingIds);
+                Map<String, StoreDO> storeMap = getStoreMapByIds(platformTables.stream()
+                        .map(PlatformTableDO::getStoreId)
+                        .collect(Collectors.toCollection(LinkedHashSet::new)));
+                for (PlatformTableDO platformTable : platformTables) {
+                    StoreDO store = storeMap.get(platformTable.getStoreId());
+                    if (store == null) {
+                        continue;
+                    }
+                    StoreSimpleRespVO vo = buildStoreSimpleRespVO(store, platformTable);
+                    resultMap.putIfAbsent(StrUtil.trim(vo.getPlatformStoreId()), vo);
+                }
             }
         }
 
         List<StoreSimpleRespVO> result = new ArrayList<>();
-        for (StoreDO store : storeList) {
-            StoreSimpleRespVO vo = new StoreSimpleRespVO();
-            vo.setStoreId(store.getStoreId());
-            vo.setStoreName(store.getStoreName());
-            vo.setStoreStatus(store.getStoreStatus());
-
-            List<PlatformTableDO> platformTables = platformTableMap.get(store.getStoreId());
-            if (CollUtil.isNotEmpty(platformTables)) {
-                PlatformTableDO first = platformTables.get(0);
-                vo.setPlatformId(first.getPlatformId());
-                vo.setPlatformStoreId(StrUtil.trim(first.getPlatformStoreId()));
+        for (String normalizedId : normalizedIds) {
+            StoreSimpleRespVO vo = resultMap.get(normalizedId);
+            if (vo != null) {
+                result.add(vo);
             }
-            result.add(vo);
         }
         return result;
+    }
+
+    private Set<String> findMatchedStoreIds(String keyword) {
+        if (StrUtil.isBlank(keyword)) {
+            return Collections.emptySet();
+        }
+        return storeMapper.selectList(new LambdaQueryWrapperX<StoreDO>()
+                        .and(query -> query.like(StoreDO::getStoreId, keyword)
+                                .or()
+                                .like(StoreDO::getStoreName, keyword))
+                        .orderByDesc(StoreDO::getStoreId))
+                .stream()
+                .map(StoreDO::getStoreId)
+                .filter(StrUtil::isNotBlank)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private Map<String, StoreDO> getStoreMapByIds(Collection<String> storeIds) {
+        if (CollUtil.isEmpty(storeIds)) {
+            return Collections.emptyMap();
+        }
+        return storeMapper.selectList(new LambdaQueryWrapperX<StoreDO>()
+                        .inIfPresent(StoreDO::getStoreId, storeIds))
+                .stream()
+                .collect(Collectors.toMap(StoreDO::getStoreId, item -> item, (left, right) -> left, LinkedHashMap::new));
+    }
+
+    private StoreSimpleRespVO buildStoreSimpleRespVO(StoreDO store, PlatformTableDO platformTable) {
+        StoreSimpleRespVO vo = new StoreSimpleRespVO();
+        vo.setStoreId(store.getStoreId());
+        vo.setStoreName(store.getStoreName());
+        vo.setStoreStatus(store.getStoreStatus());
+        vo.setPlatformId(platformTable.getPlatformId());
+        vo.setPlatformStoreId(StrUtil.trim(platformTable.getPlatformStoreId()));
+        return vo;
     }
 
     @Override
@@ -1106,12 +1217,12 @@ public class StoreServiceImpl implements StoreService {
     }
 
     /**
-     * 【What】从数据库查询门店平台数据并回填 Redis
+     * 【What】从数据库查询门店平台数据并直接返回结果
      *
      * 【查询流程】
      * 1. 查询门店（onlyOpen=true 时只查 storeStatus=1，否则查全部）
      * 2. 查询门店的平台关联（必须有 platformStoreId）
-     * 3. 组装结果并回填 Redis 缓存
+     * 3. 组装结果并直接返回，不在请求线程回填 Redis 缓存
      *
      * 【Why - 为什么要回填缓存？】
      * 缓存未命中说明数据过期或首次加载，需要从数据库加载后回填
@@ -1175,8 +1286,7 @@ public class StoreServiceImpl implements StoreService {
         }
 
         if (CollUtil.isNotEmpty(result)) {
-            storePlatformCacheService.syncStorePlatformInfoToRedis();
-            log.info("【门店平台关联查询】数据库查询完成，已回填Redis缓存，共{}条", result.size());
+            log.info("【门店平台关联查询】数据库查询完成，当前直接返回结果，不在请求线程刷新Redis缓存，共{}条", result.size());
         }
 
         return result;
@@ -1217,8 +1327,8 @@ public class StoreServiceImpl implements StoreService {
     }
 
     /**
-     * 【What】手动触发缓存同步
-     * 【Constraints】同步调用，耗时约 10-50ms
+     * 【What】手动触发门店平台缓存同步
+     * 【Constraints】保持同步调用语义，供运维修复与缓存预热使用
      */
     @Override
     public void syncStorePlatformInfo() {

@@ -18,7 +18,16 @@
         </el-select>
       </el-form-item>
       <el-form-item label="门店选择" prop="storeId">
-        <el-select v-model="formData.storeId" placeholder="请选择门店" filterable class="!w-100%">
+        <el-select
+          v-model="formData.storeId"
+          placeholder="请输入门店名称或门店ID"
+          filterable
+          remote
+          reserve-keyword
+          :remote-method="searchStoreList"
+          :loading="storeLoading"
+          class="!w-100%"
+        >
           <el-option
             v-for="item in storeList"
             :key="item.storeId"
@@ -71,6 +80,7 @@ const formType = ref<'create' | 'update'>('create')
 const formRef = ref()
 const warehouseList = ref<WarehouseSimpleRespVO[]>([])
 const storeList = ref<StoreSimpleRespVO[]>([])
+const storeLoading = ref(false)
 
 const createDefaultFormData = (): WarehouseStoreSupplySaveReqVO => ({
   id: undefined,
@@ -89,13 +99,51 @@ const formRules = reactive({
   supplyStatus: [{ required: true, message: '请选择状态', trigger: 'change' }]
 })
 
+const mergeStoreList = (stores: StoreSimpleRespVO[]) => {
+  const merged = [...storeList.value]
+  stores.forEach((store) => {
+    if (!store?.storeId || merged.some((item) => item.storeId === store.storeId)) {
+      return
+    }
+    merged.push(store)
+  })
+  storeList.value = merged
+}
+
 const loadOptions = async () => {
-  const [warehouses, stores] = await Promise.all([
-    WarehouseApi.getWarehouseSimpleList(),
-    TableApi.getTableAllSimpleList()
-  ])
+  const warehouses = await WarehouseApi.getWarehouseSimpleList()
   warehouseList.value = warehouses || []
-  storeList.value = stores || []
+}
+
+const searchStoreList = async (keyword: string) => {
+  const normalizedKeyword = keyword.trim()
+  if (!normalizedKeyword) {
+    storeList.value = []
+    return
+  }
+  storeLoading.value = true
+  try {
+    const res = await TableApi.getTableSimpleList(normalizedKeyword)
+    storeList.value = Array.isArray(res) ? res : []
+  } catch {
+    storeList.value = []
+  } finally {
+    storeLoading.value = false
+  }
+}
+
+const ensureSelectedStoreOption = async (storeId?: string) => {
+  const normalizedStoreId = `${storeId || ''}`.trim()
+  if (!normalizedStoreId || storeList.value.some((item) => item.storeId === normalizedStoreId)) {
+    return
+  }
+  try {
+    const res = await TableApi.getTableSimpleList(normalizedStoreId)
+    const stores = Array.isArray(res)
+      ? res.filter((item) => `${item.storeId || ''}`.trim() === normalizedStoreId)
+      : []
+    mergeStoreList(stores)
+  } catch {}
 }
 
 const open = async (type: 'create' | 'update', id?: number) => {
@@ -103,6 +151,7 @@ const open = async (type: 'create' | 'update', id?: number) => {
   dialogTitle.value = t('action.' + type)
   formType.value = type
   resetForm()
+  storeList.value = []
   formLoading.value = true
   try {
     await loadOptions()
@@ -114,6 +163,7 @@ const open = async (type: 'create' | 'update', id?: number) => {
       ...createDefaultFormData(),
       ...data
     }
+    await ensureSelectedStoreOption(formData.value.storeId)
   } finally {
     formLoading.value = false
   }

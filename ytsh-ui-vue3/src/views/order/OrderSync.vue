@@ -42,9 +42,12 @@
             <span class="form-label">选择门店</span>
             <el-select
               v-model="selectedStoreId"
-              placeholder="请选择门店"
+              placeholder="请输入门店名称或平台门店ID"
               clearable
               filterable
+              remote
+              reserve-keyword
+              :remote-method="searchStoreList"
               :loading="storeLoading"
               class="store-select"
             >
@@ -550,10 +553,13 @@ import {
   type OrderTrackingAlertVO
 } from '@/api/ele/orderTracking'
 import { TableApi } from '@/api/business/store'
+import type { StoreSimpleRespVO } from '@/api/business/store'
 import Pagination from '@/components/Pagination/index.vue'
 
+const ELE_PLATFORM_ID = 1
+
 const pullMode = ref<'single' | 'all'>('single')
-const storeList = ref<any[]>([])
+const storeList = ref<StoreSimpleRespVO[]>([])
 const storeLoading = ref(false)
 const selectedStoreId = ref<string | null>(null)
 const dateType = ref<'today' | 'custom'>('today')
@@ -773,16 +779,22 @@ const getStoreNameById = (platformStoreId: string) => {
   return store ? store.storeName : platformStoreId || '--'
 }
 
-const loadStoreList = async () => {
+const searchStoreList = async (keyword: string) => {
+  const normalizedKeyword = keyword.trim()
+  if (!normalizedKeyword) {
+    storeList.value = []
+    return
+  }
   storeLoading.value = true
   try {
-    const res = await TableApi.getTableAllSimpleList(1)
+    const res = await TableApi.searchPlatformStoreSimpleList(
+      ELE_PLATFORM_ID,
+      normalizedKeyword,
+      1,
+      20
+    )
     const list = Array.isArray(res) ? res : []
-    storeList.value = list.sort((a: any, b: any) => {
-      const aStatus = a.storeStatus ?? 1
-      const bStatus = b.storeStatus ?? 1
-      return bStatus - aStatus
-    })
+    storeList.value = list.sort((a, b) => (b.storeStatus ?? 1) - (a.storeStatus ?? 1))
   } catch {
     storeList.value = []
   } finally {
@@ -1068,7 +1080,11 @@ const handlePull = async () => {
         failedStores: 0,
         currentSyncingCount: 0,
         currentSyncingStores: [],
-        startTime: 0
+        failedStoreDetails: [],
+        startTime: 0,
+        totalOrders: 0,
+        successOrders: 0,
+        failOrders: 0
       }
 
       try {
@@ -1097,6 +1113,7 @@ const handlePull = async () => {
           failedStores: 0,
           currentSyncingCount: 0,
           currentSyncingStores: [],
+          failedStoreDetails: [],
           startTime: Date.now(),
           totalOrders: 0,
           successOrders: 0,
@@ -1116,6 +1133,7 @@ const handlePull = async () => {
       failedStores: 1,
       currentSyncingCount: 0,
       currentSyncingStores: [],
+      failedStoreDetails: [],
       startTime: Date.now(),
       totalOrders: 0,
       successOrders: 0,
@@ -1313,6 +1331,7 @@ const checkBatchSyncStatusOnMount = async () => {
         failedStores: data.failedStores || 0,
         currentSyncingCount: data.currentSyncingCount || 0,
         currentSyncingStores: data.currentSyncingStores || [],
+        failedStoreDetails: batchProgress.value.failedStoreDetails,
         startTime: data.startTime || 0,
         totalOrders: data.totalOrders || 0,
         successOrders: data.successOrders || 0,
@@ -1501,7 +1520,6 @@ const handleDismissAlerts = async () => {
 }
 
 onMounted(async () => {
-  loadStoreList()
   getSyncLogs()
   loadScheduleConfig()
   checkBatchSyncStatusOnMount()
