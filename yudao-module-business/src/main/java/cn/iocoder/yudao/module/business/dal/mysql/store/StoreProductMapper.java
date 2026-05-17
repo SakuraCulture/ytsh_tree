@@ -38,6 +38,7 @@ public interface StoreProductMapper extends BaseMapperX<StoreProductDO> {
     private LambdaQueryWrapperX<StoreProductDO> buildPageQuery(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
         return new LambdaQueryWrapperX<StoreProductDO>()
                 .likeIfPresent(StoreProductDO::getStoreProductId, reqVO.getStoreProductId())
+                .inIfPresent(StoreProductDO::getStoreProductId, reqVO.getStoreProductIds())
                 .eqIfPresent(StoreProductDO::getStoreId, reqVO.getStoreId())
                 .inIfPresent(StoreProductDO::getProductSkuId, productSkuIds)
                 .eqIfPresent(StoreProductDO::getStoreProductOwnership, reqVO.getProductAttribution())

@@ -6,11 +6,7 @@
       </el-form-item>
       <el-form-item label="标签选择">
         <el-checkbox-group v-model="selectedTagIds" class="tag-grid">
-          <el-checkbox
-            v-for="item in filteredTagList"
-            :key="item.tagValueId"
-            :label="item.tagValueId"
-          >
+          <el-checkbox v-for="item in filteredTagList" :key="item.tagValueId" :label="item.tagValueId">
             {{ item.tagValueName }}（{{ item.tagValueCode }}）
           </el-checkbox>
         </el-checkbox-group>
@@ -25,11 +21,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { SpuTableApi } from '@/api/business/product'
+import { StoreProductApi } from '@/api/business/store-product'
 import { TagValueApi, type TagSelectableValue } from '@/api/business/tag/value'
-import { collectSelectedTagIds, extractManualTagIds } from './productTagLogic'
+import { collectSelectedTagIds, extractManualTagIds } from '../product/productTagLogic'
 
-defineOptions({ name: 'ProductSpuTagForm' })
+defineOptions({ name: 'StoreProductTagForm' })
 
 const message = useMessage()
 
@@ -37,7 +33,7 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('管理标签')
 const loading = ref(false)
 const keyword = ref('')
-const productSpuId = ref<number>()
+const storeProductId = ref<string>()
 const selectableTagList = ref<TagSelectableValue[]>([])
 const selectedTagIds = ref<number[]>([])
 
@@ -53,17 +49,17 @@ const filteredTagList = computed(() => {
   })
 })
 
-const open = async (spuId: number) => {
+const open = async (id: string) => {
   dialogVisible.value = true
   dialogTitle.value = '管理标签'
-  productSpuId.value = spuId
+  storeProductId.value = id
   keyword.value = ''
   selectedTagIds.value = []
   loading.value = true
   try {
     const [tagPool, currentTags] = await Promise.all([
-      TagValueApi.getTagValueListForObject('SPU'),
-      SpuTableApi.getProductSpuTagList(spuId)
+      TagValueApi.getTagValueListForObject('STORE_PRODUCT'),
+      StoreProductApi.getStoreProductTagList(id)
     ])
     selectableTagList.value = tagPool
     selectedTagIds.value = extractManualTagIds(currentTags)
@@ -75,13 +71,13 @@ const open = async (spuId: number) => {
 defineExpose({ open })
 
 const submitForm = async () => {
-  if (!productSpuId.value) {
+  if (!storeProductId.value) {
     return
   }
   loading.value = true
   try {
-    await SpuTableApi.saveProductSpuManualTags({
-      productSpuId: productSpuId.value,
+    await StoreProductApi.saveStoreProductManualTags({
+      storeProductId: storeProductId.value,
       tagValueIds: collectSelectedTagIds(selectedTagIds.value)
     })
     message.success('保存成功')
@@ -91,7 +87,6 @@ const submitForm = async () => {
     loading.value = false
   }
 }
-
 </script>
 
 <style scoped>

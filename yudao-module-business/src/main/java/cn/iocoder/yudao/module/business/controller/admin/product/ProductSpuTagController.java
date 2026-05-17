@@ -1,6 +1,8 @@
 package cn.iocoder.yudao.module.business.controller.admin.product;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
+import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagBatchRespVO;
+import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagBatchSaveReqVO;
 import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagSaveReqVO;
 import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagSimpleRespVO;
@@ -54,6 +56,13 @@ public class ProductSpuTagController {
     public CommonResult<Boolean> saveManualTags(@Valid @RequestBody ProductSpuTagSaveReqVO reqVO) {
         productSpuTagService.saveManualTags(reqVO);
         return success(true);
+    }
+
+    @PostMapping("/save-manual-batch")
+    @Operation(summary = "批量保存商品 SPU 手动标签")
+    @PreAuthorize("@ss.hasPermission('business:spu-table:update')")
+    public CommonResult<ProductSpuTagBatchRespVO> saveManualTagsBatch(@Valid @RequestBody ProductSpuTagBatchSaveReqVO reqVO) {
+        return success(productSpuTagService.saveManualTagsBatch(reqVO));
     }
 
 }

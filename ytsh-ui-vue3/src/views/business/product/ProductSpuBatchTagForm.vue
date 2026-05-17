@@ -1,16 +1,12 @@
 <template>
-  <Dialog :title="dialogTitle" v-model="dialogVisible" width="820px">
+  <Dialog title="批量挂标" v-model="dialogVisible" width="820px">
     <el-form label-width="100px" v-loading="loading">
       <el-form-item label="标签搜索">
         <el-input v-model="keyword" placeholder="请输入标签名称或编码" clearable />
       </el-form-item>
       <el-form-item label="标签选择">
         <el-checkbox-group v-model="selectedTagIds" class="tag-grid">
-          <el-checkbox
-            v-for="item in filteredTagList"
-            :key="item.tagValueId"
-            :label="item.tagValueId"
-          >
+          <el-checkbox v-for="item in filteredTagList" :key="item.tagValueId" :label="item.tagValueId">
             {{ item.tagValueName }}（{{ item.tagValueCode }}）
           </el-checkbox>
         </el-checkbox-group>
@@ -27,17 +23,16 @@
 import { computed } from 'vue'
 import { SpuTableApi } from '@/api/business/product'
 import { TagValueApi, type TagSelectableValue } from '@/api/business/tag/value'
-import { collectSelectedTagIds, extractManualTagIds } from './productTagLogic'
+import { collectSelectedTagIds, formatBatchTagResult } from './productTagLogic'
 
-defineOptions({ name: 'ProductSpuTagForm' })
+defineOptions({ name: 'ProductSpuBatchTagForm' })
 
 const message = useMessage()
 
 const dialogVisible = ref(false)
-const dialogTitle = ref('管理标签')
 const loading = ref(false)
 const keyword = ref('')
-const productSpuId = ref<number>()
+const productSpuIds = ref<number[]>([])
 const selectableTagList = ref<TagSelectableValue[]>([])
 const selectedTagIds = ref<number[]>([])
 
@@ -53,20 +48,14 @@ const filteredTagList = computed(() => {
   })
 })
 
-const open = async (spuId: number) => {
-  dialogVisible.value = true
-  dialogTitle.value = '管理标签'
-  productSpuId.value = spuId
+const open = async (ids: number[]) => {
+  productSpuIds.value = ids
   keyword.value = ''
   selectedTagIds.value = []
+  dialogVisible.value = true
   loading.value = true
   try {
-    const [tagPool, currentTags] = await Promise.all([
-      TagValueApi.getTagValueListForObject('SPU'),
-      SpuTableApi.getProductSpuTagList(spuId)
-    ])
-    selectableTagList.value = tagPool
-    selectedTagIds.value = extractManualTagIds(currentTags)
+    selectableTagList.value = await TagValueApi.getTagValueListForObject('SPU')
   } finally {
     loading.value = false
   }
@@ -75,23 +64,22 @@ const open = async (spuId: number) => {
 defineExpose({ open })
 
 const submitForm = async () => {
-  if (!productSpuId.value) {
+  if (!productSpuIds.value.length) {
     return
   }
   loading.value = true
   try {
-    await SpuTableApi.saveProductSpuManualTags({
-      productSpuId: productSpuId.value,
+    const resp = await SpuTableApi.saveProductSpuManualTagsBatch({
+      productSpuIds: productSpuIds.value,
       tagValueIds: collectSelectedTagIds(selectedTagIds.value)
     })
-    message.success('保存成功')
+    message.success(formatBatchTagResult(resp))
     dialogVisible.value = false
     emit('success')
   } finally {
     loading.value = false
   }
 }
-
 </script>
 
 <style scoped>

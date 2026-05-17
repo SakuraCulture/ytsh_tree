@@ -4,13 +4,17 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.test.core.ut.BaseMockitoUnitTest;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductPageReqVO;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductRespVO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductTagRespVO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductTagSimpleRespVO;
 import cn.iocoder.yudao.module.business.dal.dataobject.product.SkuTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreProductDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagObjectRelationDO;
 import cn.iocoder.yudao.module.business.dal.mysql.product.SkuTableMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.StoreMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.StoreProductMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.StoreStockMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.tag.TagObjectRelationMapper;
 import cn.iocoder.yudao.module.business.service.store.bo.StoreProductShadowRowBO;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -22,6 +26,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.DOMAIN_TYPE_PRODUCT;
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.OBJECT_TYPE_STORE_PRODUCT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -45,6 +51,79 @@ class StoreProductServiceImplTest extends BaseMockitoUnitTest {
     private SkuTableMapper skuTableMapper;
     @Mock
     private StoreProductShadowQueryService shadowQueryService;
+    @Mock
+    private TagObjectRelationMapper tagObjectRelationMapper;
+    @Mock
+    private StoreProductTagService storeProductTagService;
+
+    @Test
+    void getStoreProductPage_shouldFilterByTagValueAndFillTags() {
+        StoreProductPageReqVO reqVO = new StoreProductPageReqVO();
+        reqVO.setPageNo(1);
+        reqVO.setPageSize(10);
+        reqVO.setTagValueId(11L);
+
+        when(tagObjectRelationMapper.selectActiveListByTagValue(DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_STORE_PRODUCT, 11L))
+                .thenReturn(List.of(TagObjectRelationDO.builder().objectId("SP001").build()));
+
+        StoreProductDO formal = new StoreProductDO();
+        formal.setStoreProductId("SP001");
+        formal.setStoreId("STORE001");
+        formal.setProductSkuId("1001");
+        formal.setStoreProductOwnership("入店");
+        formal.setStoreProductPosStatus("1");
+        formal.setStoreProductPrice(new BigDecimal("10.00"));
+        formal.setStoreProductIsActive(1);
+        formal.setCreateTime(LocalDateTime.of(2026, 4, 27, 10, 0));
+
+        SkuTableDO sku = new SkuTableDO();
+        sku.setProductSkuId(1001L);
+        sku.setProductSkuCode("SKU001");
+        sku.setProductSkuName("正式商品");
+
+        StoreDO store = new StoreDO();
+        store.setStoreId("STORE001");
+        store.setStoreName("示例门店");
+
+        StoreProductTagRespVO tag = new StoreProductTagRespVO();
+        tag.setTagValueId(11L);
+        tag.setTagValueName("重点标签");
+        StoreProductTagSimpleRespVO simpleTag = new StoreProductTagSimpleRespVO();
+        simpleTag.setStoreProductId("SP001");
+        simpleTag.setTags(List.of(tag));
+
+        when(storeProductMapper.selectPage(any(), org.mockito.ArgumentMatchers.<java.util.List<String>>any()))
+                .thenReturn(new PageResult<>(List.of(formal), 1L));
+        when(skuTableMapper.selectListByProductSkuIds(anyCollection())).thenReturn(List.of(sku));
+        when(storeMapper.selectList(any())).thenReturn(List.of(store));
+        when(storeProductTagService.getSimpleTagList(List.of("SP001"))).thenReturn(List.of(simpleTag));
+
+        PageResult<StoreProductRespVO> result = storeProductService.getStoreProductPage(reqVO);
+
+        assertEquals(1L, result.getTotal());
+        assertEquals(1, result.getList().size());
+        assertEquals("SP001", result.getList().get(0).getStoreProductId());
+        assertEquals(1, result.getList().get(0).getTags().size());
+        assertEquals(11L, result.getList().get(0).getTags().get(0).getTagValueId());
+    }
+
+    @Test
+    void getStoreProductPage_whenTagFilterMatchesNoFormalRows_shouldReturnEmpty() {
+        StoreProductPageReqVO reqVO = new StoreProductPageReqVO();
+        reqVO.setPageNo(1);
+        reqVO.setPageSize(10);
+        reqVO.setTagValueId(11L);
+
+        when(tagObjectRelationMapper.selectActiveListByTagValue(DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_STORE_PRODUCT, 11L))
+                .thenReturn(Collections.emptyList());
+
+        PageResult<StoreProductRespVO> result = storeProductService.getStoreProductPage(reqVO);
+
+        assertEquals(0L, result.getTotal());
+        assertEquals(0, result.getList().size());
+        verify(storeProductMapper, never()).selectCountForPage(any(), org.mockito.ArgumentMatchers.<java.util.List<String>>any());
+        verify(shadowQueryService, never()).countActiveShadowRows(any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
 
     @Test
     void getStoreProductPage_shouldAppendShadowRows() {

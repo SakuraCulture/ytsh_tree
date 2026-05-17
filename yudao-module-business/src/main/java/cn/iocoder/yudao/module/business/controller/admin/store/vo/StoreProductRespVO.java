@@ -6,6 +6,8 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+
 import cn.idev.excel.annotation.*;
 
 @Schema(description = "管理后台 - 门店商品 Response VO")
@@ -88,5 +90,8 @@ public class StoreProductRespVO {
     @Schema(description = "创建时间")
     @ExcelProperty("创建时间")
     private LocalDateTime createTime;
+
+    @Schema(description = "标签列表")
+    private List<StoreProductTagRespVO> tags;
 
 }

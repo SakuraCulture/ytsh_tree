@@ -64,6 +64,12 @@ export interface ProductSpuTagRespVO {
   sourceDetails: ProductSpuTagSourceRespVO[]
 }
 
+export interface ProductTagBatchRespVO {
+  successCount: number
+  failureCount: number
+  failureDetails: { objectId: string; reason: string }[]
+}
+
 // SPU基础分类 API
 export const SpuTableApi = {
   // 查询SPU基础分类分页
@@ -89,6 +95,13 @@ export const SpuTableApi = {
 
   saveProductSpuManualTags: async (data: { productSpuId: number; tagValueIds: number[] }) => {
     return await request.post({ url: '/business/product-spu-tag/save-manual', data })
+  },
+
+  saveProductSpuManualTagsBatch: async (data: { productSpuIds: number[]; tagValueIds: number[] }) => {
+    return await request.post<ProductTagBatchRespVO>({
+      url: '/business/product-spu-tag/save-manual-batch',
+      data
+    })
   },
 
   // 新增SPU基础分类

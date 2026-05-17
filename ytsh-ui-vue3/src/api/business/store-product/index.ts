@@ -19,6 +19,34 @@ export interface StoreProductStockRespVO {
   outOfStockDuration?: number
 }
 
+export interface StoreProductTagSourceRespVO {
+  sourceType: string
+  sourceRef: string
+  status: number
+  effectiveTime?: string
+  expireTime?: string
+}
+
+export interface StoreProductTagRespVO {
+  tagValueId: number
+  tagValueCode: string
+  tagValueName: string
+  dimensionPath: string
+  sources: string[]
+  sourceDetails: StoreProductTagSourceRespVO[]
+}
+
+export interface StoreProductTagSimpleRespVO {
+  storeProductId: string
+  tags: StoreProductTagRespVO[]
+}
+
+export interface StoreProductTagBatchRespVO {
+  successCount: number
+  failureCount: number
+  failureDetails: { objectId: string; reason: string }[]
+}
+
 /** 门店商品列表信息 */
 export interface StoreProductTable {
   storeProductId?: number | string
@@ -40,6 +68,7 @@ export interface StoreProductTable {
   enterShopStatus?: number
   firstEnterShopDate?: string
   createTime?: string
+  tags?: StoreProductTagRespVO[]
 }
 
 /** 门店商品详情 */
@@ -130,6 +159,34 @@ export const StoreProductApi = {
 
   getStockById: async (id: number | string) => {
     return await request.get({ url: `/store-product/get-by-store-product/` + id })
+  },
+
+  getStoreProductTagList: async (storeProductId: string) => {
+    return await request.get<StoreProductTagRespVO[]>({
+      url: '/business/store-product-tag/list',
+      params: { storeProductId }
+    })
+  },
+
+  getStoreProductTagSimpleList: async (storeProductIds: string[]) => {
+    return await request.get<StoreProductTagSimpleRespVO[]>({
+      url: '/business/store-product-tag/simple-list',
+      params: { storeProductIds }
+    })
+  },
+
+  saveStoreProductManualTags: async (data: { storeProductId: string; tagValueIds: number[] }) => {
+    return await request.post({
+      url: '/business/store-product-tag/save-manual',
+      data
+    })
+  },
+
+  saveStoreProductManualTagsBatch: async (data: { storeProductIds: string[]; tagValueIds: number[] }) => {
+    return await request.post<StoreProductTagBatchRespVO>({
+      url: '/business/store-product-tag/save-manual-batch',
+      data
+    })
   },
 
   getSkuSimpleList: async () => {

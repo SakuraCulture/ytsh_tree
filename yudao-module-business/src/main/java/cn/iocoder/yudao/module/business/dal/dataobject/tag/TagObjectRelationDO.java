@@ -32,7 +32,7 @@ public class TagObjectRelationDO extends BaseDO {
 
     private String objectType;
 
-    private Long objectId;
+    private String objectId;
 
     private Long tagValueId;
 

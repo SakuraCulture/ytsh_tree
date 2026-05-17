@@ -1,6 +1,7 @@
 DELETE FROM `product_upc_table`;
 DELETE FROM `product_sku_table`;
 DELETE FROM `product_spu_table`;
+DELETE FROM `store_product_table`;
 DELETE FROM `tag_object_relation`;
 DELETE FROM `tag_virtual`;
 DELETE FROM `tag_value`;

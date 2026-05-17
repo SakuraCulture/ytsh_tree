@@ -175,6 +175,15 @@
           <Icon icon="ep:download" class="mr-5px" /> 导出
         </el-button>
         <el-button
+          type="warning"
+          plain
+          :disabled="isEmpty(checkedIds)"
+          @click="openBatchTagForm"
+          v-hasPermi="['business:spu-table:update']"
+        >
+          <Icon icon="ep:collection-tag" class="mr-5px" /> 批量挂标
+        </el-button>
+        <el-button
           type="danger"
           plain
           :disabled="isEmpty(checkedIds)"
@@ -390,6 +399,7 @@
   <!-- 表单弹窗：添加/修改 -->
   <SpuTableForm ref="formRef" @success="getList" />
   <ProductSpuTagForm ref="tagFormRef" @success="handleTagSaved" />
+  <ProductSpuBatchTagForm ref="batchTagFormRef" @success="handleTagSaved" />
 
   <!-- UPC码表单弹窗 -->
   <el-dialog v-model="upcDialogVisible" :title="upcDialogTitle" width="500px" destroy-on-close>
@@ -495,6 +505,7 @@ import {
 } from '@/api/business/product'
 import { CategoryTableApi } from '@/api/business/category'
 import { TagValueApi, type TagSelectableValue } from '@/api/business/tag/value'
+import ProductSpuBatchTagForm from './ProductSpuBatchTagForm.vue'
 import ProductSpuTagForm from './ProductSpuTagForm.vue'
 import SpuTableForm from './SpuTableForm.vue'
 
@@ -536,6 +547,7 @@ const categoryMap = ref<Map<number, string>>(new Map()) // categoryId -> categor
 const categoryTreeData = ref<any[]>([]) // 类目树形数据
 const selectableTagList = ref<TagSelectableValue[]>([])
 const tagFormRef = ref()
+const batchTagFormRef = ref()
 
 /** 查询列表 */
 const getList = async () => {
@@ -580,6 +592,10 @@ const openForm = (type: string, id?: number) => {
 
 const openTagForm = (productSpuId: number) => {
   tagFormRef.value.open(productSpuId)
+}
+
+const openBatchTagForm = () => {
+  batchTagFormRef.value.open(checkedIds.value)
 }
 
 const handleTagSaved = async () => {

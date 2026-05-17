@@ -15,7 +15,7 @@ import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.RELATION_S
 @Mapper
 public interface TagObjectRelationMapper extends BaseMapperX<TagObjectRelationDO> {
 
-    default List<TagObjectRelationDO> selectActiveList(String domainType, String objectType, Long objectId) {
+    default List<TagObjectRelationDO> selectActiveList(String domainType, String objectType, String objectId) {
         return selectList(new LambdaQueryWrapperX<TagObjectRelationDO>()
                 .eq(TagObjectRelationDO::getDomainType, domainType)
                 .eq(TagObjectRelationDO::getObjectType, objectType)
@@ -24,7 +24,7 @@ public interface TagObjectRelationMapper extends BaseMapperX<TagObjectRelationDO
                 .orderByAsc(TagObjectRelationDO::getId));
     }
 
-    default List<TagObjectRelationDO> selectActiveListByObjectIds(String domainType, String objectType, Collection<Long> objectIds) {
+    default List<TagObjectRelationDO> selectActiveListByObjectIds(String domainType, String objectType, Collection<String> objectIds) {
         return selectList(new LambdaQueryWrapperX<TagObjectRelationDO>()
                 .eq(TagObjectRelationDO::getDomainType, domainType)
                 .eq(TagObjectRelationDO::getObjectType, objectType)
@@ -41,7 +41,7 @@ public interface TagObjectRelationMapper extends BaseMapperX<TagObjectRelationDO
                 .orderByAsc(TagObjectRelationDO::getId));
     }
 
-    default List<TagObjectRelationDO> selectListByObjectAndSource(String domainType, String objectType, Long objectId,
+    default List<TagObjectRelationDO> selectListByObjectAndSource(String domainType, String objectType, String objectId,
                                                                   String sourceType, String sourceRef) {
         return selectList(new LambdaQueryWrapperX<TagObjectRelationDO>()
                 .eq(TagObjectRelationDO::getDomainType, domainType)
@@ -52,7 +52,7 @@ public interface TagObjectRelationMapper extends BaseMapperX<TagObjectRelationDO
                 .orderByAsc(TagObjectRelationDO::getId));
     }
 
-    default TagObjectRelationDO selectByBiz(String domainType, String objectType, Long objectId, Long tagValueId,
+    default TagObjectRelationDO selectByBiz(String domainType, String objectType, String objectId, Long tagValueId,
                                             String sourceType, String sourceRef) {
         return selectOne(new LambdaQueryWrapperX<TagObjectRelationDO>()
                 .eq(TagObjectRelationDO::getDomainType, domainType)
@@ -64,6 +64,6 @@ public interface TagObjectRelationMapper extends BaseMapperX<TagObjectRelationDO
     }
 
     @Select("SELECT * FROM tag_object_relation WHERE object_type = #{objectType} AND object_id = #{objectId} ORDER BY id ASC")
-    List<TagObjectRelationDO> selectByObjectIdIgnoreDeleted(@Param("objectType") String objectType, @Param("objectId") Long objectId);
+    List<TagObjectRelationDO> selectByObjectIdIgnoreDeleted(@Param("objectType") String objectType, @Param("objectId") String objectId);
 
 }
