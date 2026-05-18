@@ -181,7 +181,7 @@ public class SpuTableServiceImpl implements SpuTableService {
             if (CollUtil.isEmpty(relations)) {
                 return PageResult.empty();
             }
-            List<Long> taggedSpuIds = CollUtil.distinct(convertList(relations, TagObjectRelationDO::getObjectId));
+            List<Long> taggedSpuIds = CollUtil.distinct(convertList(relations, this::parseSpuObjectId));
             filteredSpuIds = filteredSpuIds == null ? taggedSpuIds
                     : new ArrayList<>(CollUtil.intersectionDistinct(filteredSpuIds, taggedSpuIds));
             if (CollUtil.isEmpty(filteredSpuIds)) {
@@ -191,6 +191,15 @@ public class SpuTableServiceImpl implements SpuTableService {
         SpuTablePageReqVO queryReqVO = BeanUtils.toBean(pageReqVO, SpuTablePageReqVO.class);
         queryReqVO.setSpuIds(filteredSpuIds);
         return spuTableMapper.selectPage(queryReqVO);
+    }
+
+    private Long parseSpuObjectId(TagObjectRelationDO relation) {
+        String objectId = relation.getObjectId();
+        try {
+            return Long.parseLong(objectId);
+        } catch (NumberFormatException ex) {
+            throw exception(TAG_OBJECT_TYPE_INVALID);
+        }
     }
 
     // ==================== 子表（SKU商品主数据） ====================

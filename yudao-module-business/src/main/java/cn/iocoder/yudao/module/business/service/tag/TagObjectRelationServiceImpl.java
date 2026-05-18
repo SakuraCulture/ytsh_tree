@@ -39,35 +39,43 @@ public class TagObjectRelationServiceImpl implements TagObjectRelationService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void saveManualRelations(String domainType, String objectType, Long objectId, List<Long> tagValueIds) {
+    public void saveManualRelations(String domainType, String objectType, String objectId, List<Long> tagValueIds) {
         saveRelations(domainType, objectType, objectId, tagValueIds, SOURCE_TYPE_MANUAL, "");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void saveRuleRelations(String domainType, String objectType, Long objectId, String sourceRef, List<Long> tagValueIds) {
+    public void saveRuleRelations(String domainType, String objectType, String objectId, String sourceRef, List<Long> tagValueIds) {
         saveRelations(domainType, objectType, objectId, tagValueIds, SOURCE_TYPE_RULE, sourceRef);
     }
 
     @Override
-    public List<TagObjectRelationDO> getActiveRelations(String domainType, String objectType, Long objectId) {
-        validateScope(domainType, objectType, objectId);
-        return tagObjectRelationMapper.selectActiveList(domainType, objectType, objectId);
+    public List<TagObjectRelationDO> getActiveRelations(String domainType, String objectType, String objectId) {
+        String normalizedObjectId = validateScope(domainType, objectType, objectId);
+        return tagObjectRelationMapper.selectActiveList(domainType, objectType, normalizedObjectId);
     }
 
     @Override
-    public List<TagObjectRelationDO> getActiveRelationsByObjectIds(String domainType, String objectType, Collection<Long> objectIds) {
+    public List<TagObjectRelationDO> getActiveRelationsByObjectIds(String domainType, String objectType, Collection<String> objectIds) {
         validateDomainType(domainType);
         validateObjectType(objectType);
         if (CollUtil.isEmpty(objectIds)) {
             return List.of();
         }
-        return tagObjectRelationMapper.selectActiveListByObjectIds(domainType, objectType, objectIds);
+        List<String> normalizedObjectIds = objectIds.stream()
+                .filter(Objects::nonNull)
+                .map(objectId -> normalizeObjectId(objectType, objectId))
+                .distinct()
+                .toList();
+        if (CollUtil.isEmpty(normalizedObjectIds)) {
+            return List.of();
+        }
+        return tagObjectRelationMapper.selectActiveListByObjectIds(domainType, objectType, normalizedObjectIds);
     }
 
-    private void saveRelations(String domainType, String objectType, Long objectId, List<Long> tagValueIds,
+    private void saveRelations(String domainType, String objectType, String objectId, List<Long> tagValueIds,
                                String sourceType, String sourceRef) {
-        validateScope(domainType, objectType, objectId);
+        String normalizedObjectId = validateScope(domainType, objectType, objectId);
         validateSourceType(sourceType);
         String normalizedSourceRef = normalizeSourceRef(sourceType, sourceRef);
         List<Long> dedupedTagValueIds = dedupeTagValueIds(tagValueIds);
@@ -75,17 +83,26 @@ public class TagObjectRelationServiceImpl implements TagObjectRelationService {
 
         LocalDateTime now = LocalDateTime.now();
         List<TagObjectRelationDO> scopedRelations = tagObjectRelationMapper.selectListByObjectAndSource(
-                domainType, objectType, objectId, sourceType, normalizedSourceRef);
+                domainType, objectType, normalizedObjectId, sourceType, normalizedSourceRef);
         disableRemovedRelations(scopedRelations, dedupedTagValueIds, now);
-        upsertTargetRelations(domainType, objectType, objectId, dedupedTagValueIds, sourceType, normalizedSourceRef, now);
+        upsertTargetRelations(domainType, objectType, normalizedObjectId, dedupedTagValueIds, sourceType, normalizedSourceRef, now);
     }
 
-    private void validateScope(String domainType, String objectType, Long objectId) {
+    private String validateScope(String domainType, String objectType, String objectId) {
         validateDomainType(domainType);
         validateObjectType(objectType);
-        if (objectId == null) {
+        return normalizeObjectId(objectType, objectId);
+    }
+
+    private String normalizeObjectId(String objectType, String objectId) {
+        String normalizedObjectId = StrUtil.trimToEmpty(objectId);
+        if (StrUtil.isBlank(normalizedObjectId)) {
             throw exception(TAG_OBJECT_TYPE_INVALID);
         }
+        if (Objects.equals(objectType, OBJECT_TYPE_SPU) && !StrUtil.isNumeric(normalizedObjectId)) {
+            throw exception(TAG_OBJECT_TYPE_INVALID);
+        }
+        return normalizedObjectId;
     }
 
     private void validateDomainType(String domainType) {
@@ -169,7 +186,7 @@ public class TagObjectRelationServiceImpl implements TagObjectRelationService {
         }
     }
 
-    private void upsertTargetRelations(String domainType, String objectType, Long objectId, List<Long> tagValueIds,
+    private void upsertTargetRelations(String domainType, String objectType, String objectId, List<Long> tagValueIds,
                                        String sourceType, String sourceRef, LocalDateTime effectiveTime) {
         for (Long tagValueId : tagValueIds) {
             TagObjectRelationDO existing = tagObjectRelationMapper.selectByBiz(domainType, objectType, objectId, tagValueId,

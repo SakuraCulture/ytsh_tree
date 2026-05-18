@@ -7,12 +7,12 @@ import java.util.List;
 
 public interface TagObjectRelationService {
 
-    void saveManualRelations(String domainType, String objectType, Long objectId, List<Long> tagValueIds);
+    void saveManualRelations(String domainType, String objectType, String objectId, List<Long> tagValueIds);
 
-    void saveRuleRelations(String domainType, String objectType, Long objectId, String sourceRef, List<Long> tagValueIds);
+    void saveRuleRelations(String domainType, String objectType, String objectId, String sourceRef, List<Long> tagValueIds);
 
-    List<TagObjectRelationDO> getActiveRelations(String domainType, String objectType, Long objectId);
+    List<TagObjectRelationDO> getActiveRelations(String domainType, String objectType, String objectId);
 
-    List<TagObjectRelationDO> getActiveRelationsByObjectIds(String domainType, String objectType, Collection<Long> objectIds);
+    List<TagObjectRelationDO> getActiveRelationsByObjectIds(String domainType, String objectType, Collection<String> objectIds);
 
 }

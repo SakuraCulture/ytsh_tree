@@ -78,6 +78,22 @@
             <el-option label="否" :value="0" />
           </el-select>
         </el-form-item>
+        <el-form-item label="商品标签" prop="tagValueId">
+          <el-select
+            v-model="queryParams.tagValueId"
+            placeholder="请选择标签"
+            clearable
+            filterable
+            class="!w-100%"
+          >
+            <el-option
+              v-for="item in selectableTagList"
+              :key="item.tagValueId"
+              :label="`${item.tagValueName}（${item.tagValueCode}）`"
+              :value="item.tagValueId"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="创建时间" prop="createTime">
           <el-date-picker
             v-model="queryParams.createTime"
@@ -145,6 +161,15 @@
           </div>
           <div class="action-group">
             <el-button
+              type="warning"
+              plain
+              :disabled="isEmpty(checkedIds)"
+              @click="openBatchTagForm"
+              v-hasPermi="['business:store-product:update']"
+            >
+              <Icon icon="ep:collection-tag" class="mr-5px" /> 批量挂标
+            </el-button>
+            <el-button
               type="danger"
               plain
               :disabled="isEmpty(checkedIds)"
@@ -208,6 +233,17 @@
         </template>
       </el-table-column>
       <el-table-column label="首次入店日期" align="center" prop="firstEnterShopDate" width="130" />
+      <el-table-column label="标签" min-width="220">
+        <template #default="{ row }">
+          <el-space v-if="isFormalRow(row)" wrap>
+            <el-tag v-for="tag in row.tags || []" :key="`${row.storeProductId}-${tag.tagValueId}`" type="success">
+              {{ tag.tagValueName }}
+            </el-tag>
+            <span v-if="!(row.tags || []).length" class="text-gray-400">-</span>
+          </el-space>
+          <span v-else class="text-gray-400">-</span>
+        </template>
+      </el-table-column>
       <el-table-column
         label="创建时间"
         align="center"
@@ -215,7 +251,7 @@
         :formatter="dateFormatter"
         width="180"
       />
-      <el-table-column label="操作" align="center" fixed="right" width="180">
+      <el-table-column label="操作" align="center" fixed="right" width="240">
         <template #default="scope">
           <template v-if="isFormalRow(scope.row)">
             <el-button
@@ -225,6 +261,14 @@
               v-hasPermi="['business:store-product:update']"
             >
               编辑
+            </el-button>
+            <el-button
+              link
+              type="primary"
+              @click="openTagForm(String(scope.row.storeProductId))"
+              v-hasPermi="['business:store-product:update']"
+            >
+              管理标签
             </el-button>
             <el-button
               link
@@ -248,6 +292,8 @@
   </ContentWrap>
 
   <StoreProductForm ref="formRef" @success="getList" />
+  <StoreProductTagForm ref="tagFormRef" @success="handleTagSaved" />
+  <StoreProductBatchTagForm ref="batchTagFormRef" @success="handleTagSaved" />
 </template>
 
 <script setup lang="ts">
@@ -256,7 +302,10 @@ import { dateFormatter } from '@/utils/formatTime'
 import download from '@/utils/download'
 import { StoreProductApi, StoreProductTable } from '@/api/business/store-product'
 import { TableApi } from '@/api/business/store'
+import { TagValueApi, type TagSelectableValue } from '@/api/business/tag/value'
+import StoreProductBatchTagForm from './StoreProductBatchTagForm.vue'
 import StoreProductForm from './StoreProductForm.vue'
+import StoreProductTagForm from './StoreProductTagForm.vue'
 import StockExpandCard from './components/StockExpandCard.vue'
 
 defineOptions({ name: 'StoreProduct' })
@@ -276,6 +325,7 @@ const queryParams = reactive({
   productAttribution: undefined as string | undefined,
   posStatus: undefined as number | undefined,
   enterShopStatus: undefined as number | undefined,
+  tagValueId: undefined as number | undefined,
   createTime: [] as string[] | undefined
 })
 const queryFormRef = ref()
@@ -283,6 +333,7 @@ const exportLoading = ref(false)
 
 const storeLoading = ref(false)
 const storeList = ref<any[]>([])
+const selectableTagList = ref<TagSelectableValue[]>([])
 
 const searchStoreSuggestions = async (queryString: string) => {
   if (!queryString) {
@@ -311,6 +362,10 @@ const getList = async () => {
   }
 }
 
+const loadSelectableTags = async () => {
+  selectableTagList.value = await TagValueApi.getTagValueListForObject('STORE_PRODUCT')
+}
+
 const handleQuery = () => {
   queryParams.pageNo = 1
   getList()
@@ -322,8 +377,22 @@ const resetQuery = () => {
 }
 
 const formRef = ref()
+const tagFormRef = ref()
+const batchTagFormRef = ref()
 const openForm = (type: string, id?: number | string, row?: StoreProductTable) => {
   formRef.value.open(type, id, row)
+}
+
+const openTagForm = (storeProductId: string) => {
+  tagFormRef.value.open(storeProductId)
+}
+
+const openBatchTagForm = () => {
+  batchTagFormRef.value.open(checkedIds.value.map(String))
+}
+
+const handleTagSaved = async () => {
+  await getList()
 }
 
 const handleDelete = async (id: number | string) => {
@@ -416,6 +485,7 @@ const handleImport = async (file: File) => {
 }
 
 onMounted(() => {
+  loadSelectableTags()
   getList()
 })
 </script>

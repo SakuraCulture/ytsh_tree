@@ -17,6 +17,7 @@ import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreProductDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreStockDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.product.SkuTableDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagObjectRelationDO;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 
@@ -24,11 +25,14 @@ import cn.iocoder.yudao.module.business.dal.mysql.store.StoreProductMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.StoreStockMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.store.StoreMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.product.SkuTableMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.tag.TagObjectRelationMapper;
 import cn.iocoder.yudao.module.business.service.store.bo.StoreProductShadowRowBO;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.*;
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.DOMAIN_TYPE_PRODUCT;
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.OBJECT_TYPE_STORE_PRODUCT;
 
 /**
  * 门店商品 Service 实现类
@@ -87,6 +91,10 @@ public class StoreProductServiceImpl implements StoreProductService {
     private SkuTableMapper skuTableMapper;
     @Resource
     private StoreProductShadowQueryService shadowQueryService;
+    @Resource
+    private TagObjectRelationMapper tagObjectRelationMapper;
+    @Resource
+    private StoreProductTagService storeProductTagService;
 
     /**
      * 入店归属常量
@@ -289,9 +297,25 @@ public class StoreProductServiceImpl implements StoreProductService {
     @Override
     public PageResult<StoreProductRespVO> getStoreProductPage(StoreProductPageReqVO pageReqVO) {
         List<String> productSkuIds = getProductSkuIds(pageReqVO);
-        boolean formalOnly = "FORMAL".equalsIgnoreCase(pageReqVO.getRowSource());
-        boolean shadowOnly = "SHADOW".equalsIgnoreCase(pageReqVO.getRowSource())
-                || "MASTER_MISSING".equalsIgnoreCase(pageReqVO.getCompletenessStatus());
+        if (pageReqVO.getTagValueId() != null) {
+            if ("SHADOW".equalsIgnoreCase(pageReqVO.getRowSource())
+                    || "MASTER_MISSING".equalsIgnoreCase(pageReqVO.getCompletenessStatus())) {
+                return PageResult.empty();
+            }
+            List<TagObjectRelationDO> relations = tagObjectRelationMapper.selectActiveListByTagValue(
+                    DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_STORE_PRODUCT, pageReqVO.getTagValueId());
+            if (CollUtil.isEmpty(relations)) {
+                return PageResult.empty();
+            }
+            pageReqVO.setStoreProductIds(relations.stream()
+                    .map(TagObjectRelationDO::getObjectId)
+                    .filter(StrUtil::isNotBlank)
+                    .distinct()
+                    .toList());
+        }
+        boolean formalOnly = pageReqVO.getTagValueId() != null || "FORMAL".equalsIgnoreCase(pageReqVO.getRowSource());
+        boolean shadowOnly = pageReqVO.getTagValueId() == null && ("SHADOW".equalsIgnoreCase(pageReqVO.getRowSource())
+                || "MASTER_MISSING".equalsIgnoreCase(pageReqVO.getCompletenessStatus()));
 
         boolean formalSkuFilterMiss = hasSkuFilter(pageReqVO) && CollUtil.isEmpty(productSkuIds);
         if (formalOnly && formalSkuFilterMiss) {
@@ -603,8 +627,15 @@ public class StoreProductServiceImpl implements StoreProductService {
         Map<String, SkuTableDO> skuMap = getSkuMap(formalList.stream()
                 .map(StoreProductDO::getProductSkuId)
                 .collect(Collectors.toSet()));
+        Map<String, List<StoreProductTagRespVO>> tagMap = getStoreProductTagMap(formalList.stream()
+                .map(StoreProductDO::getStoreProductId)
+                .collect(Collectors.toList()));
         return formalList.stream()
-                .map(item -> buildRespVO(item, storeMap, skuMap))
+                .map(item -> {
+                    StoreProductRespVO respVO = buildRespVO(item, storeMap, skuMap);
+                    respVO.setTags(tagMap.getOrDefault(item.getStoreProductId(), Collections.emptyList()));
+                    return respVO;
+                })
                 .collect(Collectors.toList());
     }
 
@@ -627,6 +658,17 @@ public class StoreProductServiceImpl implements StoreProductService {
         return shadowList.stream()
                 .map(item -> buildShadowRespVO(item, storeMap))
                 .collect(Collectors.toList());
+    }
+
+    private Map<String, List<StoreProductTagRespVO>> getStoreProductTagMap(Collection<String> storeProductIds) {
+        if (CollUtil.isEmpty(storeProductIds)) {
+            return Collections.emptyMap();
+        }
+        return storeProductTagService.getSimpleTagList(storeProductIds).stream()
+                .collect(Collectors.toMap(StoreProductTagSimpleRespVO::getStoreProductId,
+                        item -> item.getTags() == null ? Collections.emptyList() : item.getTags(),
+                        (item1, item2) -> item1,
+                        LinkedHashMap::new));
     }
 
     private int getPageSize(StoreProductPageReqVO pageReqVO) {
@@ -654,6 +696,7 @@ public class StoreProductServiceImpl implements StoreProductService {
         respVO.setCompletenessStatus("MASTER_MISSING");
         respVO.setMatchStatus(shadow.getMatchStatus());
         respVO.setCreateTime(shadow.getCreateTime());
+        respVO.setTags(Collections.emptyList());
         StoreDO store = storeMap.get(shadow.getStoreId());
         if (store != null) {
             respVO.setStoreName(store.getStoreName());

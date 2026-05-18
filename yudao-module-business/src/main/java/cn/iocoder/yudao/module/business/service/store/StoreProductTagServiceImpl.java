@@ -1,19 +1,19 @@
-package cn.iocoder.yudao.module.business.service.product;
+package cn.iocoder.yudao.module.business.service.store;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.exception.ServiceException;
-import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagBatchRespVO;
-import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagBatchSaveReqVO;
-import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagRespVO;
-import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagSaveReqVO;
-import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagSimpleRespVO;
 import cn.iocoder.yudao.module.business.controller.admin.product.vo.ProductSpuTagSourceRespVO;
-import cn.iocoder.yudao.module.business.dal.dataobject.product.SpuTableDO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductTagBatchRespVO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductTagBatchSaveReqVO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductTagRespVO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductTagSaveReqVO;
+import cn.iocoder.yudao.module.business.controller.admin.store.vo.StoreProductTagSimpleRespVO;
+import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreProductDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagDimensionDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagObjectRelationDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.tag.TagValueDO;
-import cn.iocoder.yudao.module.business.dal.mysql.product.SpuTableMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.store.StoreProductMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.tag.TagDimensionMapper;
 import cn.iocoder.yudao.module.business.dal.mysql.tag.TagValueMapper;
 import cn.iocoder.yudao.module.business.service.tag.TagObjectRelationService;
@@ -34,23 +34,22 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
-import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.SPU_TABLE_NOT_EXISTS;
-import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.TAG_OBJECT_TYPE_INVALID;
+import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.STORE_PRODUCT_NOT_EXISTS;
 import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.TAG_VALUE_DIMENSION_LEVEL_ERROR;
 import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.TAG_VALUE_DISABLED;
 import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.TAG_VALUE_NOT_EXISTS;
 import static cn.iocoder.yudao.module.business.enums.ErrorCodeConstants.TAG_VALUE_NOT_PRODUCT_DOMAIN;
 import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.DOMAIN_TYPE_PRODUCT;
 import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.LEVEL_L3;
-import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.OBJECT_TYPE_SPU;
+import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.OBJECT_TYPE_STORE_PRODUCT;
 import static cn.iocoder.yudao.module.business.enums.tag.TagConstants.STATUS_ENABLED;
 
 @Service
 @Validated
-public class ProductSpuTagServiceImpl implements ProductSpuTagService {
+public class StoreProductTagServiceImpl implements StoreProductTagService {
 
     @Resource
-    private SpuTableMapper spuTableMapper;
+    private StoreProductMapper storeProductMapper;
     @Resource
     private TagValueMapper tagValueMapper;
     @Resource
@@ -59,37 +58,45 @@ public class ProductSpuTagServiceImpl implements ProductSpuTagService {
     private TagObjectRelationService tagObjectRelationService;
 
     @Override
-    public void saveManualTags(ProductSpuTagSaveReqVO reqVO) {
-        validateSpuExists(reqVO.getProductSpuId());
+    public void saveManualTags(StoreProductTagSaveReqVO reqVO) {
+        validateStoreProductExists(reqVO.getStoreProductId());
         List<Long> tagValueIds = reqVO.getTagValueIds() == null ? List.of() : reqVO.getTagValueIds().stream()
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
         validateTagValues(tagValueIds);
-        tagObjectRelationService.saveManualRelations(DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_SPU,
-                String.valueOf(reqVO.getProductSpuId()), tagValueIds);
+        tagObjectRelationService.saveManualRelations(DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_STORE_PRODUCT,
+                reqVO.getStoreProductId(), tagValueIds);
     }
 
     @Override
-    public ProductSpuTagBatchRespVO saveManualTagsBatch(ProductSpuTagBatchSaveReqVO reqVO) {
-        List<Long> productSpuIds = reqVO.getProductSpuIds() == null ? List.of() : reqVO.getProductSpuIds().stream()
-                .filter(Objects::nonNull)
+    public List<StoreProductTagRespVO> getTagList(String storeProductId) {
+        validateStoreProductExists(storeProductId);
+        List<TagObjectRelationDO> relations = sortRelations(tagObjectRelationService.getActiveRelations(
+                DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_STORE_PRODUCT, storeProductId));
+        return buildTagRespList(relations, buildTagLookupContext(relations));
+    }
+
+    @Override
+    public StoreProductTagBatchRespVO saveManualTagsBatch(StoreProductTagBatchSaveReqVO reqVO) {
+        List<String> storeProductIds = reqVO.getStoreProductIds() == null ? List.of() : reqVO.getStoreProductIds().stream()
+                .filter(StrUtil::isNotBlank)
                 .distinct()
                 .toList();
-        ProductSpuTagBatchRespVO respVO = new ProductSpuTagBatchRespVO();
+        StoreProductTagBatchRespVO respVO = new StoreProductTagBatchRespVO();
         respVO.setSuccessCount(0);
         respVO.setFailureCount(0);
         respVO.setFailureDetails(new ArrayList<>());
-        for (Long productSpuId : productSpuIds) {
-            ProductSpuTagSaveReqVO saveReqVO = new ProductSpuTagSaveReqVO();
-            saveReqVO.setProductSpuId(productSpuId);
+        for (String storeProductId : storeProductIds) {
+            StoreProductTagSaveReqVO saveReqVO = new StoreProductTagSaveReqVO();
+            saveReqVO.setStoreProductId(storeProductId);
             saveReqVO.setTagValueIds(reqVO.getTagValueIds());
             try {
                 saveManualTags(saveReqVO);
                 respVO.setSuccessCount(respVO.getSuccessCount() + 1);
             } catch (ServiceException ex) {
-                ProductSpuTagBatchRespVO.FailureDetail detail = new ProductSpuTagBatchRespVO.FailureDetail();
-                detail.setObjectId(String.valueOf(productSpuId));
+                StoreProductTagBatchRespVO.FailureDetail detail = new StoreProductTagBatchRespVO.FailureDetail();
+                detail.setObjectId(storeProductId);
                 detail.setReason(ex.getMessage());
                 respVO.getFailureDetails().add(detail);
                 respVO.setFailureCount(respVO.getFailureCount() + 1);
@@ -99,61 +106,44 @@ public class ProductSpuTagServiceImpl implements ProductSpuTagService {
     }
 
     @Override
-    public List<ProductSpuTagRespVO> getTagList(Long productSpuId) {
-        validateSpuExists(productSpuId);
-        List<TagObjectRelationDO> relations = sortRelations(tagObjectRelationService.getActiveRelations(
-                DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_SPU, String.valueOf(productSpuId)));
-        return buildTagRespList(relations, buildTagLookupContext(relations));
-    }
-
-    @Override
-    public List<ProductSpuTagSimpleRespVO> getSimpleTagList(Collection<Long> productSpuIds) {
-        if (CollUtil.isEmpty(productSpuIds)) {
+    public List<StoreProductTagSimpleRespVO> getSimpleTagList(Collection<String> storeProductIds) {
+        if (CollUtil.isEmpty(storeProductIds)) {
             return List.of();
         }
-        List<Long> distinctProductSpuIds = productSpuIds.stream().filter(Objects::nonNull).distinct().toList();
-        if (CollUtil.isEmpty(distinctProductSpuIds)) {
+        List<String> distinctStoreProductIds = storeProductIds.stream()
+                .filter(StrUtil::isNotBlank)
+                .distinct()
+                .toList();
+        if (CollUtil.isEmpty(distinctStoreProductIds)) {
             return List.of();
         }
         List<TagObjectRelationDO> relations = sortRelations(tagObjectRelationService.getActiveRelationsByObjectIds(
-                DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_SPU,
-                distinctProductSpuIds.stream().map(String::valueOf).toList()));
+                DOMAIN_TYPE_PRODUCT, OBJECT_TYPE_STORE_PRODUCT, distinctStoreProductIds));
         if (CollUtil.isEmpty(relations)) {
-            return distinctProductSpuIds.stream().map(productSpuId -> {
-                ProductSpuTagSimpleRespVO respVO = new ProductSpuTagSimpleRespVO();
-                respVO.setProductSpuId(productSpuId);
+            return distinctStoreProductIds.stream().map(storeProductId -> {
+                StoreProductTagSimpleRespVO respVO = new StoreProductTagSimpleRespVO();
+                respVO.setStoreProductId(storeProductId);
                 respVO.setTags(List.of());
                 return respVO;
             }).toList();
         }
         TagLookupContext lookupContext = buildTagLookupContext(relations);
-        Map<Long, List<TagObjectRelationDO>> relationMap = relations.stream()
-                .collect(Collectors.groupingBy(this::parseSpuObjectId, LinkedHashMap::new, Collectors.toList()));
-        List<ProductSpuTagSimpleRespVO> results = new ArrayList<>();
-        for (Long productSpuId : distinctProductSpuIds) {
-            ProductSpuTagSimpleRespVO respVO = new ProductSpuTagSimpleRespVO();
-            respVO.setProductSpuId(productSpuId);
-            respVO.setTags(buildTagRespList(relationMap.getOrDefault(productSpuId, List.of()), lookupContext));
+        Map<String, List<TagObjectRelationDO>> relationMap = relations.stream()
+                .collect(Collectors.groupingBy(TagObjectRelationDO::getObjectId, LinkedHashMap::new, Collectors.toList()));
+        List<StoreProductTagSimpleRespVO> results = new ArrayList<>();
+        for (String storeProductId : distinctStoreProductIds) {
+            StoreProductTagSimpleRespVO respVO = new StoreProductTagSimpleRespVO();
+            respVO.setStoreProductId(storeProductId);
+            respVO.setTags(buildTagRespList(relationMap.getOrDefault(storeProductId, List.of()), lookupContext));
             results.add(respVO);
         }
         return results;
     }
 
-    private List<TagObjectRelationDO> sortRelations(List<TagObjectRelationDO> relations) {
-        if (CollUtil.isEmpty(relations)) {
-            return List.of();
-        }
-        return relations.stream()
-                .sorted(Comparator.comparing(TagObjectRelationDO::getObjectId)
-                        .thenComparing(TagObjectRelationDO::getTagValueId)
-                        .thenComparing(TagObjectRelationDO::getId))
-                .toList();
-    }
-
-    private void validateSpuExists(Long productSpuId) {
-        SpuTableDO spuTable = spuTableMapper.selectById(productSpuId);
-        if (spuTable == null) {
-            throw exception(SPU_TABLE_NOT_EXISTS);
+    private void validateStoreProductExists(String storeProductId) {
+        StoreProductDO storeProduct = storeProductMapper.selectById(storeProductId);
+        if (storeProduct == null) {
+            throw exception(STORE_PRODUCT_NOT_EXISTS);
         }
     }
 
@@ -182,13 +172,24 @@ public class ProductSpuTagServiceImpl implements ProductSpuTagService {
         }
     }
 
-    private List<ProductSpuTagRespVO> buildTagRespList(List<TagObjectRelationDO> relations, TagLookupContext lookupContext) {
+    private List<TagObjectRelationDO> sortRelations(List<TagObjectRelationDO> relations) {
+        if (CollUtil.isEmpty(relations)) {
+            return List.of();
+        }
+        return relations.stream()
+                .sorted(Comparator.comparing(TagObjectRelationDO::getObjectId)
+                        .thenComparing(TagObjectRelationDO::getTagValueId)
+                        .thenComparing(TagObjectRelationDO::getId))
+                .toList();
+    }
+
+    private List<StoreProductTagRespVO> buildTagRespList(List<TagObjectRelationDO> relations, TagLookupContext lookupContext) {
         if (CollUtil.isEmpty(relations)) {
             return List.of();
         }
         Map<Long, List<TagObjectRelationDO>> groupedRelations = relations.stream()
                 .collect(Collectors.groupingBy(TagObjectRelationDO::getTagValueId, LinkedHashMap::new, Collectors.toList()));
-        List<ProductSpuTagRespVO> results = new ArrayList<>();
+        List<StoreProductTagRespVO> results = new ArrayList<>();
         for (Map.Entry<Long, List<TagObjectRelationDO>> entry : groupedRelations.entrySet()) {
             TagValueDO tagValue = lookupContext.tagValueMap().get(entry.getKey());
             if (tagValue == null) {
@@ -199,7 +200,7 @@ public class ProductSpuTagServiceImpl implements ProductSpuTagService {
             if (dimensionPath == null) {
                 continue;
             }
-            ProductSpuTagRespVO respVO = new ProductSpuTagRespVO();
+            StoreProductTagRespVO respVO = new StoreProductTagRespVO();
             respVO.setTagValueId(tagValue.getId());
             respVO.setTagValueCode(tagValue.getCode());
             respVO.setTagValueName(tagValue.getName());
@@ -277,15 +278,6 @@ public class ProductSpuTagServiceImpl implements ProductSpuTagService {
             detail.setExpireTime(relation.getExpireTime());
             return detail;
         }).toList();
-    }
-
-    private Long parseSpuObjectId(TagObjectRelationDO relation) {
-        String objectId = relation.getObjectId();
-        try {
-            return Long.parseLong(objectId);
-        } catch (NumberFormatException ex) {
-            throw exception(TAG_OBJECT_TYPE_INVALID);
-        }
     }
 
     private record TagLookupContext(Map<Long, TagValueDO> tagValueMap,

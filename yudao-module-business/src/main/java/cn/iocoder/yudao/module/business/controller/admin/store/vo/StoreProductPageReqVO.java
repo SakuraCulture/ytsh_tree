@@ -4,7 +4,9 @@ import lombok.*;
 import io.swagger.v3.oas.annotations.media.Schema;
 import cn.iocoder.yudao.framework.common.pojo.PageParam;
 import org.springframework.format.annotation.DateTimeFormat;
+
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static cn.iocoder.yudao.framework.common.util.date.DateUtils.FORMAT_YEAR_MONTH_DAY_HOUR_MINUTE_SECOND;
 
@@ -44,6 +46,12 @@ public class StoreProductPageReqVO extends PageParam {
 
     @Schema(description = "入店状态(0否1是)", example = "1")
     private Integer enterShopStatus;
+
+    @Schema(description = "标签值 ID", example = "1001")
+    private Long tagValueId;
+
+    @Schema(description = "门店商品 ID 列表（内部使用）")
+    private List<String> storeProductIds;
 
     @Schema(description = "创建时间")
     @DateTimeFormat(pattern = FORMAT_YEAR_MONTH_DAY_HOUR_MINUTE_SECOND)
