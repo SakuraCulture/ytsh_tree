@@ -71,6 +71,7 @@
         <div class="form-row btn-row">
           <el-button type="primary" :loading="queryLoading" @click="handleQuery">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
+          <el-button type="success" @click="importVisible = true">批量导入库存</el-button>
         </div>
       </div>
     </div>
@@ -142,6 +143,10 @@
 
       <el-empty v-if="!queryLoading && resultRows.length === 0" description="未查询到库存结果" />
     </div>
+
+    <InventoryBatchTaskPanel />
+
+    <InventoryImportDialog v-model="importVisible" @success="handleImportSuccess" />
   </div>
 </template>
 
@@ -156,6 +161,8 @@ import {
   type EleStoreInventoryRowVO
 } from '@/api/ele/storeInventory'
 import InventoryMetricsCard from '@/views/ele/components/InventoryMetricsCard.vue'
+import InventoryBatchTaskPanel from '@/views/ele/store-inventory/components/InventoryBatchTaskPanel.vue'
+import InventoryImportDialog from '@/views/ele/store-inventory/components/InventoryImportDialog.vue'
 import {
   adaptEleInventoryMetrics,
   buildInventoryQueryRequest,
@@ -174,6 +181,7 @@ const createQueryForm = (): InventoryQueryFormModel => ({
 
 const queryForm = reactive<InventoryQueryFormModel>(createQueryForm())
 const selectedStoreCode = ref('')
+const importVisible = ref(false)
 const storeLoading = ref(false)
 const queryLoading = ref(false)
 const storeList = ref<StoreSimpleRespVO[]>([])
@@ -279,6 +287,13 @@ const handleRefreshRow = async (row: EleStoreInventoryRowVO, index: number) => {
     ElMessage.error(error?.message || '刷新库存失败')
   } finally {
     refreshingRows.value = { ...refreshingRows.value, [rowKey]: false }
+  }
+}
+
+const handleImportSuccess = () => {
+  importVisible.value = false
+  if (resultRows.value.length > 0) {
+    handleQuery()
   }
 }
 

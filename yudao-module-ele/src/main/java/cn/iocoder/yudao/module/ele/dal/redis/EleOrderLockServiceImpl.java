@@ -215,6 +215,25 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
         }
     }
 
+    @Override
+    public void lockStoreInventoryBatchTask(String lockKey, int waitSeconds, int leaseMinutes) {
+        RLock lock = getStoreInventoryBatchTaskLock(lockKey);
+        boolean acquired = acquireLock(lock, waitSeconds, leaseMinutes, "门店库存批量任务", lockKey);
+        if (!acquired) {
+            throw new RuntimeException("门店库存批量任务正在创建中: " + lockKey);
+        }
+        log.info("【分布式锁】门店库存批量任务{}锁获取成功", lockKey);
+    }
+
+    @Override
+    public void unlockStoreInventoryBatchTask(String lockKey) {
+        RLock lock = getStoreInventoryBatchTaskLock(lockKey);
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
+            log.info("【分布式锁】门店库存批量任务{}锁释放成功", lockKey);
+        }
+    }
+
     private boolean acquireLock(RLock lock, int waitSeconds, int leaseMinutes, String businessName, String businessId) {
         try {
             return lock.tryLock(waitSeconds, leaseMinutes, TimeUnit.MINUTES);
@@ -247,5 +266,10 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
     private RLock getStoreGoodsFullSyncTaskLock(String lockKey) {
         return redissonClient.getLock(
                 String.format(EleLockKeyConstants.STORE_GOODS_FULL_SYNC_TASK_LOCK, lockKey));
+    }
+
+    private RLock getStoreInventoryBatchTaskLock(String lockKey) {
+        return redissonClient.getLock(
+                String.format(EleLockKeyConstants.STORE_INVENTORY_BATCH_TASK_LOCK, lockKey));
     }
 }

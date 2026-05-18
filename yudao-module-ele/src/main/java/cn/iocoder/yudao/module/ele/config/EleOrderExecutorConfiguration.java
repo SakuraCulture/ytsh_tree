@@ -51,6 +51,18 @@ public class EleOrderExecutorConfiguration {
                 awaitTerminationSeconds, "ele-store-goods-full-sync-");
     }
 
+    @Bean(name = "eleStoreInventoryBatchExecutor", destroyMethod = "shutdown")
+    public ThreadPoolTaskExecutor eleStoreInventoryBatchExecutor(
+            @Value("${ele.store.inventory.batch.pool.core-size:12}") int coreSize,
+            @Value("${ele.store.inventory.batch.pool.max-size:24}") int maxSize,
+            @Value("${ele.store.inventory.batch.pool.queue-capacity:0}") int queueCapacity,
+            @Value("${ele.store.inventory.batch.pool.keep-alive-seconds:60}") int keepAliveSeconds,
+            @Value("${ele.store.inventory.batch.shutdown.await-termination:true}") boolean awaitTermination,
+            @Value("${ele.store.inventory.batch.shutdown.await-termination-seconds:120}") int awaitTerminationSeconds) {
+        return buildExecutor(coreSize, maxSize, queueCapacity, keepAliveSeconds, awaitTermination,
+                awaitTerminationSeconds, "ele-store-inventory-batch-");
+    }
+
     private ThreadPoolTaskExecutor buildExecutor(int coreSize, int maxSize, int queueCapacity,
                                                  int keepAliveSeconds, boolean awaitTermination,
                                                  int awaitTerminationSeconds, String threadNamePrefix) {

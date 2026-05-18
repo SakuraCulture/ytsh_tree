@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.ele.dal.mysql;
 
+import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
@@ -150,5 +151,16 @@ public interface EleStoreGoodsShadowMapper extends BaseMapperX<EleStoreGoodsShad
                 .likeIfPresent(EleStoreGoodsShadowDO::getTitle, reqVO.getTitle())
                 .eqIfPresent(EleStoreGoodsShadowDO::getMatchStatus, reqVO.getMatchStatus())
                 .orderByDesc(EleStoreGoodsShadowDO::getUpdateTime));
+    }
+
+    default List<String> selectActiveSkuCodesByErpStoreCode(String erpStoreCode) {
+        return selectList(new LambdaQueryWrapperX<EleStoreGoodsShadowDO>()
+                .eqIfPresent(EleStoreGoodsShadowDO::getErpStoreCode, erpStoreCode)
+                .eq(EleStoreGoodsShadowDO::getIsActive, 1)
+                .orderByDesc(EleStoreGoodsShadowDO::getUpdateTime))
+                .stream()
+                .map(EleStoreGoodsShadowDO::getSkuCode)
+                .filter(StrUtil::isNotBlank)
+                .toList();
     }
 }

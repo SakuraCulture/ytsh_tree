@@ -17,6 +17,8 @@ import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreInventoryShadowDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleApiConfigMapper;
 import cn.iocoder.yudao.module.ele.service.bo.EleSkuInventoryBatchQueryReqBO;
 import cn.iocoder.yudao.module.ele.service.bo.EleSkuInventoryShadowUpsertReqBO;
+import cn.iocoder.yudao.module.ele.service.bo.EleStoreInventoryIngestResultBO;
+import cn.iocoder.yudao.module.ele.service.bo.EleStoreInventoryIngestRowBO;
 import cn.iocoder.yudao.module.ele.service.client.EleOpenApiClient;
 import cn.iocoder.yudao.module.ele.service.dto.EleSkuInventoryBatchQueryRespDTO;
 import com.alibaba.ocean.rawsdk.common.BizResultWrapper;
@@ -62,13 +64,15 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
     private final StoreStockMapper storeStockMapper;
     private final EleSkuInventoryShadowService shadowService;
     private final EleSkuInventoryGovernanceService governanceService;
+    private final EleStoreInventoryIngestService inventoryIngestService;
 
     @Autowired
     public EleSkuInventoryQueryServiceImpl(StoreService storeService, EleApiRateLimiter eleApiRateLimiter,
                                            EleApiConfigMapper eleApiConfigMapper, EleOpenApiClient eleOpenApiClient,
                                            SkuTableMapper skuTableMapper, StoreProductMapper storeProductMapper,
                                            StoreStockMapper storeStockMapper, EleSkuInventoryShadowService shadowService,
-                                           EleSkuInventoryGovernanceService governanceService) {
+                                           EleSkuInventoryGovernanceService governanceService,
+                                           EleStoreInventoryIngestService inventoryIngestService) {
         this.storeService = storeService;
         this.eleApiRateLimiter = eleApiRateLimiter;
         this.eleApiConfigMapper = eleApiConfigMapper;
@@ -78,6 +82,7 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
         this.storeStockMapper = storeStockMapper;
         this.shadowService = shadowService;
         this.governanceService = governanceService;
+        this.inventoryIngestService = inventoryIngestService;
     }
 
     @Override
@@ -186,23 +191,41 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
         if (StrUtil.isBlank(skuCode) && StrUtil.isBlank(subSkuCode)) {
             return;
         }
-        if (StrUtil.isNotBlank(skuCode)) {
-            SkuTableDO sku = skuTableMapper.selectByProductSkuCode(skuCode);
-            if (sku != null) {
-                if (upsertFormalStock(normalizedReq, sku, row)) {
-                    respDTO.setFormalSuccessCount(respDTO.getFormalSuccessCount() + 1);
-                    row.setPersistStatus(PERSIST_STATUS_FORMAL);
-                    return;
-                }
-            }
+        EleStoreInventoryIngestResultBO ingestResult = inventoryIngestService.ingest(buildIngestRow(normalizedReq, inventory, row));
+        if (PERSIST_STATUS_FORMAL.equals(ingestResult.getPersistStatus())) {
+            respDTO.setFormalSuccessCount(respDTO.getFormalSuccessCount() + 1);
         }
-        EleSkuInventoryShadowUpsertReqBO shadowReq = buildShadowReq(normalizedReq, inventory, row);
-        EleStoreInventoryShadowDO shadow = shadowService.upsert(shadowReq, MATCH_STATUS_SKU_NOT_MATCHED, REASON_CODE_SKU_NOT_FOUND);
-        governanceService.createOrRefresh(buildGovernancePool(shadowReq, shadow));
-        respDTO.setShadowSuccessCount(respDTO.getShadowSuccessCount() + 1);
-        respDTO.setGovernanceCount(respDTO.getGovernanceCount() + 1);
-        row.setPersistStatus(PERSIST_STATUS_SHADOW);
-        row.setReasonCode(REASON_CODE_SKU_NOT_FOUND);
+        if (PERSIST_STATUS_SHADOW.equals(ingestResult.getPersistStatus())) {
+            respDTO.setShadowSuccessCount(respDTO.getShadowSuccessCount() + 1);
+        }
+        if (ingestResult.getGovernanceId() != null) {
+            respDTO.setGovernanceCount(respDTO.getGovernanceCount() + 1);
+        }
+        row.setPersistStatus(ingestResult.getPersistStatus());
+        row.setReasonCode(ingestResult.getReasonCode());
+    }
+
+    private EleStoreInventoryIngestRowBO buildIngestRow(EleSkuInventoryBatchQueryReqBO normalizedReq,
+                                                         ErpSkuInventoryResultDTO inventory,
+                                                         EleSkuInventoryBatchQueryRespDTO.InventoryRowDTO row) {
+        EleStoreInventoryIngestRowBO ingestRow = new EleStoreInventoryIngestRowBO();
+        ingestRow.setPlatformId(normalizedReq.getPlatformId() == null ? DEFAULT_ELE_PLATFORM_ID : normalizedReq.getPlatformId());
+        ingestRow.setMerchantCode(normalizedReq.getMerchantCode());
+        ingestRow.setErpStoreCode(normalizedReq.getErpStoreCode());
+        ingestRow.setPlatformStoreId(normalizedReq.getPlatformStoreId());
+        ingestRow.setStoreId(normalizedReq.getStoreId());
+        ingestRow.setSkuCode(normalizeNullable(row.getSkuCode()));
+        ingestRow.setSubSkuCode(normalizeNullable(row.getSubSkuCode()));
+        ingestRow.setAvailableForSale(row.getAvailableForSale());
+        ingestRow.setReservedAmount(row.getReservedAmount());
+        ingestRow.setPhysicalStockTotalAmount(row.getPhysicalStockTotalAmount());
+        ingestRow.setPhysicalStockAvailableAmount(row.getPhysicalStockAvailableAmount());
+        ingestRow.setPhysicalStockOccupiedAmount(row.getPhysicalStockOccupiedAmount());
+        ingestRow.setPhysicalStockIntransitAmount(row.getPhysicalStockIntransitAmount());
+        ingestRow.setOwnerCode(row.getOwnerCode());
+        ingestRow.setOwnerName(row.getOwnerName());
+        ingestRow.setRawPayload(JSONUtil.toJsonStr(inventory));
+        return ingestRow;
     }
 
     private boolean upsertFormalStock(EleSkuInventoryBatchQueryReqBO normalizedReq, SkuTableDO sku,
