@@ -40,6 +40,39 @@
           <el-button type="danger" :icon="Delete" @click="handleReset"> 重置统计 </el-button>
         </div>
       </div>
+      <!-- 限流告警 -->
+      <el-alert
+        v-if="rateLimitStatus.queueAlert"
+        class="rate-limit-alert"
+        type="warning"
+        show-icon
+        :closable="false"
+      >
+        <template #title>
+          <div class="rate-limit-alert-title">
+            <span>翱象接口已触发接口级限流，后续请求正在暂停排队</span>
+            <el-tag type="danger" effect="dark" size="small">
+              总排队：{{ rateLimitStatus.waitingCount || 0 }}
+            </el-tag>
+          </div>
+        </template>
+        <template #default>
+          <div class="rate-limit-alert-desc">
+            <div>为避免接口请求堆积，系统已暂停后续批量请求提交；待排队请求清空后将自动恢复。</div>
+            <div class="rate-limit-api-list">
+              <el-tag
+                v-for="api in rateLimitStatus.apis || []"
+                :key="api.apiName || api.apiCode"
+                :type="api.hasBacklog ? 'danger' : 'success'"
+                size="small"
+              >
+                {{ api.displayName || api.apiCode || api.apiName }}：排队 {{ api.waitingCount || 0 }} / {{ api.qps || 0 }} QPS
+              </el-tag>
+            </div>
+          </div>
+        </template>
+      </el-alert>
+
       <!-- 搜索区域 -->
       <div class="search-section">
         <el-input
@@ -505,6 +538,8 @@ import {
   resetStats,
   getSyncConfig,
   getApiRps,
+  getApiRateLimitStatus,
+  type EleApiRateLimitStatusRespVO,
   type EleTrafficTodayStatsRespVO,
   type EleTrafficHourlyStatsRespVO,
   type EleTrafficRecordVO
@@ -520,6 +555,7 @@ const selectedDate = ref(getTodayDateStr())
 const refreshInterval = ref(10000)
 const rpsLoading = ref(false)
 const apiRpsData = ref<any[]>([])
+const rateLimitStatus = ref<EleApiRateLimitStatusRespVO>({})
 const apiSearchKeyword = ref('')
 const rpsSortBy = ref('currentRps')
 const lastUpdateTime = ref('')
@@ -617,13 +653,22 @@ const handlePageChange = (page: number) => {
   currentPage.value = page
 }
 
+// 加载限流状态
+const loadRateLimitStatus = async () => {
+  try {
+    rateLimitStatus.value = await getApiRateLimitStatus()
+  } catch (error: any) {
+    // console.error('加载限流状态失败:', error)
+  }
+}
+
 // 加载今日统计数据
 const loadTodayStats = async () => {
   try {
     const data = await getStatsByDate(selectedDate.value)
     todayStats.value = data
   } catch (error: any) {
-    console.error('加载当日统计失败:', error)
+    // console.error('加载当日统计失败:', error)
   }
 }
 
@@ -633,7 +678,7 @@ const loadHourlyStats = async () => {
     const data = await getHourlyStatsByDate(selectedDate.value)
     hourlyStats.value = data || []
   } catch (error: any) {
-    console.error('加载小时统计失败:', error)
+    // console.error('加载小时统计失败:', error)
   }
 }
 
@@ -641,7 +686,7 @@ const loadHourlyStats = async () => {
 const refreshAll = async () => {
   loading.value = true
   try {
-    await Promise.all([loadTodayStats(), loadHourlyStats()])
+    await Promise.all([loadTodayStats(), loadHourlyStats(), loadRateLimitStatus()])
     ElMessage.success('数据刷新成功')
   } catch (error: any) {
     ElMessage.error('数据刷新失败: ' + (error.message || '未知错误'))
@@ -702,7 +747,7 @@ const loadSyncConfig = async () => {
       AUTO_REFRESH_INTERVAL.value = config.syncIntervalMs
     }
   } catch (error: any) {
-    console.error('加载同步配置失败:', error)
+    // console.error('加载同步配置失败:', error)
   }
 }
 
@@ -755,7 +800,7 @@ const loadApiRps = async () => {
     const now = new Date()
     lastUpdateTime.value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
   } catch (error: any) {
-    console.error('获取RPS数据失败:', error)
+    // console.error('获取RPS数据失败:', error)
   } finally {
     rpsLoading.value = false
   }
@@ -768,8 +813,10 @@ const onRefreshIntervalChange = (value: number) => {
   }
   if (value > 0) {
     loadApiRps()
+    loadRateLimitStatus()
     rpsTimer = setInterval(() => {
       loadApiRps()
+      loadRateLimitStatus()
     }, value)
   }
 }
@@ -912,7 +959,33 @@ const getTableRowClassName = ({ row, rowIndex }: { row: any; rowIndex: number })
     }
   }
 
-  .search-section {
+  .rate-limit-alert {
+  margin-top: 20px;
+  border-radius: 12px;
+}
+
+.rate-limit-alert-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-weight: 700;
+}
+
+.rate-limit-alert-desc {
+  margin-top: 6px;
+  color: #92400e;
+  line-height: 1.6;
+}
+
+.rate-limit-api-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.search-section {
     display: flex;
     gap: 12px;
     align-items: center;

@@ -171,6 +171,14 @@ export interface StoreGoodsShadowRespVO {
   matchedProductSkuId?: string
   mergedStoreProductId?: string
   conflictReason?: string
+  reasonMsg?: string
+  physicalStockTotalAmount?: number
+  availableForSale?: number
+  physicalStockAvailableAmount?: number
+  physicalStockIntransitAmount?: number
+  reservedAmount?: number
+  physicalStockOccupiedAmount?: number
+  lastQueryTime?: string
   rawPayload?: string
   lastSyncTime?: string
   matchedTime?: string

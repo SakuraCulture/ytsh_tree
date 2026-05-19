@@ -35,11 +35,13 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -312,6 +314,18 @@ public class GlobalExceptionHandler {
             }
         }
         return CommonResult.error(ex.getCode(), ex.getMessage());
+    }
+
+    /**
+     * 处理客户端连接中断异常
+     * 
+     * 例如：用户关闭浏览器、前端超时、网络中断等场景
+     * 这不是服务端错误，无需记录错误日志
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public CommonResult<?> asyncRequestNotUsableExceptionHandler(AsyncRequestNotUsableException ex) {
+        log.warn("[asyncRequestNotUsableExceptionHandler][客户端连接中断] {}", ExceptionUtil.getRootCauseMessage(ex));
+        return null;
     }
 
     /**

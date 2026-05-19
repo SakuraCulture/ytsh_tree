@@ -1,12 +1,7 @@
 <template>
   <ContentWrap>
     <div class="search-section">
-      <el-form
-        class="query-form-grid"
-        :model="queryParams"
-        ref="queryFormRef"
-        label-width="90px"
-      >
+      <el-form class="query-form-grid" :model="queryParams" ref="queryFormRef" label-width="90px">
         <el-row :gutter="16" class="search-row">
           <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="6">
             <el-form-item label="日期" prop="dateRange">
@@ -26,21 +21,17 @@
             <el-form-item label="门店" prop="storeId">
               <el-select
                 v-model="queryParams.storeId"
-                placeholder="请输入门店名称或门店编码"
+                placeholder="请选择门店"
                 clearable
                 filterable
-                remote
-                reserve-keyword
-                :remote-method="searchStoreList"
                 :loading="storeLoading"
                 class="!w-full"
               >
                 <el-option
                   v-for="store in storeList"
-                  :key="getStoreOptionKey(store)"
-                  :label="getStoreOptionLabel(store)"
-                  :value="getStoreOptionValue(store)"
-                  :style="{ color: store.storeStatus === 1 ? '#333' : '#999' }"
+                  :key="store.storeId"
+                  :label="store.storeName"
+                  :value="store.storeId"
                 />
               </el-select>
             </el-form-item>
@@ -106,20 +97,22 @@
                 @select="handleSelectGoods"
                 class="!w-full"
               >
-                <template #default="{ item }"><div>{{ item.name }}</div></template>
+                <template #default="{ item }"
+                  ><div>{{ item.name }}</div></template
+                >
               </el-autocomplete>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="6">
-            <el-form-item label="配送" prop="deliveryType">
+            <el-form-item label="订单类型" prop="orderType">
               <el-select
-                v-model="queryParams.deliveryType"
+                v-model="queryParams.orderType"
                 placeholder="请选择"
                 clearable
                 class="!w-full"
               >
-                <el-option label="即时单" value="instant" />
-                <el-option label="预约单" value="appointment" />
+                <el-option label="即时单" :value="2" />
+                <el-option label="预约单" :value="1" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -133,11 +126,12 @@
                 placeholder="请选择"
                 clearable
                 class="!w-full"
-                @change="handleChannelTypeChange"
               >
-                <el-option label="美团" value="meituan" />
-                <el-option label="饿了么" value="eleme" />
-                <el-option label="自有" value="self" />
+                <el-option label="淘宝闪购" value="ELE" />
+                <el-option label="美团" value="MT" />
+                <el-option label="京东" value="JD" />
+                <el-option label="POS" value="POS" />
+                <el-option label="销售开单" value="OO" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -152,15 +146,15 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="6">
-            <el-form-item label="类型" prop="orderType">
+            <el-form-item label="订单异常" prop="exceptionType">
               <el-select
-                v-model="queryParams.orderType"
+                v-model="queryParams.exceptionType"
                 placeholder="请选择"
                 clearable
                 class="!w-full"
               >
-                <el-option label="普通订单" value="normal" />
-                <el-option label="退款订单" value="refund" />
+                <el-option label="无异常" value="normal" />
+                <el-option label="异常订单" value="exception" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -171,6 +165,7 @@
                 placeholder="请输入"
                 clearable
                 @keyup.enter="handleQuery"
+                @blur="handleQuery"
               />
             </el-form-item>
           </el-col>
@@ -178,12 +173,13 @@
 
         <el-row :gutter="16" class="search-row">
           <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="6">
-            <el-form-item label="配送方式" prop="delivery_type">
+            <el-form-item label="配送方式" prop="deliveryMode">
               <el-select
-                v-model="queryParams.delivery_type"
+                v-model="queryParams.deliveryMode"
                 placeholder="请选择"
                 clearable
                 class="!w-full"
+                @change="handleQuery"
               >
                 <el-option label="平台配送" :value="1" />
                 <el-option label="自配送" :value="2" />
@@ -215,7 +211,10 @@
           <div class="action-group">
             <el-dropdown v-hasPermi="['data:test:export']">
               <el-button type="default" link>
-                <Icon icon="ep:download" class="mr-5px" /> 导出<Icon icon="ep:arrow-down" class="ml-5px" />
+                <Icon icon="ep:download" class="mr-5px" /> 导出<Icon
+                  icon="ep:arrow-down"
+                  class="ml-5px"
+                />
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -250,9 +249,13 @@
         <div class="order-header">
           <div class="order-header-left">
             <div class="order-main-meta">
-              <el-tag :type="getChannelTagType(order.channelType)" size="small">{{ order.channelLabel }}</el-tag>
+              <el-tag :type="getChannelTagType(order.channelType)" size="small">{{
+                order.channelLabel
+              }}</el-tag>
               <span class="store-name">{{ order.storeName }}</span>
-              <el-tag :type="getDeliveryTypeTagType(order.deliveryType)" size="small">{{ order.deliveryTypeText }}</el-tag>
+              <el-tag :type="getArriveTypeTagType(order.arriveType)" size="small">{{
+                order.arriveTypeText
+              }}</el-tag>
             </div>
             <div class="order-time-meta">
               <span class="expect-time">下单：{{ order.createTime }}</span>
@@ -260,12 +263,20 @@
             </div>
           </div>
           <div class="order-header-right">
+            <span class="channel-order-no">{{ order.channelOrderId || '--' }}</span>
+            <span v-if="order.orderIndex" class="order-index">流水号：{{ order.orderIndex }}</span>
           </div>
         </div>
 
         <div class="order-content">
           <div class="order-content-top">
-            <el-tag :type="getStatusType(order.status)" effect="dark" size="small" class="status-tag-left">{{ order.statusTabText }}</el-tag>
+            <el-tag
+              :type="getStatusType(order.status)"
+              effect="dark"
+              size="small"
+              class="status-tag-left"
+              >{{ order.statusTabText }}</el-tag
+            >
             <div class="user-info compact">
               <p><strong>收货人：</strong>{{ order.userName }}</p>
               <p><strong>联系电话：</strong>{{ order.userPhone }}</p>
@@ -280,7 +291,9 @@
             </div>
             <div class="delivery-item">
               <span class="delivery-label">配送费</span>
-              <span class="delivery-value emphasis">{{ formatAmount(order.deliveryFeeAmount) }}</span>
+              <span class="delivery-value emphasis">{{
+                formatAmount(order.deliveryFeeAmount)
+              }}</span>
             </div>
             <div class="delivery-item">
               <span class="delivery-label">渠道</span>
@@ -292,29 +305,68 @@
             </div>
             <div class="delivery-item">
               <span class="delivery-label">配送状态</span>
-              <el-tag size="small" :type="getDeliveryStatusType(order.deliveryStatus)" effect="plain">{{ order.deliveryStatusText }}</el-tag>
+              <el-tag
+                size="small"
+                :type="getDeliveryStatusType(order.deliveryStatus)"
+                effect="plain"
+                >{{ order.deliveryStatusText }}</el-tag
+              >
             </div>
           </div>
-
         </div>
 
         <div class="price-info">
           <div class="price-left">
-            <span>用户实付：<strong class="price">{{ formatAmount(order.payFee) }}</strong></span>
-            <span>订单原价：<strong class="income">{{ formatAmount(order.totalFee) }}</strong></span>
-            <span>优惠合计：<strong class="profit">{{ formatAmount(order.discountFee) }}</strong></span>
-            <span>包装费：<strong>{{ formatAmount(order.packageFee) }}</strong></span>
+            <span
+              >用户实付：<strong class="price">{{ formatAmount(order.payFee) }}</strong></span
+            >
+            <span
+              >订单原价：<strong class="income">{{ formatAmount(order.totalFee) }}</strong></span
+            >
+            <span
+              >优惠合计：<strong class="profit">{{ formatAmount(order.discountFee) }}</strong></span
+            >
+            <span
+              >包装费：<strong>{{ formatAmount(order.packageFee) }}</strong></span
+            >
+            <span
+              >预计收入：<strong class="income">{{
+                formatAmount(order.estimatedIncome)
+              }}</strong></span
+            >
+            <span
+              >平台佣金：<strong class="commission">{{
+                formatAmount(order.platformCommissionFee)
+              }}</strong></span
+            >
+            <span v-if="order.settlementStatus !== undefined && order.settlementStatus !== null"
+              >结算金额：<strong :class="order.settlementStatus === 1 ? 'settled' : 'unsettled'">{{
+                formatYuan(order.settlementAmount)
+              }}</strong></span
+            >
+            <span v-if="order.settlementStatus !== undefined && order.settlementStatus !== null"
+              >结算状态：
+              <el-tag size="small" :type="order.settlementStatus === 1 ? 'success' : 'info'">
+                {{ order.settlementStatus === 1 ? '已结算' : '未结算' }}
+              </el-tag>
+            </span>
+            <span v-if="order.settlementStatus === 0">
+              <el-button type="danger" size="small" link @click="handleRetryBill(order)">重试账单同步</el-button>
+            </span>
           </div>
           <div class="price-right">
             <el-button type="default" link @click="viewOrderLogs(order)">查看日志</el-button>
             <el-button type="default" link @click="openGoodsDetail(order)">查看详情</el-button>
+            <el-button type="default" link @click="openBillDetail(order)">账单详情</el-button>
           </div>
         </div>
 
         <div class="order-footer">
           <span>创建时间：{{ order.createTime }}</span>
           <span>支付时间：{{ order.payTime }}</span>
-          <span>订单编号：<el-link type="primary">{{ order.orderSn }}</el-link></span>
+          <span
+            >订单编号：<el-link type="primary">{{ order.orderSn }}</el-link></span
+          >
           <span>渠道订单号：{{ order.channelOrderId || '--' }}</span>
         </div>
       </div>
@@ -334,7 +386,13 @@
     />
   </ContentWrap>
 
-  <el-dialog title="查看日志" v-model="logDialogVisible" width="800px" destroy-on-close :z-index="2000">
+  <el-dialog
+    title="查看日志"
+    v-model="logDialogVisible"
+    width="800px"
+    destroy-on-close
+    :z-index="2000"
+  >
     <el-table :data="currentOrderLogs" style="width: 100%" stripe border>
       <el-table-column prop="operation" label="操作" min-width="120" />
       <el-table-column prop="operator" label="操作人" min-width="100" />
@@ -350,15 +408,25 @@
     </template>
   </el-dialog>
 
-  <el-dialog title="商品详情" v-model="goodsDetailVisible" width="900px" destroy-on-close :z-index="2001">
+  <el-dialog
+    title="商品详情"
+    v-model="goodsDetailVisible"
+    width="900px"
+    destroy-on-close
+    :z-index="2001"
+  >
     <div v-if="currentOrder" class="goods-detail-content">
       <el-descriptions :column="2" border class="info-row" label-width="80px">
         <el-descriptions-item label="订单号">{{ currentOrder.orderNo }}</el-descriptions-item>
         <el-descriptions-item label="门店">{{ currentOrder.storeName }}</el-descriptions-item>
       </el-descriptions>
       <el-descriptions :column="3" border class="info-row" label-width="80px">
-        <el-descriptions-item label="商品种类">{{ currentOrder.goodsCount }}种</el-descriptions-item>
-        <el-descriptions-item label="商品件数">{{ currentOrder.goodsQuantity }}件</el-descriptions-item>
+        <el-descriptions-item label="商品种类"
+          >{{ currentOrder.goodsCount }}种</el-descriptions-item
+        >
+        <el-descriptions-item label="商品件数"
+          >{{ currentOrder.goodsQuantity }}件</el-descriptions-item
+        >
         <el-descriptions-item label="重量">{{ currentOrder.totalWeight }}g</el-descriptions-item>
       </el-descriptions>
 
@@ -368,45 +436,251 @@
         <el-table-column prop="goodsName" label="商品名称" min-width="200" show-overflow-tooltip />
         <el-table-column prop="spec" label="规格" min-width="100" />
         <el-table-column prop="quantity" label="数量" width="80" align="center" />
+        <el-table-column prop="weight" label="重量" width="80" align="center" />
         <el-table-column label="单价" width="100" align="right">
           <template #default="scope">{{ formatAmount(scope.row.price) }}</template>
         </el-table-column>
         <el-table-column label="小计" width="100" align="right">
           <template #default="scope">{{ formatAmount(scope.row.actualAmount) }}</template>
         </el-table-column>
+        <el-table-column label="赠品" width="80" align="center">
+          <template #default="scope">
+            <el-tag size="small" :type="scope.row.giftFlag === 1 ? 'success' : 'info'">
+              {{ scope.row.giftFlag === 1 ? '是' : '否' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="换货" width="80" align="center">
+          <template #default="scope">
+            <el-tag size="small" :type="scope.row.exchangeFlag === 1 ? 'warning' : 'info'">
+              {{ scope.row.exchangeFlag === 1 ? '是' : '否' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="hasExchangeAmount(currentOrder.goodsList)"
+          label="换货金额"
+          width="100"
+          align="right"
+        >
+          <template #default="scope">{{ formatAmount(scope.row.exchangeAmount) }}</template>
+        </el-table-column>
       </el-table>
 
       <div class="detail-section-title">费用信息</div>
       <div class="fee-summary">
-        <div class="fee-item"><span>商品总额</span><span>{{ formatAmount(currentOrder.goodsAmount) }}</span></div>
-        <div class="fee-item"><span>包装费</span><span>{{ formatAmount(currentOrder.packageFee) }}</span></div>
-        <div class="fee-item"><span>配送费</span><span>{{ formatAmount(currentOrder.postFee) }}</span></div>
-        <div class="fee-item"><span>优惠</span><span>{{ formatAmount(currentOrder.discountFee) }}</span></div>
-        <div class="fee-item total"><span>实付金额</span><span>{{ formatAmount(currentOrder.payFee) }}</span></div>
+        <div class="fee-item"
+          ><span>商品总额</span><span>{{ formatAmount(currentOrder.goodsAmount) }}</span></div
+        >
+        <div class="fee-item"
+          ><span>包装费</span><span>{{ formatAmount(currentOrder.packageFee) }}</span></div
+        >
+        <div class="fee-item"
+          ><span>配送费</span><span>{{ formatAmount(currentOrder.postFee) }}</span></div
+        >
+        <div class="fee-item"
+          ><span>优惠</span><span>{{ formatAmount(currentOrder.discountFee) }}</span></div
+        >
+        <div class="fee-item"
+          ><span>预计收入</span><span>{{ formatAmount(currentOrder.estimatedIncome) }}</span></div
+        >
+        <div class="fee-item"
+          ><span>平台佣金</span
+          ><span>{{ formatAmount(currentOrder.platformCommissionFee) }}</span></div
+        >
+        <div class="fee-item total"
+          ><span>实付金额</span><span>{{ formatAmount(currentOrder.payFee) }}</span></div
+        >
       </div>
+
+      <div class="detail-section-title">平台信息</div>
+      <el-descriptions :column="2" border label-width="100px">
+        <el-descriptions-item label="平台订单状态">{{
+          currentOrder.platformOrderStatusName || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="配送平台">{{
+          currentOrder.deliveryPlatformName || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="平台门店ID">{{
+          currentOrder.platformStoreId || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="ERP门店编码">{{
+          currentOrder.erpStoreCode || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="商户编码">{{
+          currentOrder.merchantCode || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="渠道来源ID">{{
+          currentOrder.channelSourceId || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="测试订单">{{
+          currentOrder.isTestOrder === 1 ? '是' : '否'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="历史订单">{{
+          currentOrder.isHistoryOrder === 1 ? '是' : '否'
+        }}</el-descriptions-item>
+      </el-descriptions>
+
+      <div
+        class="detail-section-title"
+        v-if="currentOrder.discounts && currentOrder.discounts.length > 0"
+        >优惠分摊明细</div
+      >
+      <el-table
+        v-if="currentOrder.discounts && currentOrder.discounts.length > 0"
+        :data="currentOrder.discounts"
+        border
+        size="small"
+      >
+        <el-table-column prop="activityName" label="优惠名称" min-width="150" />
+        <el-table-column prop="typeText" label="类型" width="100" />
+        <el-table-column label="平台承担" width="120" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.platformFee) }}</template>
+        </el-table-column>
+        <el-table-column label="商家承担" width="120" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.merchantFee) }}</template>
+        </el-table-column>
+        <el-table-column label="合计" width="120" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.discountFee) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <div class="detail-section-title">元数据</div>
+      <el-descriptions :column="2" border label-width="100px">
+        <el-descriptions-item label="订单来源">{{
+          currentOrder.orderFrom || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="当日流水号">{{
+          currentOrder.orderIndex || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="经度">{{
+          currentOrder.longitude || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="纬度">{{
+          currentOrder.latitude || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="更新时间">{{
+          currentOrder.updateTimeText || '--'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ currentOrder.createTime }}</el-descriptions-item>
+      </el-descriptions>
+
+      <div class="detail-section-title" v-if="currentOrder.billInfo">账单信息</div>
+      <el-descriptions v-if="currentOrder.billInfo" :column="2" border label-width="120px">
+        <el-descriptions-item label="账单日期">{{ currentOrder.billInfo.billDate || '--' }}</el-descriptions-item>
+        <el-descriptions-item label="结算状态">
+          <el-tag size="small" :type="currentOrder.billInfo.status === 1 ? 'success' : 'info'">
+            {{ currentOrder.billInfo.statusText || '--' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="结算类型">{{ currentOrder.billInfo.billTypeDesc || '--' }}</el-descriptions-item>
+        <el-descriptions-item label="结算金额">{{ formatYuan(currentOrder.billInfo.billAmount) || '--' }}</el-descriptions-item>
+        <el-descriptions-item label="配送方式">{{ currentOrder.billInfo.shippingType || '--' }}</el-descriptions-item>
+        <el-descriptions-item label="结算ID">{{ currentOrder.billInfo.settleOrderId || '--' }}</el-descriptions-item>
+      </el-descriptions>
+
+      <div class="detail-section-title" v-if="currentOrder.billInfo">账单费用明细</div>
+      <el-descriptions v-if="currentOrder.billInfo" :column="2" border label-width="150px">
+        <el-descriptions-item label="商品原价">{{ formatYuan(currentOrder.billInfo.itemPrice) }}</el-descriptions-item>
+        <el-descriptions-item label="包装费原价">{{ formatYuan(currentOrder.billInfo.packageFee) }}</el-descriptions-item>
+        <el-descriptions-item label="配送费原价">{{ formatYuan(currentOrder.billInfo.deliveryFee) }}</el-descriptions-item>
+        <el-descriptions-item label="用户实付金额">{{ formatYuan(currentOrder.billInfo.userOnlinePayAmount) }}</el-descriptions-item>
+        <el-descriptions-item label="商家活动费用">{{ formatYuan(currentOrder.billInfo.shopMarketingFee) }}</el-descriptions-item>
+        <el-descriptions-item label="平台费用">{{ formatYuan(currentOrder.billInfo.platformFee) }}</el-descriptions-item>
+        <el-descriptions-item label="商家商品补贴">{{ formatYuan(currentOrder.billInfo.productPreferences) }}</el-descriptions-item>
+        <el-descriptions-item label="商家配送费补贴">{{ formatYuan(currentOrder.billInfo.notProductPreferences) }}</el-descriptions-item>
+        <el-descriptions-item label="商家配送服务费">{{ formatYuan(currentOrder.billInfo.performanceServiceFee) }}</el-descriptions-item>
+        <el-descriptions-item label="商家平台服务费">{{ formatYuan(currentOrder.billInfo.platformChargeFee) }}</el-descriptions-item>
+        <el-descriptions-item label="平台活动补贴">{{ formatYuan(currentOrder.billInfo.activityAmount) }}</el-descriptions-item>
+        <el-descriptions-item label="公益捐赠">{{ formatYuan(currentOrder.billInfo.donationFee) }}</el-descriptions-item>
+      </el-descriptions>
     </div>
     <template #footer>
       <el-button @click="goodsDetailVisible = false">关闭</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog
+    title="账单详情"
+    v-model="billDetailVisible"
+    width="1200px"
+    destroy-on-close
+    :z-index="2001"
+  >
+    <div v-if="currentOrder && currentOrder.billInfo" class="bill-detail-content">
+      <div class="bill-summary-info">
+        <el-descriptions :column="3" border class="info-row" label-width="100px">
+          <el-descriptions-item label="订单号">{{ currentOrder.billInfo.orderId || currentOrder.orderId || '--' }}</el-descriptions-item>
+          <el-descriptions-item label="汇总结算金额">{{ formatAmount(currentOrder.billInfo.totalBillAmount) }}</el-descriptions-item>
+          <el-descriptions-item label="汇总结算状态">
+            <el-tag :type="currentOrder.billInfo.totalStatus === 1 ? 'success' : 'warning'">
+              {{ currentOrder.billInfo.totalStatus === 1 ? '已结算' : '未结算' }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+
+      <div class="detail-section-title">账单明细列表</div>
+      <el-table :data="currentOrder.billInfo.billDetails || []" border size="small" stripe>
+        <el-table-column type="index" label="#" width="50" />
+        <el-table-column prop="billTypeDesc" label="账单类型" width="120" />
+        <el-table-column prop="billDate" label="账单日期" width="110" />
+        <el-table-column prop="settleOrderId" label="结算单号" width="150" show-overflow-tooltip />
+        <el-table-column prop="refundId" label="退款单号" width="130" show-overflow-tooltip />
+        <el-table-column label="结算状态" width="90" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.status === 1 ? 'success' : 'info'" size="small">
+              {{ scope.row.status === 1 ? '已结算' : '未结算' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="账单金额" width="110" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.billAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="商品金额" width="110" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.itemPrice) }}</template>
+        </el-table-column>
+        <el-table-column label="包装费" width="90" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.packageFee) }}</template>
+        </el-table-column>
+        <el-table-column label="配送费" width="90" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.deliveryFee) }}</template>
+        </el-table-column>
+        <el-table-column label="商家营销费" width="110" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.shopMarketingFee) }}</template>
+        </el-table-column>
+        <el-table-column label="平台费" width="90" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.platformFee) }}</template>
+        </el-table-column>
+        <el-table-column label="用户实付" width="110" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.userOnlinePayAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="履约服务费" width="110" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.performanceServiceFee) }}</template>
+        </el-table-column>
+        <el-table-column label="平台服务费" width="110" align="right">
+          <template #default="scope">{{ formatAmount(scope.row.platformChargeFee) }}</template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="160" align="center">
+          <template #default="scope">{{ scope.row.createTime || '--' }}</template>
+        </el-table-column>
+      </el-table>
+    </div>
+    <div v-else class="empty-bill-info">
+      <el-empty description="暂无账单信息" />
+    </div>
+    <template #footer>
+      <el-button @click="billDetailVisible = false">关闭</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script>
 import { ElMessage } from 'element-plus'
-import { getOrderPage, getOrderStatusCounts } from '@/api/ele/order'
+import { getOrderPage, getOrderDetail, getOrderStatusCounts, getOrderBillInfo } from '@/api/ele/order'
+import { retryByOrderId } from '@/api/ele/billSync'
 import { TableApi } from '@/api/business/store'
 import Pagination from '@/components/Pagination/index.vue'
-
-const ELE_PLATFORM_ID = 1
-const MT_PLATFORM_ID = 2
-const CHANNEL_PLATFORM_ID_MAP = {
-  eleme: ELE_PLATFORM_ID,
-  meituan: MT_PLATFORM_ID
-}
-const ORDER_CHANNEL_PLATFORM_ID_MAP = {
-  ELE: ELE_PLATFORM_ID,
-  MT: MT_PLATFORM_ID
-}
 
 export default {
   name: 'Order',
@@ -426,7 +700,6 @@ export default {
       activeTab: 'all',
       gridColumns: 2,
       storeList: [],
-      currentPageStoreNameMap: {},
       storeLoading: false,
       goodsList: [],
       queryParams: {
@@ -440,14 +713,14 @@ export default {
         orderSort: 'createTime_desc',
         goodsId: null,
         goodsName: null,
-        deliveryType: null,
         channelType: null,
         orderType: null,
+        exceptionType: null,
         address: null,
         status: null,
         beginTime: null,
         endTime: null,
-        delivery_type: null
+        deliveryMode: null
       },
       form: {},
       rules: {},
@@ -465,16 +738,16 @@ export default {
       },
       logDialogVisible: false,
       goodsDetailVisible: false,
+      billDetailVisible: false,
       currentOrder: null,
       currentOrderLogs: []
     }
   },
   computed: {},
   created() {
+    this.loadStoreList()
     this.loadGoodsList()
     this.initDateRange()
-    this.getList()
-    this.loadStatusCounts()
   },
   mounted() {},
   methods: {
@@ -498,70 +771,59 @@ export default {
     openGoodsDetail(order) {
       this.currentOrder = order
       this.goodsDetailVisible = true
-    },
-    handleChannelTypeChange() {
-      this.queryParams.storeId = null
-      this.storeList = []
-    },
-    getSearchPlatformIds() {
-      const platformId = CHANNEL_PLATFORM_ID_MAP[this.queryParams.channelType]
-      return platformId ? [platformId] : [ELE_PLATFORM_ID, MT_PLATFORM_ID]
-    },
-    getStoreOptionValue(store) {
-      return store.platformId ? store.platformStoreId : store.storeId
-    },
-    getStoreOptionKey(store) {
-      return `${store.platformId || 'ERP'}-${this.getStoreOptionValue(store) || store.storeName || 'unknown'}`
-    },
-    getStoreOptionLabel(store) {
-      const channelLabelMap = {
-        [ELE_PLATFORM_ID]: '饿了么',
-        [MT_PLATFORM_ID]: '美团'
+      if (!order.billInfo && order.settlementStatus !== undefined && order.settlementStatus !== null) {
+        this.loadBillInfo(order)
       }
-      const optionValue = this.getStoreOptionValue(store)
-      const channelLabel = store.platformId ? channelLabelMap[store.platformId] || '平台门店' : '自有门店'
-      return optionValue ? `${store.storeName}（${channelLabel} / ${optionValue}）` : `${store.storeName}（${channelLabel}）`
     },
-    async searchStoreList(keyword) {
-      const normalizedKeyword = `${keyword || ''}`.trim()
-      if (!normalizedKeyword) {
-        this.storeList = []
-        return
-      }
-      this.storeLoading = true
+    async loadBillInfo(order) {
       try {
-        const mergedList = []
-        const seenKeys = new Set()
-        const appendStores = (result) => {
-          const data = Array.isArray(result) ? result : []
-          data.forEach((store) => {
-            const optionKey = this.getStoreOptionKey(store)
-            if (seenKeys.has(optionKey)) {
-              return
-            }
-            seenKeys.add(optionKey)
-            mergedList.push(store)
-          })
-        }
-        if (this.queryParams.channelType === 'self') {
-          appendStores(await TableApi.getTableSimpleList(normalizedKeyword))
+        const res = await getOrderBillInfo(order.channelOrderId)
+        if (res && res.billDetails && res.billDetails.length > 0) {
+          order.billInfo = res
         } else {
-          if (!this.queryParams.channelType) {
-            appendStores(await TableApi.getTableSimpleList(normalizedKeyword).catch(() => []))
-          }
-          const platformResults = await Promise.all(
-            this.getSearchPlatformIds().map((platformId) =>
-              TableApi.searchPlatformStoreSimpleList(platformId, normalizedKeyword, 1, 20).catch(() => [])
-            )
-          )
-          platformResults.forEach((result) => appendStores(result))
+          order.billInfo = null
         }
-        this.storeList = mergedList.sort((a, b) => (b.storeStatus ?? 0) - (a.storeStatus ?? 0))
-      } catch {
-        this.storeList = []
-      } finally {
-        this.storeLoading = false
+      } catch (e) {
+        order.billInfo = null
       }
+    },
+    async openBillDetail(order) {
+      this.currentOrder = order
+      this.billDetailVisible = true
+      if (!order.billInfo) {
+        await this.loadBillInfo(order)
+      }
+    },
+    async handleRetryBill(order) {
+      try {
+        const res = await retryByOrderId(order.channelOrderId)
+        ElMessage.success(res || '重试成功')
+        this.getList()
+      } catch (e) {
+        ElMessage.error('请求失败')
+      }
+    },
+    loadStoreList() {
+      this.storeLoading = true
+      TableApi.getTableAllSimpleList()
+        .then((res) => {
+          const list = Array.isArray(res) ? res : []
+          this.storeList = list.sort((a, b) => {
+            const aStatus = a.storeStatus ?? 0
+            const bStatus = b.storeStatus ?? 0
+            return bStatus - aStatus
+          })
+          this.queryParams.storeId = null
+          this.getList()
+          this.loadStatusCounts()
+        })
+        .catch(() => {
+          this.storeList = []
+          this.loading = false
+        })
+        .finally(() => {
+          this.storeLoading = false
+        })
     },
     loadGoodsList() {
       if (!this.useMockData) {
@@ -625,38 +887,38 @@ export default {
       }
       return `${value ?? ''}`.endsWith(suffix)
     },
-    matchesDeliveryType(order) {
-      if (!this.queryParams.deliveryType) {
-        return true
-      }
-      const deliveryTypeMap = {
-        instant: [1],
-        appointment: [2]
-      }
-      return (
-        deliveryTypeMap[this.queryParams.deliveryType]?.includes(Number(order.deliveryType)) ?? true
-      )
-    },
     matchesChannelType(order) {
       if (!this.queryParams.channelType) {
         return true
       }
-      const channelTypeMap = {
-        meituan: 'MT',
-        eleme: 'ELE',
-        self: 'POS'
-      }
-      return order.channelType === channelTypeMap[this.queryParams.channelType]
+      return order.channelType === this.queryParams.channelType
     },
     matchesOrderType(order) {
       if (!this.queryParams.orderType) {
         return true
       }
-      if (this.queryParams.orderType === 'refund') {
-        return false
-      }
-      if (this.queryParams.orderType === 'normal') {
+      return Number(order.arriveType) === Number(this.queryParams.orderType)
+    },
+    matchesExceptionType(order) {
+      if (!this.queryParams.exceptionType) {
         return true
+      }
+      const isException = this.isExceptionStatus(order.status)
+      return this.queryParams.exceptionType === 'exception' ? isException : !isException
+    },
+    matchesDeliveryMode(order) {
+      if (!this.queryParams.deliveryMode) {
+        return true
+      }
+      const mode = Number(this.queryParams.deliveryMode)
+      if (mode === 1) {
+        return Number(order.deliveryPlatform) > 0
+      }
+      if (mode === 2) {
+        return Number(order.deliveryPlatform) === 0
+      }
+      if (mode === 3) {
+        return order.channelType === 'POS'
       }
       return true
     },
@@ -697,7 +959,13 @@ export default {
       const phoneSuffix = `${this.queryParams.phoneSuffix ?? ''}`.trim()
       const storeId = this.queryParams.storeId
       const tabStatusMap = {
-        paid: 1, accepted: 2, picked: 3, packed: 4, shipped: 5, done: 6, closed: -1
+        paid: 1,
+        accepted: 2,
+        picked: 3,
+        packed: 4,
+        shipped: 5,
+        done: 6,
+        closed: -1
       }
       const targetStatus = tabStatusMap[this.activeTab]
       return orderList.filter((order) => {
@@ -708,9 +976,10 @@ export default {
           this.matchesPhoneSuffix(order.userPhone, phoneSuffix) &&
           this.includesKeyword(order.channelOrderId, channelOrderKeyword) &&
           this.includesKeyword(order.userAddress, addressKeyword) &&
-          this.matchesDeliveryType(order) &&
           this.matchesChannelType(order) &&
           this.matchesOrderType(order) &&
+          this.matchesExceptionType(order) &&
+          this.matchesDeliveryMode(order) &&
           this.matchesGoods(order) &&
           (!storeId || order.storeCode === storeId)
         )
@@ -723,16 +992,36 @@ export default {
           this.currentOrderLogs = mockLogs
         } else {
           this.currentOrderLogs = [
-            { operation: '订单创建', operator: '系统', time: order.createTime || new Date().toLocaleString(), status: '已创建' },
-            { operation: '订单付款', operator: '用户', time: order.payTime || '--', status: '已支付' },
+            {
+              operation: '订单创建',
+              operator: '系统',
+              time: order.createTime || new Date().toLocaleString(),
+              status: '已创建'
+            },
+            {
+              operation: '订单付款',
+              operator: '用户',
+              time: order.payTime || '--',
+              status: '已支付'
+            },
             { operation: '订单接单', operator: '门店', time: '--', status: '已接单' },
             { operation: '订单完成', operator: '系统', time: '--', status: '已完成' }
           ]
         }
       } catch (error) {
         this.currentOrderLogs = order.logs || [
-          { operation: '订单创建', operator: '系统', time: order.createTime || '--', status: '已创建' },
-          { operation: '订单付款', operator: '用户', time: order.payTime || '--', status: '已支付' },
+          {
+            operation: '订单创建',
+            operator: '系统',
+            time: order.createTime || '--',
+            status: '已创建'
+          },
+          {
+            operation: '订单付款',
+            operator: '用户',
+            time: order.payTime || '--',
+            status: '已支付'
+          },
           { operation: '订单接单', operator: '门店', time: '--', status: '已接单' },
           { operation: '订单完成', operator: '系统', time: '--', status: '已完成' }
         ]
@@ -742,7 +1031,16 @@ export default {
     loadStatusCounts() {
       const timeRange = this.getTimestampRange()
       if (!timeRange) {
-        this.statusCounts = { all: 0, paid: 0, accepted: 0, picked: 0, packed: 0, shipped: 0, done: 0, closed: 0 }
+        this.statusCounts = {
+          all: 0,
+          paid: 0,
+          accepted: 0,
+          picked: 0,
+          packed: 0,
+          shipped: 0,
+          done: 0,
+          closed: 0
+        }
         return
       }
       const params = {
@@ -752,18 +1050,49 @@ export default {
       if (this.queryParams.storeId) {
         params.platformStoreId = this.queryParams.storeId.trim()
       }
+      if (this.queryParams.orderNo) {
+        params.orderId = this.queryParams.orderNo.trim()
+      }
+      if (this.queryParams.channelOrderNo) {
+        params.channelOrderId = this.queryParams.channelOrderNo.trim()
+      }
+      if (this.queryParams.receiverName) {
+        params.buyerName = this.queryParams.receiverName.trim()
+      }
+      if (this.queryParams.phoneSuffix) {
+        params.buyerPhoneSuffix = this.queryParams.phoneSuffix.trim()
+      }
+      if (this.queryParams.goodsName) {
+        params.skuName = this.queryParams.goodsName.trim()
+      }
+      if (this.queryParams.channelType) {
+        params.channelType = this.queryParams.channelType
+      }
+      if (this.queryParams.orderType) {
+        params.arriveType = this.queryParams.orderType
+      }
+      if (this.queryParams.exceptionType) {
+        params.exceptionType = this.queryParams.exceptionType
+      }
+      if (this.queryParams.deliveryMode) {
+        params.deliveryMode = this.queryParams.deliveryMode
+      }
+      if (this.queryParams.address) {
+        params.address = this.queryParams.address.trim()
+      }
       getOrderStatusCounts(params)
-        .then((counts) => {
-          const totalCount = Object.values(counts).reduce((sum, c) => sum + c, 0)
+        .then((res) => {
+          const counts = res.data || res
+          const totalCount = Object.values(counts).reduce((sum, c) => sum + Number(c || 0), 0)
           this.statusCounts = {
             all: totalCount,
-            paid: counts[1] || 0,
-            accepted: counts[2] || 0,
-            picked: counts[3] || 0,
-            packed: counts[4] || 0,
-            shipped: counts[5] || 0,
-            done: counts[6] || 0,
-            closed: counts[-1] || 0
+            paid: Number(counts['1'] || counts[1] || 0),
+            accepted: Number(counts['2'] || counts[2] || 0),
+            picked: Number(counts['3'] || counts[3] || 0),
+            packed: Number(counts['4'] || counts[4] || 0),
+            shipped: Number(counts['5'] || counts[5] || 0),
+            done: Number(counts['6'] || counts[6] || 0),
+            closed: Number(counts['-1'] || counts[-1] || 0)
           }
         })
         .catch(() => {})
@@ -773,9 +1102,6 @@ export default {
       const month = `${date.getMonth() + 1}`.padStart(2, '0')
       const day = `${date.getDate()}`.padStart(2, '0')
       return `${year}-${month}-${day}`
-    },
-    updateStatusCount(statusKey, count) {
-      this.statusCounts[statusKey] = count
     },
     getTimestampRange() {
       if (!this.queryParams.beginTime || !this.queryParams.endTime) {
@@ -795,7 +1121,6 @@ export default {
       this.orderList = []
       this.total = 0
       this.goodsList = []
-      this.currentPageStoreNameMap = {}
     },
     getList() {
       this.loading = true
@@ -809,7 +1134,7 @@ export default {
       }
       const timeRange = this.getTimestampRange()
       if (!timeRange) {
-        console.warn('[ELE前端] 时间范围未设置，将使用今日日期进行查询')
+        // console.warn('[ELE前端] 时间范围未设置，将使用今日日期进行查询')
         const today = this.formatLocalDate(new Date())
         this.queryParams.beginTime = today
         this.queryParams.endTime = today
@@ -830,21 +1155,61 @@ export default {
       if (this.queryParams.storeId) {
         requestParams.platformStoreId = this.queryParams.storeId.trim()
       }
+      if (this.queryParams.orderNo) {
+        requestParams.orderId = this.queryParams.orderNo.trim()
+      }
+      if (this.queryParams.channelOrderNo) {
+        requestParams.channelOrderId = this.queryParams.channelOrderNo.trim()
+      }
+      if (this.queryParams.receiverName) {
+        requestParams.buyerName = this.queryParams.receiverName.trim()
+      }
+      if (this.queryParams.phoneSuffix) {
+        requestParams.buyerPhoneSuffix = this.queryParams.phoneSuffix.trim()
+      }
+      if (this.queryParams.goodsName) {
+        requestParams.skuName = this.queryParams.goodsName.trim()
+      }
+      if (this.queryParams.channelType) {
+        requestParams.channelType = this.queryParams.channelType
+      }
+      if (this.queryParams.deliveryType) {
+        requestParams.arriveType = this.queryParams.deliveryType
+      }
+      if (this.queryParams.orderType) {
+        requestParams.arriveType = this.queryParams.orderType
+      }
+      if (this.queryParams.exceptionType) {
+        requestParams.exceptionType = this.queryParams.exceptionType
+      }
+      if (this.queryParams.deliveryMode) {
+        requestParams.deliveryMode = this.queryParams.deliveryMode
+      }
+      if (this.queryParams.address) {
+        requestParams.address = this.queryParams.address.trim()
+      }
+      if (this.queryParams.orderSort) {
+        requestParams.orderSort = this.queryParams.orderSort
+      }
       if (this.activeTab !== 'all') {
         const statusMap = {
-          paid: 1, accepted: 2, picked: 3, packed: 4, shipped: 5, done: 6, closed: -1
+          paid: 1,
+          accepted: 2,
+          picked: 3,
+          packed: 4,
+          shipped: 5,
+          done: 6,
+          closed: -1
         }
         requestParams.status = statusMap[this.activeTab]
       }
       getOrderPage(requestParams)
-        .then(async (response) => {
+        .then((response) => {
           const orderList = Array.isArray(response?.list) ? response.list : []
-          await this.loadCurrentPageStoreNameMap(orderList)
           const normalizedList = orderList.map((item) => this.normalizeOrder(item))
           this.total = response.total || 0
           this.allOrderList = normalizedList
           this.syncGoodsListFromOrders(normalizedList)
-          this.updateStatusCount(this.activeTab, response.total || 0)
           this.dataSource = 'api'
           this.applyLocalView()
           this.loading = false
@@ -875,7 +1240,8 @@ export default {
           orderNo: '30',
           orderSn: '2002008244207066718',
           storeName: '柴小园24H便利超市（遥墙店）',
-          deliveryType: '即时单',
+          deliveryType: 1,
+          arriveType: 2,
           expectTime: '今日 15:19',
           status: 'pendingPick',
           statusText: '待拣货',
@@ -901,7 +1267,8 @@ export default {
           goodsList: [
             {
               goodsCode: '1894306525422641166',
-              goodsName: '【丝袜】宝娜斯无痕T裆丝袜女夏天超薄款连裤袜防勾丝隐形形袜长筒袜子 1双（颜色可选）',
+              goodsName:
+                '【丝袜】宝娜斯无痕T裆丝袜女夏天超薄款连裤袜防勾丝隐形形袜长筒袜子 1双（颜色可选）',
               barcode: '6972228776729',
               goodsImage: 'https://via.placeholder.com/60',
               weight: '10g',
@@ -929,12 +1296,42 @@ export default {
             }
           ],
           logs: [
-            { operation: '订单付款', operator: '用户', time: '2026-02-23 16:40:47', status: '已支付' },
-            { operation: '订单接单', operator: '平台', time: '2026-02-23 16:40:50', status: '已接单' },
-            { operation: '呼单成功', operator: '运力平台', time: '2026-02-23 16:40:59', status: '已呼单' },
-            { operation: '订单拣货', operator: '赵偉萱', time: '2026-02-23 16:44:02', status: '已拣货' },
-            { operation: '订单打包', operator: '平台', time: '2026-02-23 16:44:02', status: '已打包' },
-            { operation: '骑手接单', operator: '运力平台', time: '2026-02-23 16:48:00', status: '骑手已接单' }
+            {
+              operation: '订单付款',
+              operator: '用户',
+              time: '2026-02-23 16:40:47',
+              status: '已支付'
+            },
+            {
+              operation: '订单接单',
+              operator: '平台',
+              time: '2026-02-23 16:40:50',
+              status: '已接单'
+            },
+            {
+              operation: '呼单成功',
+              operator: '运力平台',
+              time: '2026-02-23 16:40:59',
+              status: '已呼单'
+            },
+            {
+              operation: '订单拣货',
+              operator: '赵偉萱',
+              time: '2026-02-23 16:44:02',
+              status: '已拣货'
+            },
+            {
+              operation: '订单打包',
+              operator: '平台',
+              time: '2026-02-23 16:44:02',
+              status: '已打包'
+            },
+            {
+              operation: '骑手接单',
+              operator: '运力平台',
+              time: '2026-02-23 16:48:00',
+              status: '骑手已接单'
+            }
           ]
         },
         {
@@ -942,7 +1339,8 @@ export default {
           orderNo: '31',
           orderSn: '2002008244207066719',
           storeName: '柴小园24H便利超市（高新店）',
-          deliveryType: '即时单',
+          deliveryType: 1,
+          arriveType: 2,
           expectTime: '今日 15:45',
           status: 'pendingCall',
           statusText: '待呼单',
@@ -982,9 +1380,24 @@ export default {
             }
           ],
           logs: [
-            { operation: '订单付款', operator: '用户', time: '2026-02-23 15:30:20', status: '已支付' },
-            { operation: '订单接单', operator: '平台', time: '2026-02-23 15:30:25', status: '已接单' },
-            { operation: '呼单成功', operator: '运力平台', time: '2026-02-23 15:31:00', status: '已呼单' }
+            {
+              operation: '订单付款',
+              operator: '用户',
+              time: '2026-02-23 15:30:20',
+              status: '已支付'
+            },
+            {
+              operation: '订单接单',
+              operator: '平台',
+              time: '2026-02-23 15:30:25',
+              status: '已接单'
+            },
+            {
+              operation: '呼单成功',
+              operator: '运力平台',
+              time: '2026-02-23 15:31:00',
+              status: '已呼单'
+            }
           ]
         },
         {
@@ -992,7 +1405,8 @@ export default {
           orderNo: '32',
           orderSn: '2002008244207066720',
           storeName: '柴小园24H便利超市（遥墙店）',
-          deliveryType: '预约单',
+          deliveryType: 1,
+          arriveType: 1,
           expectTime: '今日 18:00',
           status: 'delivering',
           statusText: '配送中',
@@ -1032,14 +1446,54 @@ export default {
             }
           ],
           logs: [
-            { operation: '订单付款', operator: '用户', time: '2026-02-23 16:00:00', status: '已支付' },
-            { operation: '订单接单', operator: '平台', time: '2026-02-23 16:00:05', status: '已接单' },
-            { operation: '呼单成功', operator: '运力平台', time: '2026-02-23 16:01:00', status: '已呼单' },
-            { operation: '订单拣货', operator: '王师傅', time: '2026-02-23 16:05:00', status: '已拣货' },
-            { operation: '订单打包', operator: '李师傅', time: '2026-02-23 16:06:00', status: '已打包' },
-            { operation: '骑手接单', operator: '运力平台', time: '2026-02-23 16:08:00', status: '骑手已接单' },
-            { operation: '骑手取货', operator: '运力平台', time: '2026-02-23 16:10:00', status: '骑手已取货' },
-            { operation: '配送中', operator: '运力平台', time: '2026-02-23 16:15:00', status: '配送中' }
+            {
+              operation: '订单付款',
+              operator: '用户',
+              time: '2026-02-23 16:00:00',
+              status: '已支付'
+            },
+            {
+              operation: '订单接单',
+              operator: '平台',
+              time: '2026-02-23 16:00:05',
+              status: '已接单'
+            },
+            {
+              operation: '呼单成功',
+              operator: '运力平台',
+              time: '2026-02-23 16:01:00',
+              status: '已呼单'
+            },
+            {
+              operation: '订单拣货',
+              operator: '王师傅',
+              time: '2026-02-23 16:05:00',
+              status: '已拣货'
+            },
+            {
+              operation: '订单打包',
+              operator: '李师傅',
+              time: '2026-02-23 16:06:00',
+              status: '已打包'
+            },
+            {
+              operation: '骑手接单',
+              operator: '运力平台',
+              time: '2026-02-23 16:08:00',
+              status: '骑手已接单'
+            },
+            {
+              operation: '骑手取货',
+              operator: '运力平台',
+              time: '2026-02-23 16:10:00',
+              status: '骑手已取货'
+            },
+            {
+              operation: '配送中',
+              operator: '运力平台',
+              time: '2026-02-23 16:15:00',
+              status: '配送中'
+            }
           ]
         }
       ]
@@ -1061,9 +1515,19 @@ export default {
     },
     reset() {
       this.form = {
-        id: null, orderNo: null, status: null, storeId: null, userId: null,
-        userName: null, userPhone: null, userAddress: null, payAmount: null,
-        income: null, profit: null, remark: null, createTime: null
+        id: null,
+        orderNo: null,
+        status: null,
+        storeId: null,
+        userId: null,
+        userName: null,
+        userPhone: null,
+        userAddress: null,
+        payAmount: null,
+        income: null,
+        profit: null,
+        remark: null,
+        createTime: null
       }
       this.resetForm('form')
     },
@@ -1083,11 +1547,24 @@ export default {
       this.dateRange = []
       this.initDateRange()
       this.queryParams = {
-        pageNum: 1, pageSize: 20, orderNo: null, storeId: null, receiverName: null,
-        phoneSuffix: null, channelOrderNo: null, orderSort: 'createTime_desc',
-        goodsId: null, goodsName: null, deliveryType: null, channelType: null,
-        orderType: null, address: null, status: null, beginTime: null, endTime: null,
-        delivery_type: null
+        pageNum: 1,
+        pageSize: 20,
+        orderNo: null,
+        storeId: null,
+        receiverName: null,
+        phoneSuffix: null,
+        channelOrderNo: null,
+        orderSort: 'createTime_desc',
+        goodsId: null,
+        goodsName: null,
+        channelType: null,
+        orderType: null,
+        exceptionType: null,
+        address: null,
+        status: null,
+        beginTime: null,
+        endTime: null,
+        deliveryMode: null
       }
       this.resetForm('queryForm')
       this.handleQuery()
@@ -1099,11 +1576,27 @@ export default {
       this.loadStatusCounts()
     },
     getStatusType(status) {
-      const statusMap = { 1: 'info', 2: 'warning', 3: 'warning', 4: 'warning', 5: 'primary', 6: 'success', '-1': 'danger' }
+      const statusMap = {
+        1: 'info',
+        2: 'warning',
+        3: 'warning',
+        4: 'warning',
+        5: 'primary',
+        6: 'success',
+        '-1': 'danger'
+      }
       return statusMap[status] || 'info'
     },
     getStatusText(status) {
-      const statusMap = { 1: '已支付', 2: '已接单', 3: '已拣货', 4: '已打包', 5: '已发货', 6: '交易成功', '-1': '交易关闭' }
+      const statusMap = {
+        1: '已支付',
+        2: '已接单',
+        3: '已拣货',
+        4: '已打包',
+        5: '已发货',
+        6: '交易成功',
+        '-1': '交易关闭'
+      }
       return statusMap[status] || `状态${status}`
     },
     getStatusTabText(status) {
@@ -1111,20 +1604,40 @@ export default {
       return statusMap[status] || this.getStatusText(status)
     },
     getChannelLabel(channelType) {
-      const channelMap = { MT: '美团', ELE: '饿了么', JD: '京东', POS: 'POS' }
+      const channelMap = {
+        ELE: '淘宝闪购',
+        MT: '美团',
+        JD: '京东',
+        POS: 'POS',
+        OO: '销售开单'
+      }
       return channelMap[channelType] || channelType || '--'
     },
     getChannelTagType(channelType) {
-      const typeMap = { MT: 'warning', ELE: 'primary', JD: 'success', POS: 'info' }
+      const typeMap = {
+        ELE: 'primary',
+        MT: 'warning',
+        JD: 'success',
+        POS: 'info',
+        OO: 'success'
+      }
       return typeMap[channelType] || 'info'
     },
     getDeliveryTypeTagType(deliveryType) {
-      const typeMap = { 1: 'primary', 2: 'warning' }
+      const typeMap = { 1: 'success', 2: 'warning', 3: 'info' }
       return typeMap[deliveryType] || 'info'
     },
     getDeliveryTypeText(deliveryType) {
-      const typeMap = { 1: '即时单', 2: '预约单' }
+      const typeMap = { 1: '平台配', 2: '自配送', 3: '自提' }
       return typeMap[deliveryType] || '--'
+    },
+    getArriveTypeTagType(arriveType) {
+      const typeMap = { 1: 'warning', 2: 'primary' }
+      return typeMap[arriveType] || 'info'
+    },
+    getArriveTypeText(arriveType) {
+      const typeMap = { 1: '预约单', 2: '即时单' }
+      return typeMap[arriveType] || '--'
     },
     getDeliveryPlatformText(order) {
       if (order.deliveryPlatform === '4' || order.deliveryPlatform === 4) {
@@ -1137,15 +1650,27 @@ export default {
     },
     getDeliveryStatusText(deliveryStatus) {
       const statusMap = {
-        29: '待请求配送', 30: '待骑手接单', 31: '配送取消', 32: '骑手接单',
-        33: '骑手到店', 34: '配送异常', 35: '骑手揽收', 36: '骑手送达'
+        29: '待请求配送',
+        30: '待骑手接单',
+        31: '配送取消',
+        32: '骑手接单',
+        33: '骑手到店',
+        34: '配送异常',
+        35: '骑手揽收',
+        36: '骑手送达'
       }
       return statusMap[deliveryStatus] || (deliveryStatus ?? '--')
     },
     getDeliveryStatusType(deliveryStatus) {
       const statusMap = {
-        29: 'info', 30: 'warning', 31: 'danger', 32: 'primary',
-        33: 'warning', 34: 'danger', 35: 'success', 36: 'success'
+        29: 'info',
+        30: 'warning',
+        31: 'danger',
+        32: 'primary',
+        33: 'warning',
+        34: 'danger',
+        35: 'success',
+        36: 'success'
       }
       return statusMap[deliveryStatus] || 'info'
     },
@@ -1154,6 +1679,10 @@ export default {
         return `${order.deliveryName}${order.deliveryPhone ? `(${order.deliveryPhone})` : ''}`
       }
       return '暂无骑手接单'
+    },
+    hasExchangeAmount(goodsList) {
+      if (!Array.isArray(goodsList)) return false
+      return goodsList.some((g) => Number(g.exchangeAmount || 0) > 0)
     },
     getDiscountTypeText(type) {
       const typeMap = { sku: '商品优惠', post: '配送优惠' }
@@ -1192,57 +1721,11 @@ export default {
       }
       return `¥${(Number(value) / 100).toFixed(2)}`
     },
-    getOrderChannelPlatformId(channelType) {
-      return ORDER_CHANNEL_PLATFORM_ID_MAP[channelType] || null
-    },
-    buildStoreNameMapKey(platformId, storeCode) {
-      const normalizedStoreCode = `${storeCode || ''}`.trim()
-      if (!platformId || !normalizedStoreCode) {
-        return ''
+    formatYuan(value) {
+      if (value === null || value === undefined || value === '') {
+        return '--'
       }
-      return `${platformId}::${normalizedStoreCode}`
-    },
-    async loadCurrentPageStoreNameMap(orderList) {
-      const platformStoreIdsMap = new Map()
-      orderList.forEach((order) => {
-        const platformId = this.getOrderChannelPlatformId(order.channelType)
-        const storeCode = `${order.storeCode || ''}`.trim()
-        if (!platformId || !storeCode) {
-          return
-        }
-        if (!platformStoreIdsMap.has(platformId)) {
-          platformStoreIdsMap.set(platformId, new Set())
-        }
-        platformStoreIdsMap.get(platformId).add(storeCode)
-      })
-      if (!platformStoreIdsMap.size) {
-        this.currentPageStoreNameMap = {}
-        return
-      }
-      const requestList = Array.from(platformStoreIdsMap.entries()).map(([platformId, storeCodeSet]) =>
-        TableApi.getPlatformStoreSimpleList({
-          platformId,
-          platformStoreIds: Array.from(storeCodeSet)
-        }).catch(() => [])
-      )
-      const resultList = await Promise.all(requestList)
-      const storeNameMap = {}
-      resultList.forEach((result) => {
-        const data = Array.isArray(result) ? result : []
-        data.forEach((store) => {
-          const key = this.buildStoreNameMapKey(store.platformId, store.platformStoreId)
-          if (!key || !store.storeName) {
-            return
-          }
-          storeNameMap[key] = store.storeName
-        })
-      })
-      this.currentPageStoreNameMap = storeNameMap
-    },
-    resolveOrderStoreName(item) {
-      const platformId = this.getOrderChannelPlatformId(item.channelType)
-      const mappingKey = this.buildStoreNameMapKey(platformId, item.storeCode)
-      return this.currentPageStoreNameMap[mappingKey] || item.channelSourceName || '--'
+      return `¥${Number(value).toFixed(2)}`
     },
     normalizeOrder(item) {
       const goodsList = Array.isArray(item.subOrders)
@@ -1253,19 +1736,26 @@ export default {
               goodsCode: sub.skuCode || '--',
               goodsName: sub.skuName || '--',
               barcode: sub.barcode || '--',
-              weight: sub.weight ?? '--',
+              weight: sub.weight ? `${sub.weight}g` : '--',
               price: sub.price,
               quantity: sub.buyAmount ?? 0,
               spec: sub.specification || '--',
               location: sub.cabinetCode || '--',
               totalAmount,
               discountAmount: Math.max(totalAmount - actualAmount, 0),
-              actualAmount
+              actualAmount,
+              giftFlag: sub.giftFlag ?? 0,
+              exchangeFlag: sub.exchangeFlag ?? 0,
+              exchangeAmount: sub.exchangeAmount ?? 0
             }
           })
         : []
       const discounts = Array.isArray(item.discounts)
-        ? item.discounts.map((discount) => ({ ...discount, typeText: this.getDiscountTypeText(discount.type) }))
+        ? item.discounts.map((discount) => ({
+            ...discount,
+            activityName: discount.activityName || discount.name || '--',
+            typeText: this.getDiscountTypeText(discount.type)
+          }))
         : []
       const goodsCount = goodsList.length
       const goodsQuantity = goodsList.reduce((sum, goods) => sum + Number(goods.quantity || 0), 0)
@@ -1278,10 +1768,17 @@ export default {
         id: item.orderId,
         orderNo: item.orderId,
         orderSn: item.orderId,
-        storeName: this.resolveOrderStoreName(item),
+        storeName:
+          this.storeList.find(
+            (store) => store.platformStoreId === item.storeCode || store.storeId === item.storeCode
+          )?.storeName ||
+          item.channelSourceName ||
+          '--',
         channelLabel: this.getChannelLabel(item.channelType),
         deliveryTypeText: this.getDeliveryTypeText(item.deliveryType),
         deliveryPlatformText: this.getDeliveryPlatformText(item),
+        arriveType: item.arriveType,
+        arriveTypeText: this.getArriveTypeText(item.arriveType),
         deliveryStatus: item.deliveryStatus,
         deliveryStatusText: this.getDeliveryStatusText(item.deliveryStatus),
         deliveryNameText: this.getDeliveryNameText(item),
@@ -1290,7 +1787,10 @@ export default {
         userName: item.buyerName || '--',
         userPhone: item.buyerPhone || '--',
         userAddress: item.buyerAddress || '--',
-        goodsCount, goodsQuantity, totalWeight, goodsAmount,
+        goodsCount,
+        goodsQuantity,
+        totalWeight,
+        goodsAmount,
         packageFee: item.packageFee,
         discountFee: item.discountFee,
         postFee: deliveryOriginalAmount,
@@ -1298,29 +1798,73 @@ export default {
         deliveryDiscountAmount: Math.max(deliveryOriginalAmount - Number(item.deliveryFee || 0), 0),
         payFee: item.payFee,
         totalFee: item.totalFee,
+        estimatedIncome: item.estimatedIncome ?? 0,
+        platformCommissionFee: item.platformCommissionFee ?? 0,
+        platformOrderStatus: item.platformOrderStatus,
+        platformOrderStatusName: item.platformOrderStatusName,
+        deliveryPlatformName: item.deliveryPlatformName,
+        platformStoreId: item.platformStoreId,
+        erpStoreCode: item.erpStoreCode,
+        merchantCode: item.merchantCode,
+        channelSourceId: item.channelSourceId,
+        isTestOrder: item.isTestOrder,
+        isHistoryOrder: item.isHistoryOrder,
+        orderFrom: item.orderFrom,
+        orderIndex: item.orderIndex,
+        longitude: item.longitude,
+        latitude: item.latitude,
         createTimeRaw: Number(item.createTime || 0),
         payTimeRaw: Number(item.payTime || 0),
+        updateTimeText: item.updateTime ? this.formatTimestamp(item.updateTime) : '--',
         createTime: this.formatTimestamp(item.createTime),
         payTime: this.formatTimestamp(item.payTime),
         goodsList,
         discounts,
         logs: this.buildOrderLogs(item),
-        showDetail: false
+        showDetail: false,
+        settlementAmount: item.settlementAmount != null ? Number(item.settlementAmount) : null,
+        settlementStatus: item.settlementStatus != null ? Number(item.settlementStatus) : null,
+        billInfo: null
       }
     },
     buildOrderLogs(order) {
-      const logs = [{ operation: '订单创建', operator: '系统', time: this.formatTimestamp(order.createTime), status: '已创建' }]
+      const logs = [
+        {
+          operation: '订单创建',
+          operator: '系统',
+          time: this.formatTimestamp(order.createTime),
+          status: '已创建'
+        }
+      ]
       if (order.payTime) {
-        logs.push({ operation: '订单付款', operator: order.buyerName || '用户', time: this.formatTimestamp(order.payTime), status: '已支付' })
+        logs.push({
+          operation: '订单付款',
+          operator: order.buyerName || '用户',
+          time: this.formatTimestamp(order.payTime),
+          status: '已支付'
+        })
       }
-      logs.push({ operation: '订单状态', operator: order.deliveryName || '系统', time: this.formatTimestamp(order.payTime || order.createTime), status: this.getStatusText(order.status) })
+      logs.push({
+        operation: '订单状态',
+        operator: order.deliveryName || '系统',
+        time: this.formatTimestamp(order.payTime || order.createTime),
+        status: this.getStatusText(order.status)
+      })
       return logs
     },
     filterOrdersByTab(orderList) {
       if (this.activeTab === 'all') {
         return orderList
       }
-      const tabStatusMap = { paid: 1, accepted: 2, picked: 3, packed: 4, shipped: 5, done: 6, closed: -1 }
+      const tabStatusMap = {
+        paid: 1,
+        accepted: 2,
+        picked: 3,
+        packed: 4,
+        shipped: 5,
+        done: 6,
+        closed: -1
+      }
       const targetStatus = tabStatusMap[this.activeTab]
       if (targetStatus === undefined) {
         return orderList
@@ -1328,7 +1872,8 @@ export default {
       return orderList.filter((order) => Number(order.status) === targetStatus)
     },
     applyLocalView() {
-      const searchFilteredOrders = this.applySearchFilters(this.allOrderList)
+      const statusFilteredOrders = this.filterOrdersByTab(this.allOrderList)
+      const searchFilteredOrders = this.applySearchFilters(statusFilteredOrders)
       const sortedOrders = this.sortOrders(searchFilteredOrders)
       if (this.dataSource === 'mock') {
         const pageNum = this.queryParams.pageNum
@@ -1605,6 +2150,12 @@ export default {
       color: #999;
       font-size: 12px;
     }
+
+    .order-index {
+      color: #909399;
+      font-size: 12px;
+      font-weight: 500;
+    }
   }
 }
 
@@ -1758,6 +2309,24 @@ export default {
       font-weight: 600;
     }
 
+    .commission {
+      color: #f56c6c;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .settled {
+      color: #67c23a;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .unsettled {
+      color: #909399;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
     .profit {
       color: #67c23a;
       font-size: 14px;
@@ -1856,6 +2425,26 @@ export default {
       }
     }
   }
+}
+
+.bill-detail-content {
+  .info-row {
+    margin-bottom: 12px;
+  }
+
+  .detail-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    margin: 20px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+}
+
+.empty-bill-info {
+  padding: 40px 0;
+  text-align: center;
 }
 
 :deep(.el-table) {

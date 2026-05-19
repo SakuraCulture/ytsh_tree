@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,6 +35,9 @@ public class SaasOrderStatusPushController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Value("${ele.saas.push.enabled}")
+    private boolean pushEnabled;
+
     @PostMapping(consumes = { "application/x-www-form-urlencoded", "application/json", "*/*" })
     @Operation(summary = "接收SaaS订单推送通知（订单创建 + 状态变更）")
     public Map<String, Object> handlePush(HttpServletRequest httpRequest) {
@@ -48,6 +52,11 @@ public class SaasOrderStatusPushController {
         log.info("【SaaS推送】==== 收到推送通知 START ====");
         log.info("【SaaS推送】请求参数：cmd={}, ticket={}, source={}, sign={}, version={}, timestamp={}, body={}",
                 cmd, ticket, source, sign, version, timestampStr, bodyParam);
+
+        if (!pushEnabled && !"push.verify".equals(cmd)) {
+            log.info("【SaaS推送】订单推送功能已关闭，跳过消息处理（保留push.verify验证），orderId={}", bodyParam);
+            return buildSuccessResponse(cmd, ticket, source, version);
+        }
 
         if ("push.verify".equals(cmd)) {
             log.info("【SaaS推送】收到push.verify验证请求，直接返回成功");

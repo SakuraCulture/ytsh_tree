@@ -4,14 +4,11 @@
       <el-form-item label="门店" prop="platformStoreId">
         <el-select
           v-model="queryParams.platformStoreId"
-          placeholder="请输入门店名称或平台门店ID"
+          placeholder="请选择门店"
           clearable
           filterable
-          remote
-          reserve-keyword
-          :remote-method="searchStoreList"
           :loading="storeLoading"
-          style="width: 240px"
+          style="width: 200px"
         >
           <el-option
             v-for="store in storeList"
@@ -114,15 +111,12 @@
 <script lang="ts" setup>
 import * as SyncLogApi from '@/api/ele/syncLog'
 import * as TableApi from '@/api/business/store'
-import type { StoreSimpleRespVO } from '@/api/business/store'
 import { ref, onMounted } from 'vue'
-
-const ELE_PLATFORM_ID = 1
 
 const loading = ref(false)
 const total = ref(0)
 const list = ref<SyncLogApi.EleSyncLogRespVO[]>([])
-const storeList = ref<StoreSimpleRespVO[]>([])
+const storeList = ref<any[]>([])
 const storeLoading = ref(false)
 const queryRef = ref()
 
@@ -133,27 +127,28 @@ const queryParams = ref<SyncLogApi.EleSyncLogReqVO>({
   pageSize: 10
 })
 
-const searchStoreList = async (keyword: string) => {
-  const normalizedKeyword = keyword.trim()
-  if (!normalizedKeyword) {
-    storeList.value = []
-    return
-  }
+const loadStoreList = () => {
   storeLoading.value = true
-  try {
-    const res = await TableApi.searchPlatformStoreSimpleList(
-      ELE_PLATFORM_ID,
-      normalizedKeyword,
-      1,
-      20
-    )
-    const data = Array.isArray(res) ? res : []
-    storeList.value = data.sort((a, b) => (b.storeStatus ?? 0) - (a.storeStatus ?? 0))
-  } catch {
-    storeList.value = []
-  } finally {
-    storeLoading.value = false
-  }
+  TableApi.getTableAllSimpleList(1)
+    .then((res) => {
+      const data = Array.isArray(res) ? res : []
+      storeList.value = data.sort((a, b) => {
+        const aStatus = a.storeStatus ?? 0
+        const bStatus = b.storeStatus ?? 0
+        return bStatus - aStatus
+      })
+      const firstOpenStore = storeList.value.find((store) => store.storeStatus === 1)
+      if (firstOpenStore) {
+        queryParams.value.platformStoreId = firstOpenStore.platformStoreId
+      }
+      getList()
+    })
+    .catch(() => {
+      storeList.value = []
+    })
+    .finally(() => {
+      storeLoading.value = false
+    })
 }
 
 const getList = async () => {
@@ -173,7 +168,7 @@ const getList = async () => {
     list.value = data.list || []
     total.value = data.total || 0
   } catch (error) {
-    console.error('查询同步日志失败:', error)
+    // console.error('查询同步日志失败:', error)
   } finally {
     loading.value = false
   }
@@ -186,12 +181,14 @@ const handleQuery = () => {
 
 const resetQuery = () => {
   queryParams.value = {
-    platformStoreId: '',
+    platformStoreId:
+      storeList.value.length > 0
+        ? storeList.value.find((s) => s.storeStatus === 1)?.platformStoreId || ''
+        : '',
     status: undefined,
     pageNo: 1,
     pageSize: 10
   }
-  storeList.value = []
   getList()
 }
 
@@ -213,6 +210,6 @@ const calcDuration = (start: number | string | undefined, end: number | string |
 }
 
 onMounted(() => {
-  getList()
+  loadStoreList()
 })
 </script>

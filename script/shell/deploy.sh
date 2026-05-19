@@ -15,8 +15,8 @@ HEALTH_CHECK_URL=http://127.0.0.1:48080/actuator/health/
 
 # heapError 存放路径
 HEAP_ERROR_PATH=$BASE_PATH/heapError
-# JVM 参数
-JAVA_OPS="-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HEAP_ERROR_PATH"
+# JVM 参数（服务器15GB内存，4核CPU，分配4GB给JVM）
+JAVA_OPS="-Xms4096m -Xmx4096m -XX:MetaspaceSize=256m -XX:MaxMetaspaceSize=512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HEAP_ERROR_PATH"
 
 # SkyWalking Agent 配置
 #export SW_AGENT_NAME=$SERVER_NAME

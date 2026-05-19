@@ -64,12 +64,13 @@ public class EleOrderSyncLogServiceImpl implements EleOrderSyncLogService {
                         id -> {
                             try {
                                 StorePlatformRespVO storeInfo = storeService.getPlatformTableByPlatformStoreId(id);
-                                return storeInfo != null ? storeInfo.getPlatformStoreName() : null;
+                                return storeInfo != null ? storeInfo.getPlatformStoreName() : "";
                             } catch (Exception e) {
                                 log.warn("[同步日志] 查询门店名称失败, platformStoreId: {}", id, e);
-                                return null;
+                                return "";
                             }
-                        }));
+                        },
+                        (existing, replacement) -> existing));
 
         List<EleOrderSyncLogRespVO> respList = pageResult.getList().stream().map(syncLog -> {
             EleOrderSyncLogRespVO respVO = BeanUtils.toBean(syncLog, EleOrderSyncLogRespVO.class);

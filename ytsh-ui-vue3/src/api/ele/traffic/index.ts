@@ -80,6 +80,30 @@ export interface EleTrafficApiRpsRespVO {
   rpsHistory?: number[]
 }
 
+export interface EleApiRateLimitApiStatusRespVO {
+  apiName?: string
+  apiCode?: string
+  displayName?: string
+  qps?: number
+  waitingCount?: number
+  hasBacklog?: boolean
+}
+
+export interface EleApiRateLimitStatusRespVO {
+  globalQps?: number
+  hasBacklog?: boolean
+  waitingCount?: number
+  localWaitingCount?: number
+  queueAlert?: boolean
+  message?: string
+  timestamp?: number
+  apis?: EleApiRateLimitApiStatusRespVO[]
+}
+
+export const getApiRateLimitStatus = async () => {
+  return await request.get<EleApiRateLimitStatusRespVO>({ url: '/ele/order/rate-limit/status' })
+}
+
 export const getApiRps = async () => {
   return await request.get<EleTrafficApiRpsRespVO[]>({ url: '/ele/traffic/api-rps' })
 }

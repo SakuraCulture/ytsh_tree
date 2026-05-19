@@ -56,6 +56,17 @@ export interface EleOrderPageReqVO {
   endTime?: number
   pageNo?: number
   pageSize?: number
+  orderId?: string
+  channelOrderId?: string
+  buyerName?: string
+  buyerPhoneSuffix?: string
+  skuName?: string
+  channelType?: string
+  arriveType?: number
+  exceptionType?: string
+  deliveryMode?: number
+  orderSort?: string
+  address?: string
 }
 
 export interface EleOrderPageRespVO {
@@ -79,6 +90,20 @@ export const getOrderStatusCounts = async (params: {
   platformStoreId?: string
   startTime: number
   endTime: number
+  orderId?: string
+  channelOrderId?: string
+  buyerName?: string
+  buyerPhoneSuffix?: string
+  skuName?: string
+  channelType?: string
+  arriveType?: number
+  exceptionType?: string
+  deliveryMode?: number
+  address?: string
 }): Promise<Record<number, number>> => {
   return await request.get({ url: '/ele/order/status-counts', params })
+}
+
+export const getOrderBillInfo = async (orderId: string) => {
+  return await request.get({ url: '/ele/order/bill-info', params: { orderId } })
 }

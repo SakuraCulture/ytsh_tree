@@ -32,7 +32,7 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertList;
 import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
 
-@Tag(name = "鐢ㄦ埛 APP - 鎷煎洟娲诲姩")
+@Tag(name = "用户 APP - 拼团活动")
 @RestController
 @RequestMapping("/promotion/combination-record")
 @Validated
@@ -42,10 +42,10 @@ public class AppCombinationRecordController {
     private CombinationRecordService combinationRecordService;
 
     @GetMapping("/get-summary")
-    @Operation(summary = "鑾峰緱鎷煎洟璁板綍鐨勬瑕佷俊鎭?, description = "鐢ㄤ簬灏忕▼搴忛椤?)
+    @Operation(summary = "获得拼团记录的概要信息", description = "用于小程序首页")
     public CommonResult<AppCombinationRecordSummaryRespVO> getCombinationRecordSummary() {
         AppCombinationRecordSummaryRespVO summary = new AppCombinationRecordSummaryRespVO();
-        // 1. 鑾峰緱鎷煎洟鍙備笌鐢ㄦ埛鏁伴噺
+        // 1. 获得拼团参与用户数量
         Long userCount = combinationRecordService.getCombinationUserCount();
         if (userCount == 0) {
             summary.setAvatars(Collections.emptyList());
@@ -54,7 +54,7 @@ public class AppCombinationRecordController {
         }
         summary.setUserCount(userCount);
 
-        // 2. 鑾峰緱鎷煎洟璁板綍澶村儚
+        // 2. 获得拼团记录头像
         List<CombinationRecordDO> records = combinationRecordService.getLatestCombinationRecordList(
                 AppCombinationRecordSummaryRespVO.AVATAR_COUNT);
         summary.setAvatars(convertList(records, CombinationRecordDO::getAvatar));
@@ -62,11 +62,11 @@ public class AppCombinationRecordController {
     }
 
     @GetMapping("/get-head-list")
-    @Operation(summary = "鑾峰緱鏈€杩?n 鏉℃嫾鍥㈣褰曪紙鍥㈤暱鍙戣捣鐨勶級")
+    @Operation(summary = "获得最近 n 条拼团记录（团长发起的）")
     @Parameters({
-            @Parameter(name = "activityId", description = "鎷煎洟娲诲姩缂栧彿"),
-            @Parameter(name = "status", description = "鎷煎洟鐘舵€?), // 瀵瑰簲 CombinationRecordStatusEnum 鏋氫妇
-            @Parameter(name = "count", description = "鏁伴噺")
+            @Parameter(name = "activityId", description = "拼团活动编号"),
+            @Parameter(name = "status", description = "拼团状态"), // 对应 CombinationRecordStatusEnum 枚举
+            @Parameter(name = "count", description = "数量")
     })
     public CommonResult<List<AppCombinationRecordRespVO>> getHeadCombinationRecordList(
             @RequestParam(value = "activityId", required = false) Long activityId,
@@ -77,7 +77,7 @@ public class AppCombinationRecordController {
     }
 
     @GetMapping("/page")
-    @Operation(summary = "鑾峰緱鎴戠殑鎷煎洟璁板綍鍒嗛〉")
+    @Operation(summary = "获得我的拼团记录分页")
     public CommonResult<PageResult<AppCombinationRecordRespVO>> getCombinationRecordPage(
             @Valid AppCombinationRecordPageReqVO pageReqVO) {
         PageResult<CombinationRecordDO> pageResult = combinationRecordService.getCombinationRecordPage(
@@ -86,26 +86,27 @@ public class AppCombinationRecordController {
     }
 
     @GetMapping("/get-detail")
-    @Operation(summary = "鑾峰緱鎷煎洟璁板綍鏄庣粏")
-    @Parameter(name = "id", description = "鎷煎洟璁板綍缂栧彿", required = true, example = "1024")
+    @Operation(summary = "获得拼团记录明细")
+    @Parameter(name = "id", description = "拼团记录编号", required = true, example = "1024")
     public CommonResult<AppCombinationRecordDetailRespVO> getCombinationRecordDetail(@RequestParam("id") Long id) {
-        // 1. 鏌ユ壘杩欐潯鎷煎洟璁板綍
+        // 1. 查找这条拼团记录
         CombinationRecordDO record = combinationRecordService.getCombinationRecordById(id);
         if (record == null) {
             return success(null);
         }
 
-        // 2. 鏌ユ壘璇ユ嫾鍥㈢殑鍙傚洟璁板綍
+        // 2. 查找该拼团的参团记录
         CombinationRecordDO headRecord;
         List<CombinationRecordDO> memberRecords;
-        if (Objects.equals(record.getHeadId(), CombinationRecordDO.HEAD_ID_GROUP)) { // 鎯呭喌涓€锛氬洟闀?            headRecord = record;
+        if (Objects.equals(record.getHeadId(), CombinationRecordDO.HEAD_ID_GROUP)) { // 情况一：团长
+            headRecord = record;
             memberRecords = combinationRecordService.getCombinationRecordListByHeadId(record.getId());
-        } else { // 鎯呭喌浜岋細鍥㈠憳
+        } else { // 情况二：团员
             headRecord = combinationRecordService.getCombinationRecordById(record.getHeadId());
             memberRecords = combinationRecordService.getCombinationRecordListByHeadId(headRecord.getId());
         }
 
-        // 3. 鎷兼帴鏁版嵁
+        // 3. 拼接数据
         return success(CombinationActivityConvert.INSTANCE.convert(getLoginUserId(), headRecord, memberRecords));
     }
 

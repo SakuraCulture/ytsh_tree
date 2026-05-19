@@ -12,6 +12,7 @@ import cn.iocoder.yudao.module.ele.service.push.OrderStatusPushService;
 import com.alibaba.ocean.rawsdk.common.BizResultWrapper;
 import lib.ele.retail.param.SaasOrderGetParam;
 import lib.ele.retail.param.SaasOrderGetResult;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
@@ -32,6 +33,14 @@ import java.util.UUID;
 @Component
 @Lazy(false)
 public class SaasOrderStatusPushConsumer {
+
+    @PostConstruct
+    public void init() {
+        log.info("【SaaS推送消费】==== 消费者Bean初始化完成，pushEnabled={} ====", pushEnabled);
+        log.info("【SaaS推送消费】消费者配置：topic={}, groupId={}, idempotentKeyPrefix={}, expireSeconds={}",
+                "order-status-change", "order-status-consumer", idempotentKeyPrefix, expireSeconds);
+        log.info("【SaaS推送消费】如果pushEnabled=false，消费者将跳过所有消息处理");
+    }
 
     @Resource
     private EleOrderService eleOrderService;
@@ -60,12 +69,21 @@ public class SaasOrderStatusPushConsumer {
     @Value("${ele.saas.push.retry.retry-interval-ms:2000}")
     private long retryIntervalMs;
 
+    @Value("${ele.saas.push.enabled}")
+    private boolean pushEnabled;
+
     @KafkaListener(topics = "${ele.saas.push.kafka.topic:order-status-change}", groupId = "${ele.saas.push.kafka.consumer-group-id:order-status-consumer}", containerFactory = "saasPushKafkaListenerContainerFactory")
     public void consumePushMessage(
             OrderStatusPushMessage message,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
             @Header(KafkaHeaders.OFFSET) long offset,
             Acknowledgment acknowledgment) {
+
+        if (!pushEnabled) {
+            log.debug("【SaaS推送消费】订单推送功能已关闭，跳过消息处理，orderId={}", message.getOrderId());
+            acknowledgment.acknowledge();
+            return;
+        }
 
         String orderId = message.getOrderId();
         String ticket = message.getTicket();

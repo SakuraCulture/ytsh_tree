@@ -10,6 +10,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -24,9 +25,11 @@ public class EleOrderRetryTaskSubmitter {
 
     private static final int MAX_RETRY_COUNT = 3;
 
-    public void submitRetryTasks(List<RetryTask> tasks) {
+    public List<Long> submitRetryTasks(List<RetryTask> tasks) {
+        List<Long> successFailRecordIds = new ArrayList<>();
+
         if (tasks == null || tasks.isEmpty()) {
-            return;
+            return successFailRecordIds;
         }
 
         log.info("【重试Kafka】开始发送重试消息到Kafka，共{}个订单", tasks.size());
@@ -46,6 +49,14 @@ public class EleOrderRetryTaskSubmitter {
                 if ("SUCCESS".equals(record.getProcessStatus())) {
                     log.info("【重试Kafka】失败记录已成功，跳过，orderId={}", task.getOrderId());
                     successCount++;
+                    successFailRecordIds.add(task.getFailRecordId());
+                    continue;
+                }
+
+                if ("RETRYING".equals(record.getProcessStatus())) {
+                    log.info("【重试Kafka】失败记录正在重试，跳过，orderId={}", task.getOrderId());
+                    successCount++;
+                    successFailRecordIds.add(task.getFailRecordId());
                     continue;
                 }
 
@@ -63,8 +74,14 @@ public class EleOrderRetryTaskSubmitter {
                     message.setTraceId(traceId);
                 }
 
-                retryKafkaProducer.sendRetryMessage(message);
-                successCount++;
+                boolean sendSuccess = retryKafkaProducer.sendRetryMessageAndWait(message);
+                if (sendSuccess) {
+                    successCount++;
+                    successFailRecordIds.add(task.getFailRecordId());
+                } else {
+                    failCount++;
+                    log.error("【重试Kafka】发送重试消息失败，orderId={}", task.getOrderId());
+                }
 
             } catch (Exception e) {
                 failCount++;
@@ -73,6 +90,12 @@ public class EleOrderRetryTaskSubmitter {
         }
 
         log.info("【重试Kafka】重试消息发送完成，总数={}, 成功={}, 失败={}", tasks.size(), successCount, failCount);
+        return successFailRecordIds;
+    }
+
+    public int submitRetryTasksAndIgnoreResult(List<RetryTask> tasks) {
+        List<Long> successFailRecordIds = submitRetryTasks(tasks);
+        return successFailRecordIds.size();
     }
 
     @lombok.Data

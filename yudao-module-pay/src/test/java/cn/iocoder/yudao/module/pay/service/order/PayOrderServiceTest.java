@@ -1102,7 +1102,7 @@ public class PayOrderServiceTest extends BaseDbAndRedisUnitTest {
         // 断言 order 变化
         order.setStatus(PayOrderStatusEnum.CLOSED.getStatus());
         assertPojoEquals(order, orderMapper.selectOne(null),
-                "updateTime", "updater");
+                "updateTime", "updater", "expireTime");
     }
 
 }

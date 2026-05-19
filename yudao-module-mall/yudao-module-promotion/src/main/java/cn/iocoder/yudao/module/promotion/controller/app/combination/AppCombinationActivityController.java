@@ -31,7 +31,7 @@ import java.util.List;
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertList;
 
-@Tag(name = "鐢ㄦ埛 APP - 鎷煎洟娲诲姩")
+@Tag(name = "用户 APP - 拼团活动")
 @RestController
 @RequestMapping("/promotion/combination-activity")
 @Validated
@@ -44,13 +44,13 @@ public class AppCombinationActivityController {
     private ProductSpuApi spuApi;
 
     @GetMapping("/page")
-    @Operation(summary = "鑾峰緱鎷煎洟娲诲姩鍒嗛〉")
+    @Operation(summary = "获得拼团活动分页")
     public CommonResult<PageResult<AppCombinationActivityRespVO>> getCombinationActivityPage(PageParam pageParam) {
         PageResult<CombinationActivityDO> pageResult = activityService.getCombinationActivityPage(pageParam);
         if (CollUtil.isEmpty(pageResult.getList())) {
             return success(PageResult.empty(pageResult.getTotal()));
         }
-        // 鎷兼帴杩斿洖
+        // 拼接返回
         List<CombinationProductDO> productList = activityService.getCombinationProductListByActivityIds(
                 convertList(pageResult.getList(), CombinationActivityDO::getId));
         List<ProductSpuRespDTO> spuList = spuApi.getSpuList(convertList(pageResult.getList(), CombinationActivityDO::getSpuId));
@@ -58,16 +58,16 @@ public class AppCombinationActivityController {
     }
 
     @GetMapping("/list-by-ids")
-    @Operation(summary = "鑾峰緱鎷煎洟娲诲姩鍒楄〃锛屽熀浜庢椿鍔ㄧ紪鍙锋暟缁?)
-    @Parameter(name = "ids", description = "娲诲姩缂栧彿鏁扮粍", required = true, example = "[1024, 1025]")
+    @Operation(summary = "获得拼团活动列表，基于活动编号数组")
+    @Parameter(name = "ids", description = "活动编号数组", required = true, example = "[1024, 1025]")
     public CommonResult<List<AppCombinationActivityRespVO>> getCombinationActivityListByIds(@RequestParam("ids") List<Long> ids) {
-        // 1. 鑾峰緱寮€鍚殑娲诲姩鍒楄〃
+        // 1. 获得开启的活动列表
         List<CombinationActivityDO> activityList = activityService.getCombinationActivityListByIds(ids);
         activityList.removeIf(activity -> CommonStatusEnum.isDisable(activity.getStatus()));
         if (CollUtil.isEmpty(activityList)) {
             return success(Collections.emptyList());
         }
-        // 2. 鎷兼帴杩斿洖
+        // 2. 拼接返回
         List<CombinationProductDO> productList = activityService.getCombinationProductListByActivityIds(
                 convertList(activityList, CombinationActivityDO::getId));
         List<ProductSpuRespDTO> spuList = spuApi.getSpuList(convertList(activityList, CombinationActivityDO::getSpuId));
@@ -75,17 +75,17 @@ public class AppCombinationActivityController {
     }
 
     @GetMapping("/get-detail")
-    @Operation(summary = "鑾峰緱鎷煎洟娲诲姩鏄庣粏")
-    @Parameter(name = "id", description = "娲诲姩缂栧彿", required = true, example = "1024")
+    @Operation(summary = "获得拼团活动明细")
+    @Parameter(name = "id", description = "活动编号", required = true, example = "1024")
     public CommonResult<AppCombinationActivityDetailRespVO> getCombinationActivityDetail(@RequestParam("id") Long id) {
-        // 1. 鑾峰彇娲诲姩
+        // 1. 获取活动
         CombinationActivityDO activity = activityService.getCombinationActivity(id);
         if (activity == null
                 || ObjectUtil.equal(activity.getStatus(), CommonStatusEnum.DISABLE.getStatus())) {
             return success(null);
         }
 
-        // 2. 鑾峰彇娲诲姩鍟嗗搧
+        // 2. 获取活动商品
         List<CombinationProductDO> products = activityService.getCombinationProductsByActivityId(activity.getId());
         return success(CombinationActivityConvert.INSTANCE.convert3(activity, products));
     }

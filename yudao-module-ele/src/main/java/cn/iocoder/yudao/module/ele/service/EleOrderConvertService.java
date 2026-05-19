@@ -88,6 +88,8 @@ public class EleOrderConvertService {
         detail.setLatitude(order.getLatitude());
         detail.setUserId(order.getUserId());
         detail.setArriveType(order.getArriveType());
+        detail.setOrderIndex(order.getOrderIndex() != null ? String.valueOf(order.getOrderIndex()) : null);
+        detail.setEstimatedIncome(yuanToFen(order.getEstimatedIncome()));
         return detail;
     }
 
@@ -118,6 +120,8 @@ public class EleOrderConvertService {
         dto.setLatitude(order.getLatitude());
         dto.setUserId(order.getUserId());
         dto.setArriveType(order.getArriveType());
+        dto.setOrderIndex(order.getOrderIndex() != null ? String.valueOf(order.getOrderIndex()) : null);
+        dto.setEstimatedIncome(yuanToFen(order.getEstimatedIncome()));
 
         List<OrderPlatformDO> platformList = orderPlatformMapper.selectList(
                 new cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX<OrderPlatformDO>()
@@ -244,6 +248,7 @@ public class EleOrderConvertService {
         dto.setLatitude(data.getLatitude());
         dto.setUserId(data.getUser_id());
         dto.setArriveType(data.getArrive_type());
+        dto.setEstimatedIncome(data.getEstimated_income());
 
         if (data.getSub_orders() != null) {
             for (SaasOrderGetResult.SubOrder subOrder : data.getSub_orders()) {

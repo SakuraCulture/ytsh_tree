@@ -34,7 +34,7 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.*;
 import static cn.iocoder.yudao.framework.common.util.collection.MapUtils.findAndThen;
 
-@Tag(name = "鐢ㄦ埛 App - 绉垎鍟嗗煄娲诲姩")
+@Tag(name = "用户 App - 积分商城活动")
 @RestController
 @RequestMapping("/promotion/point-activity")
 @Validated
@@ -47,31 +47,32 @@ public class AppPointActivityController {
     private ProductSpuApi productSpuApi;
 
     @GetMapping("/page")
-    @Operation(summary = "鑾峰緱绉垎鍟嗗煄娲诲姩鍒嗛〉")
+    @Operation(summary = "获得积分商城活动分页")
     public CommonResult<PageResult<AppPointActivityRespVO>> getPointActivityPage(AppPointActivityPageReqVO pageReqVO) {
-        // 1. 鏌ヨ婊¤冻褰撳墠闃舵鐨勬椿鍔?        PageResult<PointActivityDO> pageResult = pointActivityService.getPointActivityPage(
+        // 1. 查询满足当前阶段的活动
+        PageResult<PointActivityDO> pageResult = pointActivityService.getPointActivityPage(
                 BeanUtils.toBean(pageReqVO, PointActivityPageReqVO.class));
         if (CollUtil.isEmpty(pageResult.getList())) {
             return success(PageResult.empty(pageResult.getTotal()));
         }
 
-        // 2. 鎷兼帴鏁版嵁
+        // 2. 拼接数据
         List<AppPointActivityRespVO> resultList = buildAppPointActivityRespVOList(pageResult.getList());
         return success(new PageResult<>(resultList, pageResult.getTotal()));
     }
 
     @GetMapping("/get-detail")
-    @Operation(summary = "鑾峰緱绉垎鍟嗗煄娲诲姩鏄庣粏")
-    @Parameter(name = "id", description = "娲诲姩缂栧彿", required = true, example = "1024")
+    @Operation(summary = "获得积分商城活动明细")
+    @Parameter(name = "id", description = "活动编号", required = true, example = "1024")
     public CommonResult<AppPointActivityDetailRespVO> getPointActivity(@RequestParam("id") Long id) {
-        // 1. 鑾峰彇娲诲姩
+        // 1. 获取活动
         PointActivityDO activity = pointActivityService.getPointActivity(id);
         if (activity == null
                 || ObjUtil.equal(activity.getStatus(), CommonStatusEnum.DISABLE.getStatus())) {
             return success(null);
         }
 
-        // 2. 鎷兼帴鏁版嵁
+        // 2. 拼接数据
         List<PointProductDO> products = pointActivityService.getPointProductListByActivityIds(Collections.singletonList(id));
         PointProductDO minProduct = getMinObject(products, PointProductDO::getPoint);
         assert minProduct != null;
@@ -82,16 +83,16 @@ public class AppPointActivityController {
     }
 
     @GetMapping("/list-by-ids")
-    @Operation(summary = "鑾峰緱绉垎鍟嗗煄娲诲姩鍒楄〃锛屽熀浜庢椿鍔ㄧ紪鍙锋暟缁?)
-    @Parameter(name = "ids", description = "娲诲姩缂栧彿鏁扮粍", required = true, example = "[1024, 1025]")
+    @Operation(summary = "获得积分商城活动列表，基于活动编号数组")
+    @Parameter(name = "ids", description = "活动编号数组", required = true, example = "[1024, 1025]")
     public CommonResult<List<AppPointActivityRespVO>> getCombinationActivityListByIds(@RequestParam("ids") List<Long> ids) {
-        // 1. 鑾峰緱寮€鍚殑娲诲姩鍒楄〃
+        // 1. 获得开启的活动列表
         List<PointActivityDO> activityList = pointActivityService.getPointActivityListByIds(ids);
         activityList.removeIf(activity -> CommonStatusEnum.isDisable(activity.getStatus()));
         if (CollUtil.isEmpty(activityList)) {
             return success(Collections.emptyList());
         }
-        // 2. 鎷兼帴杩斿洖
+        // 2. 拼接返回
         List<AppPointActivityRespVO> result = buildAppPointActivityRespVOList(activityList);
         return success(result);
     }
@@ -104,7 +105,7 @@ public class AppPointActivityController {
                 convertSet(activityList, PointActivityDO::getSpuId));
         List<AppPointActivityRespVO> result = BeanUtils.toBean(activityList, AppPointActivityRespVO.class);
         result.forEach(activity -> {
-            // 璁剧疆 product 淇℃伅
+            // 设置 product 信息
             PointProductDO minProduct = getMinObject(productsMap.get(activity.getId()), PointProductDO::getPoint);
             assert minProduct != null;
             activity.setPoint(minProduct.getPoint()).setPrice(minProduct.getPrice());

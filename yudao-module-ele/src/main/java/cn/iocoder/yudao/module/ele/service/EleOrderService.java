@@ -1,10 +1,10 @@
 package cn.iocoder.yudao.module.ele.service;
 
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.*;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleOrderFailRecord;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleOrderStatusLog;
 import cn.iocoder.yudao.module.ele.service.dto.EleCompensateProgressDTO;
-import cn.iocoder.yudao.module.ele.service.dto.EleSyncSubmitRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderDetailRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListReqDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListRespDTO;
@@ -25,9 +25,6 @@ public interface EleOrderService {
 
     void syncOrders(String platformStoreId, String merchantCode, String erpStoreCode, Long startTime, Long endTime);
 
-    EleSyncSubmitRespDTO submitSyncTask(String platformStoreId, String merchantCode, String erpStoreCode,
-            Long startTime, Long endTime, boolean compensate);
-
     EleCompensateProgressDTO getSyncProgress(String taskId);
 
     List<EleOrderFailRecord> getFailRecords();
@@ -40,7 +37,9 @@ public interface EleOrderService {
 
     PageResult<OrderListRespDTO.OrderDetail> getOrdersFromLocal(String platformStoreId, String storeId, Integer status,
             Long startTime, Long endTime,
-            Integer pageNo, Integer pageSize);
+            Integer pageNo, Integer pageSize,
+            String orderId, String channelOrderId, String buyerName, String buyerPhoneSuffix, String skuName,
+            String channelType, Integer arriveType, String exceptionType, Integer deliveryMode, String address, String orderSort);
 
     OrderDetailRespDTO getDetailFromLocal(String orderId);
 
@@ -141,4 +140,26 @@ public interface EleOrderService {
      * 由定时任务 {@link cn.iocoder.yudao.module.ele.job.EleOrderRetryScanJob} 调用
      */
     void scanPendingRetryRecords();
+
+    /**
+     * 按订单状态分组统计数量（支持所有筛选条件）
+     * 
+     * @param platformStoreId 平台门店ID
+     * @param startTime 起始时间（秒级时间戳）
+     * @param endTime 结束时间（秒级时间戳）
+     * @param orderId 订单ID/订单小号
+     * @param channelOrderId 渠道订单号
+     * @param buyerName 收货人
+     * @param buyerPhoneSuffix 手机号后缀
+     * @param skuName 商品名称
+     * @param channelType 渠道类型
+     * @param arriveType 订单类型/到达类型
+     * @param exceptionType 订单异常
+     * @param deliveryMode 配送类型
+     * @param address 收货地址
+     * @return 状态码为key，数量为value的Map
+     */
+    Map<Integer, Long> getStatusCounts(String platformStoreId, Long startTime, Long endTime,
+            String orderId, String channelOrderId, String buyerName, String buyerPhoneSuffix, String skuName,
+            String channelType, Integer arriveType, String exceptionType, Integer deliveryMode, String address);
 }

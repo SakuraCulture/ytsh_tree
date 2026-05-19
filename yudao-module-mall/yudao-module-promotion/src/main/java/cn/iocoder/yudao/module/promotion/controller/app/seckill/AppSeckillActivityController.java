@@ -45,14 +45,14 @@ import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.findFirst;
 import static cn.iocoder.yudao.framework.common.util.date.LocalDateTimeUtils.isBetween;
 
-@Tag(name = "鐢ㄦ埛 App - 绉掓潃娲诲姩")
+@Tag(name = "用户 App - 秒杀活动")
 @RestController
 @RequestMapping("/promotion/seckill-activity")
 @Validated
 public class AppSeckillActivityController {
 
     /**
-     * {@link AppSeckillActivityNowRespVO} 缂撳瓨锛岄€氳繃瀹冨紓姝ュ埛鏂?{@link #getNowSeckillActivity()} 鎵€瑕佺殑棣栭〉鏁版嵁
+     * {@link AppSeckillActivityNowRespVO} 缓存，通过它异步刷新 {@link #getNowSeckillActivity()} 所要的首页数据
      */
     private final LoadingCache<String, AppSeckillActivityNowRespVO> nowSeckillActivityCache = buildAsyncReloadingCache(Duration.ofSeconds(10L),
             new CacheLoader<String, AppSeckillActivityNowRespVO>() {
@@ -74,87 +74,94 @@ public class AppSeckillActivityController {
     private ProductSpuApi spuApi;
 
     @GetMapping("/get-now")
-    @Operation(summary = "鑾峰緱褰撳墠绉掓潃娲诲姩", description = "鑾峰彇褰撳墠姝ｅ湪杩涜鐨勬椿鍔紝鎻愪緵缁欓椤典娇鐢?)
+    @Operation(summary = "获得当前秒杀活动", description = "获取当前正在进行的活动，提供给首页使用")
     public CommonResult<AppSeckillActivityNowRespVO> getNowSeckillActivity() {
-        return success(nowSeckillActivityCache.getUnchecked("")); // 缂撳瓨
+        return success(nowSeckillActivityCache.getUnchecked("")); // 缓存
     }
 
     private AppSeckillActivityNowRespVO getNowSeckillActivity0() {
-        // 1. 鑾峰彇褰撳墠鏃堕棿澶勫湪鍝釜绉掓潃闃舵
+        // 1. 获取当前时间处在哪个秒杀阶段
         SeckillConfigDO config = configService.getCurrentSeckillConfig();
-        if (config == null) { // 鏃舵涓嶅瓨鍦ㄧ洿鎺ヨ繑鍥?null
+        if (config == null) { // 时段不存在直接返回 null
             return new AppSeckillActivityNowRespVO();
         }
 
-        // 2.1 鏌ヨ婊¤冻褰撳墠闃舵鐨勬椿鍔?        List<SeckillActivityDO> activityList = activityService.getSeckillActivityListByConfigIdAndStatus(config.getId(), CommonStatusEnum.ENABLE.getStatus());
+        // 2.1 查询满足当前阶段的活动
+        List<SeckillActivityDO> activityList = activityService.getSeckillActivityListByConfigIdAndStatus(config.getId(), CommonStatusEnum.ENABLE.getStatus());
         List<SeckillProductDO> productList = activityService.getSeckillProductListByActivityIds(
                 convertList(activityList, SeckillActivityDO::getId));
-        // 2.2 鑾峰彇 spu 淇℃伅
+        // 2.2 获取 spu 信息
         List<ProductSpuRespDTO> spuList = spuApi.getSpuList(convertList(activityList, SeckillActivityDO::getSpuId));
         return SeckillActivityConvert.INSTANCE.convert(config, activityList, productList, spuList);
     }
 
     @GetMapping("/page")
-    @Operation(summary = "鑾峰緱绉掓潃娲诲姩鍒嗛〉")
+    @Operation(summary = "获得秒杀活动分页")
     public CommonResult<PageResult<AppSeckillActivityRespVO>> getSeckillActivityPage(AppSeckillActivityPageReqVO pageReqVO) {
-        // 1. 鏌ヨ婊¤冻褰撳墠闃舵鐨勬椿鍔?        PageResult<SeckillActivityDO> pageResult = activityService.getSeckillActivityAppPageByConfigId(pageReqVO);
+        // 1. 查询满足当前阶段的活动
+        PageResult<SeckillActivityDO> pageResult = activityService.getSeckillActivityAppPageByConfigId(pageReqVO);
         if (CollUtil.isEmpty(pageResult.getList())) {
             return success(PageResult.empty(pageResult.getTotal()));
         }
         List<SeckillProductDO> productList = activityService.getSeckillProductListByActivityIds(
                 convertList(pageResult.getList(), SeckillActivityDO::getId));
 
-        // 2. 鎷兼帴鏁版嵁
+        // 2. 拼接数据
         List<ProductSpuRespDTO> spuList = spuApi.getSpuList(convertList(pageResult.getList(), SeckillActivityDO::getSpuId));
         return success(SeckillActivityConvert.INSTANCE.convertPage02(pageResult, productList, spuList));
     }
 
     @GetMapping("/get-detail")
-    @Operation(summary = "鑾峰緱绉掓潃娲诲姩鏄庣粏")
-    @Parameter(name = "id", description = "娲诲姩缂栧彿", required = true, example = "1024")
+    @Operation(summary = "获得秒杀活动明细")
+    @Parameter(name = "id", description = "活动编号", required = true, example = "1024")
     public CommonResult<AppSeckillActivityDetailRespVO> getSeckillActivity(@RequestParam("id") Long id) {
-        // 1. 鑾峰彇娲诲姩
+        // 1. 获取活动
         SeckillActivityDO activity = activityService.getSeckillActivity(id);
         if (activity == null
                 || ObjectUtil.equal(activity.getStatus(), CommonStatusEnum.DISABLE.getStatus())) {
             return success(null);
         }
 
-        // 2. 鑾峰彇鏃堕棿娈?        List<SeckillConfigDO> configs = configService.getSeckillConfigListByStatus(CommonStatusEnum.ENABLE.getStatus());
+        // 2. 获取时间段
+        List<SeckillConfigDO> configs = configService.getSeckillConfigListByStatus(CommonStatusEnum.ENABLE.getStatus());
         configs.removeIf(config -> !CollUtil.contains(activity.getConfigIds(), config.getId()));
-        // 2.1 浼樺厛浣跨敤褰撳墠鏃堕棿娈?        SeckillConfigDO config = findFirst(configs, config0 -> isBetween(config0.getStartTime(), config0.getEndTime()));
-        // 2.2 濡傛灉娌℃湁锛屽垯鑾峰彇鏈€鍚庝竴涓紝鍥犱负鍊惧悜浼樺厛灞曠ず鈥滄湭寮€濮嬧€?> 鈥滃凡缁撴潫鈥?        if (config == null) {
+        // 2.1 优先使用当前时间段
+        SeckillConfigDO config = findFirst(configs, config0 -> isBetween(config0.getStartTime(), config0.getEndTime()));
+        // 2.2 如果没有，则获取最后一个，因为倾向优先展示"未开始" > "已结束"
+        if (config == null) {
             config = CollUtil.getLast(configs);
         }
         if (config == null) {
             return null;
         }
-        // 3. 璁＄畻寮€濮嬫椂闂淬€佺粨鏉熸椂闂?        LocalDate nowDate;
-        // 3.1 濡傛灉鍦ㄦ椿鍔ㄦ棩鏈熻寖鍥村唴锛屽垯浠ヤ粖澶╀负 nowDate
+        // 3. 计算开始时间、结束时间
+        LocalDate nowDate;
+        // 3.1 如果在活动日期范围内，则以今天为 nowDate
         if (LocalDateTimeUtils.isBetween(activity.getStartTime(), activity.getEndTime())) {
             nowDate = LocalDate.now();
         } else {
-            // 3.2 濡傛灉涓嶅湪娲诲姩鏃堕棿鑼冨洿鍐咃紝鍒欑洿鎺ヤ互娲诲姩鐨?endTime 浣滀负 nowDate锛屽洜涓鸿繕鏄€惧悜浼樺厛灞曠ず鈥滄湭寮€濮嬧€?> 鈥滃凡缁撴潫鈥?            nowDate = activity.getEndTime().toLocalDate();
+            // 3.2 如果不在活动时间范围内，则直接以活动的 endTime 作为 nowDate，因为还是倾向优先展示"未开始" > "已结束"
+            nowDate = activity.getEndTime().toLocalDate();
         }
         LocalDateTime startTime = LocalDateTime.of(nowDate, LocalTime.parse(config.getStartTime()));
         LocalDateTime endTime = LocalDateTime.of(nowDate, LocalTime.parse(config.getEndTime()));
 
-        // 4. 鎷兼帴鏁版嵁
+        // 4. 拼接数据
         List<SeckillProductDO> productList = activityService.getSeckillProductListByActivityId(activity.getId());
         return success(SeckillActivityConvert.INSTANCE.convert3(activity, productList, startTime, endTime));
     }
 
     @GetMapping("/list-by-ids")
-    @Operation(summary = "鑾峰緱绉掓潃娲诲姩鍒楄〃锛屽熀浜庢椿鍔ㄧ紪鍙锋暟缁?)
-    @Parameter(name = "ids", description = "娲诲姩缂栧彿鏁扮粍", required = true, example = "[1024, 1025]")
+    @Operation(summary = "获得秒杀活动列表，基于活动编号数组")
+    @Parameter(name = "ids", description = "活动编号数组", required = true, example = "[1024, 1025]")
     public CommonResult<List<AppSeckillActivityRespVO>> getCombinationActivityListByIds(@RequestParam("ids") List<Long> ids) {
-        // 1. 鑾峰緱寮€鍚殑娲诲姩鍒楄〃
+        // 1. 获得开启的活动列表
         List<SeckillActivityDO> activityList = activityService.getSeckillActivityListByIds(ids);
         activityList.removeIf(activity -> CommonStatusEnum.isDisable(activity.getStatus()));
         if (CollUtil.isEmpty(activityList)) {
             return success(Collections.emptyList());
         }
-        // 2. 鎷兼帴杩斿洖
+        // 2. 拼接返回
         List<SeckillProductDO> productList = activityService.getSeckillProductListByActivityIds(
                 convertList(activityList, SeckillActivityDO::getId));
         List<ProductSpuRespDTO> spuList = spuApi.getSpuList(convertList(activityList, SeckillActivityDO::getSpuId));

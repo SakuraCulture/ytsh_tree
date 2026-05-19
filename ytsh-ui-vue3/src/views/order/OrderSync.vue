@@ -3,9 +3,13 @@
     <div class="pull-card">
       <div class="pull-card-header">
         <span class="header-title">📦 订单同步</span>
+        <el-divider direction="vertical" />
+        <span class="header-title">🧾 账单同步</span>
       </div>
       <div class="pull-card-body">
-        <div class="settings-bar">
+        <el-tabs v-model="activeSyncTab" class="sync-tabs">
+          <el-tab-pane label="订单同步" name="order">
+            <div class="settings-bar">
           <div class="setting-group">
             <span class="setting-label">拉取模式</span>
             <el-radio-group v-model="pullMode" class="mode-radio" size="small">
@@ -42,12 +46,9 @@
             <span class="form-label">选择门店</span>
             <el-select
               v-model="selectedStoreId"
-              placeholder="请输入门店名称或平台门店ID"
+              placeholder="请选择门店"
               clearable
               filterable
-              remote
-              reserve-keyword
-              :remote-method="searchStoreList"
               :loading="storeLoading"
               class="store-select"
             >
@@ -312,64 +313,203 @@
             <div class="push-status-tip">💡 订单状态变更时将实时推送通知</div>
           </div>
         </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="账单同步" name="bill">
+            <div class="bill-sync-card">
+              <div class="bill-header">
+                <span class="bill-header-title">账单同步设置</span>
+              </div>
+              <div class="bill-settings">
+                <div class="setting-row">
+                  <div class="setting-group">
+                    <span class="setting-label">同步模式</span>
+                    <el-radio-group v-model="billSyncMode" class="bill-mode-radio" size="small">
+                      <el-radio-button label="single">指定门店</el-radio-button>
+                      <el-radio-button label="all">全部门店</el-radio-button>
+                    </el-radio-group>
+                  </div>
+                </div>
+
+                <div class="setting-row" v-if="billSyncMode === 'single'">
+                  <div class="setting-group">
+                    <span class="setting-label">选择门店</span>
+                    <el-select
+                      v-model="selectedBillStoreId"
+                      placeholder="请选择门店"
+                      clearable
+                      filterable
+                      :loading="storeLoading"
+                      class="bill-store-select"
+                    >
+                      <el-option
+                        v-for="store in storeList"
+                        :key="store.platformStoreId || store.storeName"
+                        :label="store.storeName"
+                        :value="store.platformStoreId || store.storeName"
+                      />
+                    </el-select>
+                  </div>
+                  <div class="setting-group">
+                    <span class="setting-label">账单日期</span>
+                    <el-date-picker
+                      v-model="billSyncDate"
+                      type="date"
+                      placeholder="选择账单日期"
+                      value-format="YYYY-MM-DD"
+                      class="bill-date-picker"
+                    />
+                  </div>
+                  <div class="setting-group btn-group">
+                    <el-button
+                      type="primary"
+                      :loading="billSyncLoading"
+                      :disabled="!canBillSyncSingle"
+                      @click="handleBillSyncSingle"
+                    >
+                      同步门店账单
+                    </el-button>
+                  </div>
+                </div>
+
+                <div class="setting-row" v-if="billSyncMode === 'all'">
+                  <div class="setting-group">
+                    <span class="setting-label">开始日期</span>
+                    <el-date-picker
+                      v-model="billSyncStartDate"
+                      type="date"
+                      placeholder="选择开始日期"
+                      value-format="YYYY-MM-DD"
+                      class="bill-date-picker"
+                    />
+                  </div>
+                  <div class="setting-group">
+                    <span class="setting-label">结束日期</span>
+                    <el-date-picker
+                      v-model="billSyncEndDate"
+                      type="date"
+                      placeholder="选择结束日期"
+                      value-format="YYYY-MM-DD"
+                      class="bill-date-picker"
+                    />
+                  </div>
+                  <div class="setting-group btn-group">
+                    <el-button
+                      type="primary"
+                      :loading="billSyncLoading"
+                      :disabled="!canBillSyncAll"
+                      @click="handleBillSyncAll"
+                    >
+                      同步全部账单
+                    </el-button>
+                  </div>
+                </div>
+
+                <div class="bill-sync-tip">
+                  💡 账单同步按门店+日期维度拉取，接口QPS限制为20，内部已做限流处理
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
       </div>
     </div>
 
     <div class="sync-progress-overlay" v-if="showBatchSyncProgress">
       <div class="sync-progress-container">
         <div class="sync-header">
-          <span class="sync-icon">{{
-            batchProgress.syncStatus === 'COMPLETED'
-              ? '✅'
-              : batchProgress.syncStatus === 'FAILED'
-                ? '❌'
-                : '🔄'
-          }}</span>
-          <span class="sync-title">{{ syncProgressTitle }}</span>
+          <div class="sync-header-left">
+            <span class="sync-icon">{{
+              batchProgress.syncStatus === 'COMPLETED'
+                ? '✅'
+                : batchProgress.syncStatus === 'FAILED'
+                  ? '❌'
+                  : '🔄'
+            }}</span>
+            <span class="sync-title">{{ syncProgressTitle }}</span>
+          </div>
+          <el-button
+            v-if="!batchProgress.isSyncing"
+            type="primary"
+            size="small"
+            @click="showBatchSyncProgress = false"
+          >
+            关闭
+          </el-button>
         </div>
+
         <div v-if="batchProgress.isSyncing" class="sync-detail">
           <el-progress
             :percentage="syncProgressPercent"
             :status="syncProgressPercent === 100 ? 'success' : ''"
+            :stroke-width="12"
+            class="sync-progress-bar"
           />
           <div class="sync-stats">
+            <div class="stat-item">
+              <span class="stat-label">门店进度</span>
+              <span class="stat-value"
+                >{{ batchProgress.completedStores }}/{{ batchProgress.totalStores }}</span
+              >
+            </div>
             <div class="stat-item">
               <span class="stat-label">已拉取订单</span>
               <span class="stat-value">{{ batchProgress.totalOrders }}</span>
             </div>
             <div class="stat-item success">
-              <span class="stat-label">成功订单</span>
-              <span class="stat-value">{{ batchProgress.successOrders }}</span>
+              <span class="stat-label">成功门店</span>
+              <span class="stat-value">{{ batchProgress.successStores }}</span>
             </div>
             <div class="stat-item failed">
-              <span class="stat-label">失败订单</span>
-              <span class="stat-value">{{ batchProgress.failOrders }}</span>
+              <span class="stat-label">失败门店</span>
+              <span class="stat-value">{{ batchProgress.failedStores }}</span>
             </div>
           </div>
           <div v-if="batchProgress.currentSyncingStores.length > 0" class="syncing-info">
-            正在同步: {{ batchProgress.currentSyncingStores.slice(0, 3).join('、') }}
+            <el-icon class="syncing-icon"><Loading /></el-icon>
+            <span>正在同步: {{ batchProgress.currentSyncingStores.slice(0, 3).join('、') }}</span>
             <span v-if="batchProgress.currentSyncingStores.length > 3"
               >等{{ batchProgress.currentSyncingCount }}家门店</span
             >
           </div>
         </div>
+
         <div v-else class="sync-complete">
-          <div class="sync-stats">
-            <div class="stat-item">
-              <span class="stat-label">总计订单</span>
-              <span class="stat-value">{{ batchProgress.totalOrders }}</span>
+          <div class="sync-stats summary-stats">
+            <div class="stat-card-item">
+              <div class="stat-card-inner">
+                <div class="stat-card-label">门店总数</div>
+                <div class="stat-card-value">{{ batchProgress.totalStores }}</div>
+              </div>
             </div>
-            <div class="stat-item success">
-              <span class="stat-label">成功订单</span>
-              <span class="stat-value">{{ batchProgress.successOrders }}</span>
+            <div class="stat-card-item">
+              <div class="stat-card-inner success-card">
+                <div class="stat-card-label">成功门店</div>
+                <div class="stat-card-value success-value">{{ batchProgress.successStores }}</div>
+              </div>
             </div>
-            <div class="stat-item failed">
-              <span class="stat-label">失败订单</span>
-              <span class="stat-value">{{ batchProgress.failOrders }}</span>
+            <div class="stat-card-item">
+              <div class="stat-card-inner">
+                <div class="stat-card-label">拉取订单</div>
+                <div class="stat-card-value">{{ batchProgress.totalOrders }}</div>
+              </div>
+            </div>
+            <div class="stat-card-item">
+              <div class="stat-card-inner failed-card" v-if="batchProgress.failedStores > 0">
+                <div class="stat-card-label">失败门店</div>
+                <div class="stat-card-value failed-value">{{ batchProgress.failedStores }}</div>
+              </div>
             </div>
           </div>
-          <div v-if="batchProgress.failedStores.length > 0" class="failed-stores-section">
-            <div class="failed-section-title">失败门店详情</div>
+
+          <div
+            v-if="batchProgress.failedStores > 0 && batchProgress.failedStoreDetails.length > 0"
+            class="failed-stores-section"
+          >
+            <div class="failed-section-title">
+              <el-icon><WarningFilled /></el-icon>
+              失败门店详情
+            </div>
             <div class="failed-store-list">
               <div
                 v-for="(store, index) in batchProgress.failedStoreDetails"
@@ -419,12 +559,50 @@
         <el-table-column prop="threadCount" label="线程数" width="80" align="center" />
         <el-table-column prop="totalPulled" label="API拉取" width="100" align="center">
           <template #default="{ row }">
-            <span>{{ row.totalPulled || row.syncCount }}</span>
+            <span>{{ row.totalPulled || row.syncCount || 0 }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="syncCount" label="同步订单数" width="110" align="center">
           <template #default="{ row }">
             <span>{{ row.syncCount ?? '--' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="expectedTotal" label="预期总数" width="100" align="center">
+          <template #default="{ row }">
+            <span>{{ row.expectedTotal ?? '--' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="savedTotal" label="实际落库" width="100" align="center">
+          <template #default="{ row }">
+            <span :class="{ 'text-danger': row.discrepancyRate > 0 }">{{
+              row.savedTotal ?? '--'
+            }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="discrepancyRate" label="差异率" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag
+              v-if="row.discrepancyRate !== null && row.discrepancyRate !== undefined"
+              :type="
+                row.discrepancyRate === 0
+                  ? 'success'
+                  : row.discrepancyRate > 20
+                    ? 'danger'
+                    : 'warning'
+              "
+              size="small"
+            >
+              {{ row.discrepancyRate }}%
+            </el-tag>
+            <span v-else>--</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="dataIntegrity" label="完整性" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.dataIntegrity === 1" type="success" size="small">完整</el-tag>
+            <el-tag v-else-if="row.dataIntegrity === 2" type="warning" size="small">部分</el-tag>
+            <el-tag v-else-if="row.dataIntegrity === 3" type="danger" size="small">严重</el-tag>
+            <span v-else>--</span>
           </template>
         </el-table-column>
         <el-table-column prop="successCount" label="成功" width="90" align="center">
@@ -452,12 +630,44 @@
             <span>{{ formatTimestamp(row.syncEndTime) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="失败原因" min-width="200" show-overflow-tooltip>
+        <el-table-column label="错误代码" width="200" align="center">
+          <template #default="{ row }">
+            <div class="error-codes-cell">
+              <el-tag v-if="row.pullErrorCode" type="danger" size="small" class="error-code-tag">
+                {{ getErrorInfo(row.pullErrorCode).icon
+                }}{{ getErrorInfo(row.pullErrorCode).label }}
+              </el-tag>
+              <el-tag v-if="row.saveErrorCode" type="warning" size="small" class="error-code-tag">
+                {{ getErrorInfo(row.saveErrorCode).icon
+                }}{{ getErrorInfo(row.saveErrorCode).label }}
+              </el-tag>
+              <el-tag
+                v-if="row.reconciliationErrorCode"
+                type="info"
+                size="small"
+                class="error-code-tag"
+              >
+                {{ getErrorInfo(row.reconciliationErrorCode).icon
+                }}{{ getErrorInfo(row.reconciliationErrorCode).label }}
+              </el-tag>
+              <span v-if="!row.pullErrorCode && !row.saveErrorCode && !row.reconciliationErrorCode"
+                >--</span
+              >
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="失败详情" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <span
-              v-if="row.failCount > 0 && row.errorMsg"
+              v-if="
+                (row.failCount > 0 ||
+                  row.pullErrorCode ||
+                  row.saveErrorCode ||
+                  row.reconciliationErrorCode) &&
+                row.errorMsg
+              "
               class="error-msg"
-              @click="showErrorDetail(row.errorMsg)"
+              @click="showErrorDetail(row)"
             >
               {{ row.errorMsg }}
             </span>
@@ -481,6 +691,130 @@
       </div>
       <template #footer>
         <el-button @click="errorDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      title="同步错误详情"
+      v-model="errorDetailDialogVisible"
+      width="800px"
+      destroy-on-close
+    >
+      <div v-if="errorDetailData" class="error-detail-dialog">
+        <div class="error-detail-header">
+          <span>门店: {{ errorDetailData.storeName }}</span>
+          <span>时间: {{ errorDetailData.syncStartTime }}</span>
+        </div>
+
+        <el-tabs v-model="activeErrorTab" class="error-tabs">
+          <el-tab-pane label="对账数据" name="reconciliation">
+            <div class="reconciliation-panel">
+              <el-descriptions :column="2" border>
+                <el-descriptions-item label="API查询总数"
+                  >{{ errorDetailData.reconciliation?.expectedTotal || 0 }}条</el-descriptions-item
+                >
+                <el-descriptions-item label="实际落库数"
+                  >{{ errorDetailData.reconciliation?.savedTotal || 0 }}条</el-descriptions-item
+                >
+                <el-descriptions-item label="差异率"
+                  >{{ errorDetailData.reconciliation?.discrepancyRate || 0 }}%</el-descriptions-item
+                >
+                <el-descriptions-item label="重试次数"
+                  >{{ errorDetailData.reconciliation?.retryCount || 0 }}次</el-descriptions-item
+                >
+              </el-descriptions>
+              <div v-if="errorDetailData.reconciliation?.apiStatusCounts" class="status-compare">
+                <h4>各状态对比</h4>
+                <el-table :data="statusCompareData" border size="small">
+                  <el-table-column prop="statusName" label="状态" width="100" />
+                  <el-table-column prop="apiCount" label="API数" width="80" align="center" />
+                  <el-table-column prop="savedCount" label="落库数" width="80" align="center" />
+                  <el-table-column prop="diff" label="差异" width="80" align="center" />
+                </el-table>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane
+            :label="`拉取错误${errorDetailData.pullError?.code ? '(1)' : ''}`"
+            name="pull"
+          >
+            <div v-if="errorDetailData.pullError?.code" class="error-card">
+              <el-alert
+                :title="
+                  getErrorInfo(errorDetailData.pullError.code).icon +
+                  ' ' +
+                  getErrorInfo(errorDetailData.pullError.code).label
+                "
+                :type="getErrorInfo(errorDetailData.pullError.code).color as any"
+                :description="getErrorInfo(errorDetailData.pullError.code).suggestion"
+                show-icon
+                :closable="false"
+              />
+              <pre v-if="errorDetailData.pullError.detail" class="error-json">{{
+                JSON.stringify(errorDetailData.pullError.detail, null, 2)
+              }}</pre>
+            </div>
+            <el-empty v-else description="无拉取错误" />
+          </el-tab-pane>
+
+          <el-tab-pane
+            :label="`落库错误${errorDetailData.saveError?.code ? '(1)' : ''}`"
+            name="save"
+          >
+            <div v-if="errorDetailData.saveError?.code" class="error-card">
+              <el-alert
+                :title="
+                  getErrorInfo(errorDetailData.saveError.code).icon +
+                  ' ' +
+                  getErrorInfo(errorDetailData.saveError.code).label
+                "
+                :type="getErrorInfo(errorDetailData.saveError.code).color as any"
+                :description="getErrorInfo(errorDetailData.saveError.code).suggestion"
+                show-icon
+                :closable="false"
+              />
+              <pre v-if="errorDetailData.saveError.detail" class="error-json">{{
+                JSON.stringify(errorDetailData.saveError.detail, null, 2)
+              }}</pre>
+            </div>
+            <el-empty v-else description="无落库错误" />
+          </el-tab-pane>
+
+          <el-tab-pane
+            :label="`对账错误${errorDetailData.reconciliationError?.code ? '(1)' : ''}`"
+            name="recon"
+          >
+            <div v-if="errorDetailData.reconciliationError?.code" class="error-card">
+              <el-alert
+                :title="
+                  getErrorInfo(errorDetailData.reconciliationError.code).icon +
+                  ' ' +
+                  getErrorInfo(errorDetailData.reconciliationError.code).label
+                "
+                :type="getErrorInfo(errorDetailData.reconciliationError.code).color as any"
+                :description="getErrorInfo(errorDetailData.reconciliationError.code).suggestion"
+                show-icon
+                :closable="false"
+              />
+              <pre v-if="errorDetailData.reconciliationError.detail" class="error-json">{{
+                JSON.stringify(errorDetailData.reconciliationError.detail, null, 2)
+              }}</pre>
+            </div>
+            <el-empty v-else description="无对账错误" />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+      <template #footer>
+        <el-button @click="errorDetailDialogVisible = false">关闭</el-button>
+        <el-button
+          v-if="errorDetailData?.reconciliation?.discrepancyRate > 0"
+          type="warning"
+          @click="triggerCompensation"
+          :loading="compensationLoading"
+        >
+          触发补偿
+        </el-button>
       </template>
     </el-dialog>
 
@@ -536,16 +870,24 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { Loading, WarningFilled, Document, Check, Refresh } from '@element-plus/icons-vue'
 import {
-  pullSingleStore,
-  pullAllStores,
+  pullOrdersByRange,
   getSyncLogPage,
   getSyncScheduleConfig,
   updateSyncScheduleConfig,
   getSyncProgress,
   getBatchSyncProgress,
+  getErrorDetail,
   type SyncScheduleConfigReqVO
 } from '@/api/ele/orderSync'
+import {
+  syncBillsByDate,
+  syncBillsByDateRange,
+  syncBillByStore as syncBillByStoreApi,
+  getBillInfo,
+  getBillSummary
+} from '@/api/ele/billSync'
 import { getOrderPushSetting, updateOrderPushSetting } from '@/api/ele/orderPush'
 import {
   getUnshownAlerts,
@@ -553,15 +895,19 @@ import {
   type OrderTrackingAlertVO
 } from '@/api/ele/orderTracking'
 import { TableApi } from '@/api/business/store'
-import type { StoreSimpleRespVO } from '@/api/business/store'
 import Pagination from '@/components/Pagination/index.vue'
 
-const ELE_PLATFORM_ID = 1
-
 const pullMode = ref<'single' | 'all'>('single')
-const storeList = ref<StoreSimpleRespVO[]>([])
+const activeSyncTab = ref<'order' | 'bill'>('order')
+const storeList = ref<any[]>([])
 const storeLoading = ref(false)
 const selectedStoreId = ref<string | null>(null)
+const billSyncMode = ref<'single' | 'all'>('all')
+const selectedBillStoreId = ref<string | null>(null)
+const billSyncDate = ref<string | null>(null)
+const billSyncStartDate = ref<string | null>(null)
+const billSyncEndDate = ref<string | null>(null)
+const billSyncLoading = ref(false)
 const dateType = ref<'today' | 'custom'>('today')
 const customDate = ref<string | null>(null)
 const startDate = ref<string | null>(null)
@@ -587,12 +933,171 @@ const batchProgress = ref({
   startTime: 0,
   totalOrders: 0,
   successOrders: 0,
-  failOrders: 0
+  failOrders: 0,
+  apiStatusCounts: {} as Record<number, number>,
+  savedStatusCounts: {} as Record<number, number>,
+  pageCounts: {} as Record<number, number>,
+  totalApiCount: 0,
+  totalSavedCount: 0,
+  discrepancyRate: 0,
+  reconciliationStatus: 'PENDING' as string,
+  retryCount: 0,
+  pullErrors: [] as any[],
+  saveErrors: [] as any[],
+  reconciliationErrors: [] as any[],
+  currentStatus: null as number | null,
+  currentPage: 0,
+  elapsedSeconds: 0
 })
 const batchSyncPollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
+const errorDetailDialogVisible = ref(false)
+const currentSyncLogId = ref<number | null>(null)
+const errorDetailData = ref<any>(null)
+const activeErrorTab = ref<string>('reconciliation')
+const compensationLoading = ref(false)
+
+const STATUS_NAMES: Record<string, string> = {
+  '0': '待支付',
+  '1': '已支付',
+  '2': '已接单',
+  '3': '已拣货',
+  '4': '已打包',
+  '5': '已发货',
+  '6': '交易成功',
+  '-1': '交易关闭',
+  '-2': '已取消',
+  '-3': '部分退款',
+  '-4': '全额退款',
+  '-5': '退款中'
+}
+
+const ERROR_CODE_MAP: Record<
+  string,
+  { label: string; color: string; icon: string; suggestion: string }
+> = {
+  PULL_API_TIMEOUT: {
+    label: 'API调用超时',
+    color: 'warning',
+    icon: '⏱️',
+    suggestion: '系统将自动重试'
+  },
+  PULL_API_RATE_LIMIT: {
+    label: 'API限流',
+    color: 'info',
+    icon: '🚦',
+    suggestion: '请求频率过高，请稍后重试'
+  },
+  PULL_PAGE_INCOMPLETE: {
+    label: '分页不完整',
+    color: 'error',
+    icon: '📄',
+    suggestion: 'API返回数据不完整，已触发二次拉取'
+  },
+  PULL_STATUS_MISSING: {
+    label: '状态订单缺失',
+    color: 'error',
+    icon: '📋',
+    suggestion: '某状态订单未拉取完整'
+  },
+  PULL_NETWORK_ERROR: {
+    label: '网络错误',
+    color: 'warning',
+    icon: '🌐',
+    suggestion: '网络连接异常，系统将重试'
+  },
+  PULL_AUTH_ERROR: {
+    label: '认证失败',
+    color: 'error',
+    icon: '🔐',
+    suggestion: 'API认证失败，请联系技术支持'
+  },
+  PULL_DATA_FORMAT_ERROR: {
+    label: '数据格式错误',
+    color: 'error',
+    icon: '📝',
+    suggestion: 'API返回数据格式异常'
+  },
+  SAVE_DUPLICATE_KEY: {
+    label: '重复订单',
+    color: 'info',
+    icon: '🔄',
+    suggestion: '订单已存在，已自动跳过'
+  },
+  SAVE_DATA_TRUNCATION: {
+    label: '数据截断',
+    color: 'warning',
+    icon: '✂️',
+    suggestion: '字段长度超出限制'
+  },
+  SAVE_CONSTRAINT_VIOLATION: {
+    label: '约束违反',
+    color: 'error',
+    icon: '🚫',
+    suggestion: '数据库约束冲突'
+  },
+  SAVE_TRANSACTION_TIMEOUT: {
+    label: '事务超时',
+    color: 'warning',
+    icon: '⏰',
+    suggestion: '数据库事务执行超时'
+  },
+  SAVE_CONNECTION_ERROR: {
+    label: '数据库连接错误',
+    color: 'error',
+    icon: '🔌',
+    suggestion: '数据库连接异常'
+  },
+  SAVE_BATCH_ERROR: {
+    label: '批量插入失败',
+    color: 'warning',
+    icon: '📦',
+    suggestion: '批量操作部分失败'
+  },
+  RECON_DISCREPANCY: {
+    label: '数据不一致',
+    color: 'error',
+    icon: '⚠️',
+    suggestion: 'API与数据库数据不一致，已触发补偿拉取'
+  },
+  RECON_STATUS_MISMATCH: {
+    label: '状态分布不匹配',
+    color: 'warning',
+    icon: '📊',
+    suggestion: '各状态订单数量不匹配'
+  },
+  RECON_TIME_RANGE_ERROR: {
+    label: '时间范围异常',
+    color: 'warning',
+    icon: '🕐',
+    suggestion: '订单时间超出同步时间窗口'
+  },
+  RECON_RETRY_EXHAUSTED: {
+    label: '重试次数用尽',
+    color: 'error',
+    icon: '🔁',
+    suggestion: '补偿3次后仍不一致，请人工介入'
+  },
+  RECON_API_DATA_CHANGED: {
+    label: 'API数据变更',
+    color: 'warning',
+    icon: '🔄',
+    suggestion: '对账期间API数据发生变化'
+  }
+}
+
+function getErrorInfo(errorCode: string) {
+  return (
+    ERROR_CODE_MAP[errorCode] || {
+      label: '未知错误',
+      color: 'error',
+      icon: '❓',
+      suggestion: '请联系技术支持'
+    }
+  )
+}
+
 const scheduleEnabled = ref(false)
-const intervalMinutes = ref(60)
 const currentCron = ref('')
 const scheduleSaving = ref(false)
 
@@ -665,6 +1170,14 @@ const canPull = computed(() => {
     return !!selectedStoreId.value
   }
   return !!startDate.value
+})
+
+const canBillSyncSingle = computed(() => {
+  return !!selectedBillStoreId.value && !!billSyncDate.value
+})
+
+const canBillSyncAll = computed(() => {
+  return !!billSyncStartDate.value && !!billSyncEndDate.value
 })
 
 const syncProgressPercent = computed(() => {
@@ -779,30 +1292,27 @@ const getStoreNameById = (platformStoreId: string) => {
   return store ? store.storeName : platformStoreId || '--'
 }
 
-const searchStoreList = async (keyword: string) => {
-  const normalizedKeyword = keyword.trim()
-  if (!normalizedKeyword) {
-    storeList.value = []
-    return
-  }
+const loadStoreList = async () => {
   storeLoading.value = true
   try {
-    const res = await TableApi.searchPlatformStoreSimpleList(
-      ELE_PLATFORM_ID,
-      normalizedKeyword,
-      1,
-      20
-    )
-    const list = Array.isArray(res) ? res : []
-    storeList.value = list.sort((a, b) => (b.storeStatus ?? 1) - (a.storeStatus ?? 1))
-  } catch {
+    const res = await TableApi.getTableAllSimpleList(1)
+    const rawData = (res as any)?.data || res
+    const list = Array.isArray(rawData) ? rawData : []
+    // console.log('门店列表加载成功:', list.length, '条数据', list)
+    storeList.value = list.sort((a: any, b: any) => {
+      const aStatus = a.storeStatus ?? 1
+      const bStatus = b.storeStatus ?? 1
+      return bStatus - aStatus
+    })
+  } catch (error) {
+    // console.error('门店列表加载失败:', error)
     storeList.value = []
   } finally {
     storeLoading.value = false
   }
 }
 
-const handlePaginationChange = ({ page, limit }) => {
+const handlePaginationChange = ({ page, limit }: { page: number; limit: number }) => {
   queryParams.value.pageNum = page
   queryParams.value.pageSize = limit
   getSyncLogs()
@@ -827,7 +1337,7 @@ const getSyncLogs = async () => {
     syncLogList.value = list
     total.value = totalVal
   } catch (error: any) {
-    console.error('同步日志查询失败:', error)
+    // console.error('同步日志查询失败:', error)
     syncLogList.value = []
     total.value = 0
   } finally {
@@ -963,6 +1473,39 @@ const stopPolling = () => {
   }
 }
 
+const isBatchProgressRunning = (data: any): boolean => {
+  if (!data) return false
+  const syncStatus = String(data.syncStatus || '').toUpperCase()
+  const totalStores = Number(data.totalStores || 0)
+  const completedStores = Number(data.completedStores || 0)
+  const currentSyncingCount = Number(data.currentSyncingCount || 0)
+
+  return (
+    data.isSyncing === true ||
+    syncStatus === 'RUNNING' ||
+    syncStatus === 'SYNCING' ||
+    syncStatus === 'PROCESSING' ||
+    currentSyncingCount > 0 ||
+    (totalStores > 0 && completedStores < totalStores)
+  )
+}
+
+const toBatchProgress = (data: any, fallbackStatus = 'IDLE') => ({
+  isSyncing: isBatchProgressRunning(data),
+  syncStatus: data?.syncStatus || fallbackStatus,
+  totalStores: data?.totalStores ?? 0,
+  completedStores: data?.completedStores ?? 0,
+  successStores: data?.successStores ?? 0,
+  failedStores: data?.failedStores ?? 0,
+  currentSyncingCount: data?.currentSyncingCount ?? 0,
+  currentSyncingStores: data?.currentSyncingStores ?? [],
+  failedStoreDetails: batchProgress.value.failedStoreDetails || [],
+  startTime: data?.startTime ?? 0,
+  totalOrders: data?.totalOrders ?? 0,
+  successOrders: data?.successOrders ?? 0,
+  failOrders: data?.failOrders ?? 0
+})
+
 const startBatchSyncPolling = () => {
   stopBatchSyncPolling()
   batchSyncPollingTimer.value = setInterval(async () => {
@@ -970,23 +1513,9 @@ const startBatchSyncPolling = () => {
       const res = await getBatchSyncProgress()
       if (res) {
         const data = (res as any)?.data || res
-        batchProgress.value = {
-          isSyncing: data?.isSyncing ?? false,
-          syncStatus: data?.syncStatus ?? 'IDLE',
-          totalStores: data?.totalStores ?? 0,
-          completedStores: data?.completedStores ?? 0,
-          successStores: data?.successStores ?? 0,
-          failedStores: data?.failedStores ?? 0,
-          currentSyncingCount: data?.currentSyncingCount ?? 0,
-          currentSyncingStores: data?.currentSyncingStores ?? [],
-          failedStoreDetails: batchProgress.value.failedStoreDetails,
-          startTime: data?.startTime ?? 0,
-          totalOrders: data?.totalOrders ?? 0,
-          successOrders: data?.successOrders ?? 0,
-          failOrders: data?.failOrders ?? 0
-        }
+        batchProgress.value = toBatchProgress(data)
 
-        if (!data?.isSyncing || data?.syncStatus === 'COMPLETED' || data?.syncStatus === 'FAILED') {
+        if (!isBatchProgressRunning(data) || data?.syncStatus === 'COMPLETED' || data?.syncStatus === 'FAILED') {
           stopBatchSyncPolling()
 
           if (batchProgress.value.failedStores > 0) {
@@ -1039,6 +1568,74 @@ const stopBatchSyncPolling = () => {
   }
 }
 
+const handleBillSyncSingle = async () => {
+  if (!selectedBillStoreId.value || !billSyncDate.value) {
+    ElMessage.warning('请选择门店和账单日期')
+    return
+  }
+
+  const store = storeList.value.find(s => s.platformStoreId === selectedBillStoreId.value)
+  if (!store) {
+    ElMessage.warning('门店信息不存在')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要同步门店「${store.storeName}」${billSyncDate.value}的账单吗？`,
+      '确认同步账单',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  billSyncLoading.value = true
+  try {
+    await syncBillByStoreApi(store.settlementAccount || '', selectedBillStoreId.value, billSyncDate.value)
+    ElMessage.success('门店账单同步任务已提交')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '账单同步任务提交失败')
+  } finally {
+    billSyncLoading.value = false
+  }
+}
+
+const handleBillSyncAll = async () => {
+  if (!billSyncStartDate.value || !billSyncEndDate.value) {
+    ElMessage.warning('请选择开始日期和结束日期')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要同步全部门店 ${billSyncStartDate.value} ~ ${billSyncEndDate.value} 的账单吗？\n（可能需要较长时间，请耐心等待）`,
+      '确认同步账单',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  billSyncLoading.value = true
+  try {
+    await syncBillsByDateRange(billSyncStartDate.value, billSyncEndDate.value)
+    ElMessage.success('全部门店账单同步任务已提交')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '账单同步任务提交失败')
+  } finally {
+    billSyncLoading.value = false
+  }
+}
+
 const handlePull = async () => {
   if (pullMode.value === 'single' && !selectedStoreId.value) {
     ElMessage.warning('请选择要拉取的门店')
@@ -1080,47 +1677,98 @@ const handlePull = async () => {
         failedStores: 0,
         currentSyncingCount: 0,
         currentSyncingStores: [],
-        failedStoreDetails: [],
-        startTime: 0,
-        totalOrders: 0,
-        successOrders: 0,
-        failOrders: 0
+        startTime: 0
       }
 
       try {
-        await pullAllStores({ startTime: timeRange.start, endTime: timeRange.end })
-      } catch {
-        // 后端返回的CommonResult<Boolean>可能导致axios拦截器报错，静默处理
+        const result = await pullOrdersByRange({
+          startTime: timeRange.start,
+          endTime: timeRange.end
+        })
+        const data = (result as any)?.data || result || {}
+
+        if (data && data.totalCount !== undefined) {
+          const completed = data.completed === true
+          batchProgress.value = {
+            isSyncing: false,
+            syncStatus: completed ? 'COMPLETED' : 'FAILED',
+            totalStores: data.totalCount || 0,
+            completedStores: data.totalCount || 0,
+            successStores: data.successCount || 0,
+            failedStores: data.failCount || 0,
+            currentSyncingCount: 0,
+            currentSyncingStores: [],
+            failedStoreDetails: (data.failedStores || []).map((storeId: string) => ({
+              platformStoreId: storeId,
+              storeName: getStoreNameById(storeId),
+              errorMsg: '同步失败'
+            })),
+            startTime: Date.now(),
+            totalOrders: data.totalCount || 0,
+            successOrders: data.successCount || 0,
+            failOrders: data.failCount || 0
+          }
+
+          if (completed) {
+            ElMessage.success(
+              `拉取完成！成功${batchProgress.value.successStores}家，失败${batchProgress.value.failedStores}家`
+            )
+            await getSyncLogs()
+            setTimeout(() => {
+              showBatchSyncProgress.value = false
+            }, 5000)
+          } else {
+            ElMessage.error(
+              `拉取失败！成功${batchProgress.value.successStores}家，失败${batchProgress.value.failedStores}家`
+            )
+          }
+        } else {
+          batchProgress.value.syncStatus = 'FAILED'
+          batchProgress.value.isSyncing = false
+          ElMessage.error('订单同步返回数据异常')
+        }
+      } catch (e) {
+        batchProgress.value.syncStatus = 'FAILED'
+        batchProgress.value.isSyncing = false
+        ElMessage.error('订单同步任务提交失败')
       }
-      startBatchSyncPolling()
-      ElMessage.info('订单同步任务已提交，正在等待结果...')
+
+      if (batchProgress.value.isSyncing) {
+        startBatchSyncPolling()
+        ElMessage.info('订单同步任务已提交，正在等待结果...')
+      }
     } else {
-      const result = await pullSingleStore({
+      const result = await pullOrdersByRange({
         platformStoreId: selectedStoreId.value!,
         startTime: timeRange.start,
         endTime: timeRange.end
       })
-      if (result && typeof result === 'object' && (result as any).taskId) {
-        startPolling((result as any).taskId)
-        ElMessage.info('订单同步任务已提交，正在等待结果...')
-      } else {
+      const data = (result as any)?.data || result || {}
+
+      if (data && data.totalCount !== undefined) {
         batchProgress.value = {
           isSyncing: false,
-          syncStatus: 'COMPLETED',
+          syncStatus: data.completed ? 'COMPLETED' : 'FAILED',
           totalStores: 1,
           completedStores: 1,
-          successStores: 1,
-          failedStores: 0,
+          successStores: data.successCount || 0,
+          failedStores: data.failCount || 0,
           currentSyncingCount: 0,
           currentSyncingStores: [],
-          failedStoreDetails: [],
           startTime: Date.now(),
-          totalOrders: 0,
-          successOrders: 0,
-          failOrders: 0
+          totalOrders: data.totalCount || 0,
+          successOrders: data.successCount || 0,
+          failOrders: data.failCount || 0
         }
-        ElMessage.success('门店订单同步完成')
+
+        if (data.completed) {
+          ElMessage.success('门店订单同步完成')
+        } else {
+          ElMessage.error(`门店订单同步失败，失败门店: ${(data.failedStores || []).join(', ')}`)
+        }
         await getSyncLogs()
+      } else {
+        ElMessage.error('门店订单同步返回数据异常')
       }
     }
   } catch (error: any) {
@@ -1133,7 +1781,6 @@ const handlePull = async () => {
       failedStores: 1,
       currentSyncingCount: 0,
       currentSyncingStores: [],
-      failedStoreDetails: [],
       startTime: Date.now(),
       totalOrders: 0,
       successOrders: 0,
@@ -1174,10 +1821,104 @@ const formatTimestamp = (timestamp: number | null | undefined) => {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
-const showErrorDetail = (errorMsg: string) => {
-  currentError.value = errorMsg
-  errorDialogVisible.value = true
+const showErrorDetail = (row: any) => {
+  if (typeof row === 'string') {
+    currentError.value = row
+    errorDialogVisible.value = true
+    return
+  }
+
+  if (row.id) {
+    currentSyncLogId.value = row.id
+    loadErrorDetail(row)
+  } else {
+    currentError.value = row.errorMsg || '未知错误'
+    errorDialogVisible.value = true
+  }
 }
+
+const loadErrorDetail = async (row: any) => {
+  try {
+    errorDetailData.value = {
+      storeName: row.storeName || '--',
+      syncStartTime: row.syncStartTime ? formatTimestamp(row.syncStartTime) : '--',
+      reconciliation: {
+        expectedTotal: row.expectedTotal || 0,
+        savedTotal: row.savedTotal || 0,
+        discrepancyRate: row.discrepancyRate || 0,
+        retryCount: row.retryCount || 0,
+        apiStatusCounts: row.apiStatusCounts ? JSON.parse(row.apiStatusCounts) : {},
+        savedStatusCounts: row.savedStatusCounts ? JSON.parse(row.savedStatusCounts) : {}
+      },
+      pullError: row.pullErrorCode
+        ? {
+            code: row.pullErrorCode,
+            detail: row.pullErrorDetail ? JSON.parse(row.pullErrorDetail) : null
+          }
+        : { code: null, detail: null },
+      saveError: row.saveErrorCode
+        ? {
+            code: row.saveErrorCode,
+            detail: row.saveErrorDetail ? JSON.parse(row.saveErrorDetail) : null
+          }
+        : { code: null, detail: null },
+      reconciliationError: row.reconciliationErrorCode
+        ? {
+            code: row.reconciliationErrorCode,
+            detail: row.reconciliationErrorDetail ? JSON.parse(row.reconciliationErrorDetail) : null
+          }
+        : { code: null, detail: null }
+    }
+    activeErrorTab.value = 'reconciliation'
+    errorDetailDialogVisible.value = true
+  } catch (error) {
+    // console.error('加载错误详情失败:', error)
+    currentError.value = row.errorMsg || '加载详情失败'
+    errorDialogVisible.value = true
+  }
+}
+
+const triggerCompensation = async () => {
+  if (!errorDetailData.value) return
+
+  compensationLoading.value = true
+  try {
+    await pullOrdersByRange({
+      platformStoreId: errorDetailData.value.storeName || '',
+      startTime: Math.floor(new Date(errorDetailData.value.syncStartTime).getTime() / 1000),
+      endTime: Math.floor(Date.now() / 1000)
+    })
+
+    ElMessage.success('补偿任务已提交，正在重新拉取订单')
+    errorDetailDialogVisible.value = false
+    await getSyncLogs()
+  } catch (error) {
+    // console.error('触发补偿失败:', error)
+    ElMessage.error('触发补偿失败')
+  } finally {
+    compensationLoading.value = false
+  }
+}
+
+const statusCompareData = computed(() => {
+  if (!errorDetailData.value?.reconciliation?.apiStatusCounts) return []
+
+  const apiCounts = errorDetailData.value.reconciliation.apiStatusCounts || {}
+  const savedCounts = errorDetailData.value.reconciliation.savedStatusCounts || {}
+
+  const allStatuses = new Set([...Object.keys(apiCounts), ...Object.keys(savedCounts)])
+
+  return Array.from(allStatuses).map((status) => {
+    const apiCount = apiCounts[status] || 0
+    const savedCount = savedCounts[status] || 0
+    return {
+      statusName: STATUS_NAMES[status] || `状态${status}`,
+      apiCount,
+      savedCount,
+      diff: apiCount - savedCount
+    }
+  })
+})
 
 const addTimePoint = () => {
   if (newTimePoint.value && !scheduleTimePoints.value.includes(newTimePoint.value)) {
@@ -1320,27 +2061,13 @@ const checkBatchSyncStatusOnMount = async () => {
     const res = await getBatchSyncProgress()
     const data = (res as any)?.data || res || {}
 
-    if (data.isSyncing || data.syncStatus === 'RUNNING') {
+    if (isBatchProgressRunning(data)) {
       showBatchSyncProgress.value = true
-      batchProgress.value = {
-        isSyncing: true,
-        syncStatus: data.syncStatus || 'RUNNING',
-        totalStores: data.totalStores || 0,
-        completedStores: data.completedStores || 0,
-        successStores: data.successStores || 0,
-        failedStores: data.failedStores || 0,
-        currentSyncingCount: data.currentSyncingCount || 0,
-        currentSyncingStores: data.currentSyncingStores || [],
-        failedStoreDetails: batchProgress.value.failedStoreDetails,
-        startTime: data.startTime || 0,
-        totalOrders: data.totalOrders || 0,
-        successOrders: data.successOrders || 0,
-        failOrders: data.failOrders || 0
-      }
+      batchProgress.value = toBatchProgress(data, 'RUNNING')
       startBatchSyncPolling()
     }
   } catch (err) {
-    console.warn('检查同步状态失败（请确认后端服务已重启）:', err)
+    // console.warn('检查同步状态失败（请确认后端服务已重启）:', err)
   }
 }
 
@@ -1356,7 +2083,7 @@ const loadPushSetting = async () => {
       }
     }
   } catch (e) {
-    console.error('加载推送设置失败:', e)
+    // console.error('加载推送设置失败:', e)
   }
 }
 
@@ -1398,7 +2125,7 @@ const connectWebSocket = () => {
     websocket.value = new WebSocket(wsUrl)
 
     websocket.value.onopen = () => {
-      console.log('WebSocket连接成功')
+      // console.log('WebSocket连接成功')
     }
 
     websocket.value.onmessage = (event) => {
@@ -1408,20 +2135,20 @@ const connectWebSocket = () => {
           handleOrderStatusPush(data)
         }
       } catch (e) {
-        console.error('解析WebSocket消息失败:', e)
+        // console.error('解析WebSocket消息失败:', e)
       }
     }
 
     websocket.value.onerror = (error) => {
-      console.error('WebSocket错误:', error)
+      // console.error('WebSocket错误:', error)
     }
 
     websocket.value.onclose = () => {
-      console.log('WebSocket连接关闭，3秒后重连...')
+      // console.log('WebSocket连接关闭，3秒后重连...')
       setTimeout(connectWebSocket, 3000)
     }
   } catch (e) {
-    console.warn('WebSocket连接失败（如未配置WebSocket服务可忽略）:', e)
+    // console.warn('WebSocket连接失败（如未配置WebSocket服务可忽略）:', e)
   }
 }
 
@@ -1462,17 +2189,17 @@ const handleOrderStatusPush = (data: any) => {
   getSyncLogs()
 }
 
-const getStatusName = (status: number): string => {
-  const map: Record<number, string> = {
-    1: '已支付',
-    2: '已接单',
-    3: '已拣货',
-    4: '已打包',
-    5: '已发货',
-    6: '交易成功',
+const getStatusName = (status: number | string): string => {
+  const map: Record<string, string> = {
+    '1': '已支付',
+    '2': '已接单',
+    '3': '已拣货',
+    '4': '已打包',
+    '5': '已发货',
+    '6': '交易成功',
     '-1': '交易关闭'
   }
-  return map[status] || '未知'
+  return map[String(status)] || `状态${status}`
 }
 
 const getStatusTagType = (status: number): string => {
@@ -1520,6 +2247,7 @@ const handleDismissAlerts = async () => {
 }
 
 onMounted(async () => {
+  loadStoreList()
   getSyncLogs()
   loadScheduleConfig()
   checkBatchSyncStatusOnMount()
@@ -1559,6 +2287,8 @@ onUnmounted(() => {
     padding: 16px 24px;
     border-bottom: 1px solid rgba(226, 232, 240, 0.6);
     background: #f8fafc;
+    display: flex;
+    align-items: center;
 
     .header-title {
       font-size: 16px;
@@ -1569,6 +2299,125 @@ onUnmounted(() => {
 
   .pull-card-body {
     padding: 20px 24px;
+
+    .sync-tabs {
+      :deep(.el-tabs__header) {
+        margin-bottom: 16px;
+      }
+
+      :deep(.el-tabs__item) {
+        font-size: 15px;
+        font-weight: 600;
+        color: #64748b;
+
+        &.is-active {
+          color: #6366f1;
+        }
+      }
+
+      :deep(.el-tabs__active-bar) {
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+      }
+    }
+
+    .bill-sync-card {
+      .bill-header {
+        margin-bottom: 16px;
+
+        .bill-header-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: #1e293b;
+        }
+      }
+
+      .bill-settings {
+        .setting-row {
+          display: flex;
+          align-items: center;
+          margin-bottom: 16px;
+          gap: 16px;
+          flex-wrap: wrap;
+
+          .setting-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+
+            .setting-label {
+              font-size: 13px;
+              color: #64748b;
+              font-weight: 500;
+              white-space: nowrap;
+            }
+          }
+
+          .btn-group {
+            margin-left: auto;
+          }
+        }
+
+        .bill-sync-tip {
+          margin-top: 12px;
+          font-size: 12px;
+          color: #94a3b8;
+          padding: 8px 12px;
+          background: #f8fafc;
+          border-radius: 6px;
+          line-height: 1.6;
+        }
+      }
+    }
+
+    .bill-mode-radio {
+      :deep(.el-radio-button__inner) {
+        padding: 8px 16px;
+        font-size: 14px;
+        background: #f8fafc;
+        border-color: #e2e8f0;
+        color: #64748b;
+        transition: all 0.2s ease;
+      }
+
+      :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        border-color: #6366f1;
+        color: #fff;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+      }
+    }
+
+    .bill-store-select {
+      width: 240px;
+
+      :deep(.el-input__wrapper) {
+        background: #f8fafc;
+        border-color: #e2e8f0;
+        box-shadow: none;
+        border-radius: 8px;
+
+        &:hover,
+        &:focus-within {
+          border-color: #6366f1;
+        }
+      }
+    }
+
+    .bill-date-picker {
+      width: 160px;
+
+      :deep(.el-input__wrapper) {
+        background: #f8fafc;
+        border-color: #e2e8f0;
+        box-shadow: none;
+        border-radius: 8px;
+
+        &:hover,
+        &:focus-within {
+          border-color: #0ea5e9;
+        }
+      }
+    }
 
     .settings-bar {
       display: flex;
@@ -2060,6 +2909,17 @@ onUnmounted(() => {
   }
 }
 
+.error-codes-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+
+  .error-code-tag {
+    margin: 0;
+  }
+}
+
 .el-table {
   font-size: 14px;
 
@@ -2141,38 +3001,46 @@ onUnmounted(() => {
   .sync-progress-container {
     background: white;
     border-radius: 16px;
-    padding: 32px;
-    width: 480px;
+    padding: 28px;
+    width: 520px;
     max-width: 90vw;
+    max-height: 80vh;
+    overflow-y: auto;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
     animation: slideUp 0.3s ease;
 
     .sync-header {
       display: flex;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 20px;
+      justify-content: space-between;
+      margin-bottom: 24px;
 
-      .sync-icon {
-        font-size: 28px;
-      }
+      .sync-header-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
 
-      .sync-title {
-        font-size: 18px;
-        font-weight: 700;
-        color: #1e293b;
+        .sync-icon {
+          font-size: 28px;
+        }
+
+        .sync-title {
+          font-size: 18px;
+          font-weight: 700;
+          color: #1e293b;
+        }
       }
     }
 
     .sync-detail {
-      .el-progress {
+      .sync-progress-bar {
         margin-bottom: 20px;
       }
 
       .sync-stats {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
         padding: 16px;
         background: #f8fafc;
         border-radius: 12px;
@@ -2182,7 +3050,10 @@ onUnmounted(() => {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 6px;
+          gap: 4px;
+          padding: 10px;
+          background: white;
+          border-radius: 8px;
 
           .stat-label {
             font-size: 12px;
@@ -2190,7 +3061,7 @@ onUnmounted(() => {
           }
 
           .stat-value {
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 700;
             color: #1e293b;
           }
@@ -2210,68 +3081,97 @@ onUnmounted(() => {
       }
 
       .syncing-info {
-        padding: 10px 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
         background: #eff6ff;
         border: 1px solid #bfdbfe;
         border-radius: 8px;
         font-size: 13px;
         color: #1e40af;
         line-height: 1.6;
+
+        .syncing-icon {
+          animation: spin 1s linear infinite;
+        }
       }
     }
 
     .sync-complete {
-      .sync-stats {
+      .summary-stats {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
-        padding: 16px;
-        background: #f0fdf4;
-        border-radius: 12px;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        padding: 0;
+        background: transparent;
+        border-radius: 0;
+        margin-bottom: 0;
 
-        .stat-item {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 6px;
+        .stat-card-item {
+          .stat-card-inner {
+            padding: 16px 12px;
+            background: #f8fafc;
+            border-radius: 12px;
+            text-align: center;
+            transition: transform 0.2s ease;
 
-          .stat-label {
-            font-size: 12px;
-            color: #64748b;
-          }
-
-          .stat-value {
-            font-size: 22px;
-            font-weight: 700;
-            color: #1e293b;
-          }
-
-          &.success {
-            .stat-value {
-              color: #10b981;
+            &:hover {
+              transform: translateY(-2px);
             }
-          }
 
-          &.failed {
-            .stat-value {
-              color: #ef4444;
+            &.success-card {
+              background: #f0fdf4;
+              border: 1px solid #bbf7d0;
+            }
+
+            &.failed-card {
+              background: #fef2f2;
+              border: 1px solid #fecaca;
+            }
+
+            .stat-card-label {
+              font-size: 12px;
+              color: #64748b;
+              margin-bottom: 8px;
+            }
+
+            .stat-card-value {
+              font-size: 24px;
+              font-weight: 700;
+              color: #1e293b;
+
+              &.success-value {
+                color: #10b981;
+              }
+
+              &.failed-value {
+                color: #ef4444;
+              }
             }
           }
         }
       }
 
       .failed-stores-section {
-        margin-top: 16px;
+        margin-top: 20px;
 
         .failed-section-title {
+          display: flex;
+          align-items: center;
+          gap: 6px;
           font-size: 14px;
           font-weight: 600;
           color: #ef4444;
           margin-bottom: 12px;
+
+          .el-icon {
+            font-size: 16px;
+          }
         }
 
         .failed-store-list {
-          max-height: 300px;
+          max-height: 250px;
           overflow-y: auto;
           display: flex;
           flex-direction: column;
@@ -2318,6 +3218,15 @@ onUnmounted(() => {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 

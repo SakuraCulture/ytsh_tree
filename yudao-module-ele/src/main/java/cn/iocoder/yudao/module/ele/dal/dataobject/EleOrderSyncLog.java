@@ -16,6 +16,10 @@ public class EleOrderSyncLog {
 
     private String syncBatchId;
 
+    private String syncMode;
+
+    private Integer threadCount;
+
     private String platformStoreId;
 
     private String merchantCode;
@@ -36,6 +40,43 @@ public class EleOrderSyncLog {
 
     private Integer totalPulled;
 
+    // ============== 新增: 对账相关字段 ==============
+    private Integer expectedTotal;
+
+    private Integer actualTotal;
+
+    private Integer savedTotal;
+
+    private java.math.BigDecimal discrepancyRate;
+
+    private Integer dataIntegrity;
+
+    private Integer retryCount;
+
+    private String apiStatusCounts;
+
+    private String savedStatusCounts;
+
+    private String pageCounts;
+
+    // ============== 新增: 错误信息字段 ==============
+    private String pullErrorCode;
+
+    private String pullErrorDetail;
+
+    private String saveErrorCode;
+
+    private String saveErrorDetail;
+
+    private String reconciliationErrorCode;
+
+    private String reconciliationErrorDetail;
+
+    private Integer pauseSync;
+
+    private String compensationInfo;
+
+    // ============== 原有字段 ==============
     private Integer successCount;
 
     private Integer failCount;
@@ -47,10 +88,6 @@ public class EleOrderSyncLog {
     private Integer partialFailed;
 
     private String failedOrderIds;
-
-    private String syncMode;
-
-    private Integer threadCount;
 
     private String checkpointInfo;
 

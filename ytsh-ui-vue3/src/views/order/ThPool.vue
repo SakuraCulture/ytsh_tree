@@ -398,7 +398,7 @@ const loadPoolStatus = async () => {
     const data = await getAllPoolStatus()
     poolList.value = data || []
   } catch (error: any) {
-    console.error('加载线程池状态失败:', error)
+    // console.error('加载线程池状态失败:', error)
   }
 }
 
@@ -407,7 +407,7 @@ const loadAlarmConfigs = async () => {
     const data = await getAllAlarmThresholds()
     alarmConfigs.value = data || {}
   } catch (error: any) {
-    console.error('加载告警配置失败:', error)
+    // console.error('加载告警配置失败:', error)
   }
 }
 

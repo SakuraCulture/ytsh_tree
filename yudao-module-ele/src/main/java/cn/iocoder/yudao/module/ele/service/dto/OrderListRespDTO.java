@@ -44,6 +44,8 @@ public class OrderListRespDTO {
         private String latitude;
         private String userId;
         private Integer arriveType;
+        private String orderIndex;
+        private Integer estimatedIncome;
         private List<OrderDetailRespDTO.SubOrder> subOrders = new ArrayList<>();
         private List<OrderDetailRespDTO.Discount> discounts = new ArrayList<>();
     }

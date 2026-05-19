@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS "infra_job" (
     "status" tinyint(4) NOT NULL COMMENT '任务状态',
     "handler_name" varchar(64) NOT NULL COMMENT '处理器的名字',
     "handler_param" varchar(255) DEFAULT NULL COMMENT '处理器的参数',
-    "cron_expression" varchar(32) NOT NULL COMMENT 'CRON 表达式',
+    "cron_expression" varchar(255) NOT NULL COMMENT 'CRON 表达式',
     "retry_count" int(11) NOT NULL DEFAULT '0' COMMENT '重试次数',
     "retry_interval" int(11) NOT NULL DEFAULT '0' COMMENT '重试间隔',
     "monitor_timeout" int(11) NOT NULL DEFAULT '0' COMMENT '监控超时时间',

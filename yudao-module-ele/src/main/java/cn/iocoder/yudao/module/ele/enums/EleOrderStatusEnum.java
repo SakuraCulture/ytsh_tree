@@ -27,7 +27,8 @@ public enum EleOrderStatusEnum {
         return null;
     }
 
-    public static boolean isTerminalStatus(Integer status) {
-        return COMPLETED.getStatus().equals(status) || CLOSED.getStatus().equals(status);
+    public static String getNameByStatus(Integer status) {
+        EleOrderStatusEnum statusEnum = getByStatus(status);
+        return statusEnum == null ? "未知状态" : statusEnum.getName();
     }
 }

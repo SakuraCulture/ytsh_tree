@@ -44,4 +44,13 @@ public interface OperateLogService {
      */
     PageResult<OperateLogDO> getOperateLogPage(OperateLogPageReqDTO pageReqVO);
 
+    /**
+     * 清理超过指定天数的操作日志
+     *
+     * @param exceedDay 超过的天数
+     * @param deleteLimit 每次删除的条数
+     * @return 清理的日志数量
+     */
+    Integer cleanOperateLog(Integer exceedDay, Integer deleteLimit);
+
 }

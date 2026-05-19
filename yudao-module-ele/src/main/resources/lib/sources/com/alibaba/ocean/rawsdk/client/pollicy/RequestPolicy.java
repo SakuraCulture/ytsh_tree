@@ -10,7 +10,7 @@ public class RequestPolicy implements Cloneable {
     private Protocol responseProtocol = Protocol.json2;
     private boolean responseCompress = true;
     private int requestCompressThreshold = -1; // 默认不开启
-    private int timeout = 5000; // 5秒
+    private int timeout = 30000;
     private HttpMethodPolicy httpMethod = HttpMethodPolicy.POST;
     private String queryStringCharset = "GB18030"; // Request URL query string
     // encoder

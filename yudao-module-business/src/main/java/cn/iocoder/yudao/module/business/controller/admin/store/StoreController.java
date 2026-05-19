@@ -252,6 +252,21 @@ import org.springframework.web.multipart.MultipartFile;
     }
 
     /**
+     * 获取所有门店简单信息列表
+     *
+     * 【What】返回所有门店的简化信息列表，用于下拉选择等场景
+     *
+     * @param platformId 平台ID（可选，用于过滤特定平台的门店）
+     * @return 门店简单信息列表
+     */
+    @GetMapping("/list-all-simple")
+    @Operation(summary = "获取所有门店简单信息列表")
+    @PreAuthorize("@ss.hasAnyPermissions('business:table:query', 'business:store-product:query')")
+    public CommonResult<List<StoreSimpleRespVO>> getStoreAllSimpleList(@RequestParam(value = "platformId", required = false) Long platformId) {
+        return success(storeService.getAllSimpleList(platformId));
+    }
+
+    /**
      * 导出门店 Excel
      *
      * 【What】导出门店数据为 Excel 文件

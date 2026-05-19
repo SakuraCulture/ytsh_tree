@@ -17,7 +17,7 @@ import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -39,6 +39,9 @@ public class SaasOrderPushKafkaConfig {
 
     @Value("${spring.kafka.properties.security.protocol:SASL_PLAINTEXT}")
     private String securityProtocol;
+
+    @Value("${ele.saas.push.enabled:false}")
+    private boolean pushEnabled;
 
     @Bean
     public ProducerFactory<String, OrderStatusPushMessage> saasPushProducerFactory() {
@@ -62,14 +65,18 @@ public class SaasOrderPushKafkaConfig {
     }
 
     @Bean
-    public ConsumerFactory<String, OrderStatusPushMessage> saasPushConsumerFactory() {
+    public ConsumerFactory<String, OrderStatusPushMessage> saasPushConsumerFactory(
+            @Value("${ele.saas.push.kafka.consumer-group-id:order-status-consumer}") String groupId) {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
-
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 300000);
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30000);
+        props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 10000);
         if (!jaasConfig.isEmpty()) {
             props.put("sasl.mechanism", saslMechanism);
             props.put("security.protocol", securityProtocol);
@@ -84,14 +91,26 @@ public class SaasOrderPushKafkaConfig {
     }
 
     @Bean("saasPushKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, OrderStatusPushMessage> saasPushKafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, OrderStatusPushMessage> saasPushKafkaListenerContainerFactory(
+            @Value("${ele.saas.push.kafka.consumer-group-id:order-status-consumer}") String groupId,
+            @Value("${ele.saas.push.kafka.topic:order-status-change}") String topic) {
         ConcurrentKafkaListenerContainerFactory<String, OrderStatusPushMessage> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(saasPushConsumerFactory());
+        factory.setConsumerFactory(saasPushConsumerFactory(groupId));
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+
+        ExponentialBackOff backOff = new ExponentialBackOff(1000L, 2.0);
+        backOff.setMaxInterval(60000L);
+        backOff.setMaxElapsedTime(300000L);
+
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(
-                (record, ex) -> log.error("【SaaS推送Kafka】消费失败，record={}, error={}", record, ex.getMessage()),
-                new FixedBackOff(1000L, 1L));
+                (record, ex) -> log.error("【SaaS推送Kafka】消费失败，record={}, error={}", record, ex.getMessage(), ex),
+                backOff);
+        errorHandler.setRetryListeners((record, ex, deliveryAttempt) -> log.warn(
+                "【SaaS推送Kafka重试】第{}次重试失败，topic={}, partition={}, offset={}, error={}",
+                deliveryAttempt, record.topic(), record.partition(), record.offset(), ex.getMessage()));
         factory.setCommonErrorHandler(errorHandler);
+
+        log.info("【SaaS推送Kafka】消费者容器工厂初始化完成，topic={}, groupId={}, pushEnabled={}", topic, groupId, pushEnabled);
         return factory;
     }
 }

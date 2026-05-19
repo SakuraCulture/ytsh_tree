@@ -41,7 +41,7 @@ public class AppCategoryController {
     }
 
     @GetMapping("/list-by-ids")
-    @Operation(summary = "鑾峰緱鍟嗗搧鍒嗙被鍒楄〃锛屾寚瀹氱紪鍙?)
+    @Operation(summary = "获得商品分类列表，指定编号")
     @Parameter(name = "ids", description = "鍟嗗搧鍒嗙被缂栧彿鏁扮粍", required = true)
     public CommonResult<List<AppCategoryRespVO>> getProductCategoryList(@RequestParam("ids") List<Long> ids) {
         if (CollUtil.isEmpty(ids)) {

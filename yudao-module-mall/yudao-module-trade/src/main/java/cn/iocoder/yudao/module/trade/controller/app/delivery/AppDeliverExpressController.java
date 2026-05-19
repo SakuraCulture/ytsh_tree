@@ -20,7 +20,7 @@ import java.util.List;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
-@Tag(name = "鐢ㄦ埛 App - 蹇€掑叕鍙?)
+@Tag(name = "用户 App - 快递公司")
 @RestController
 @RequestMapping("/trade/delivery/express")
 @Validated
@@ -30,7 +30,7 @@ public class AppDeliverExpressController {
     private DeliveryExpressService deliveryExpressService;
 
     @GetMapping("/list")
-    @Operation(summary = "鑾峰緱蹇€掑叕鍙稿垪琛?)
+    @Operation(summary = "获得快递公司列表")
     public CommonResult<List<AppDeliveryExpressRespVO>> getDeliveryExpressList() {
         List<DeliveryExpressDO> list = deliveryExpressService.getDeliveryExpressListByStatus(CommonStatusEnum.ENABLE.getStatus());
         list.sort(Comparator.comparing(DeliveryExpressDO::getSort));

@@ -37,6 +37,12 @@ public class OrderPlatformDO {
     /** 平台扩展信息(JSON) */
     private String platformExtend;
 
+    /** ETL时间 */
+    private java.time.LocalDateTime etlTime;
+
+    /** 租户编号 */
+    private Long tenantId;
+
     /** 创建人 */
     private String creator;
 

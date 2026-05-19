@@ -61,7 +61,7 @@ public class EleOrderTrackingService {
         try {
             EleOrderTrackingDO tracking = eleOrderTrackingMapper.selectByOrderId(orderId);
             if (tracking == null) {
-                log.warn("【订单跟踪】未找到跟踪记录，orderId={}", orderId);
+                log.info("【订单跟踪】完结或历史订单无跟踪记录，视为无需跟踪，orderId={}, status={}", orderId, newStatus);
                 return;
             }
 

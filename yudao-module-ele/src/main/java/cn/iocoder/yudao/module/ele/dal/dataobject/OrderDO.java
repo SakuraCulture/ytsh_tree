@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.ele.dal.dataobject;
 
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -14,6 +15,7 @@ import java.math.BigDecimal;
 public class OrderDO {
 
     /** 订单ID */
+    @TableId
     private String orderId;
 
     /** 用户ID */
@@ -88,6 +90,30 @@ public class OrderDO {
     /** 预约类型 1-预约单 2-即时单 */
     private Integer arriveType;
 
+    /** 关联门店ID */
+    private Long storeId;
+
+    /** 订单来源 */
+    private String orderFrom;
+
+    /** 当日流水号 */
+    private Integer orderIndex;
+
+    /** 预计收入(元) */
+    private BigDecimal estimatedIncome;
+
+    /** 子订单JSON数据 */
+    private String subOrdersJson;
+
+    /** 折扣信息JSON数据 */
+    private String discountsJson;
+
+    /** ETL时间 */
+    private java.time.LocalDateTime etlTime;
+
+    /** 租户编号 */
+    private String tenantId;
+
     /** 创建人 */
     private String creator;
 
@@ -99,4 +125,10 @@ public class OrderDO {
 
     /** 是否删除 0-否 1-是 */
     private Boolean deleted;
+
+    /** 结算金额(元) */
+    private java.math.BigDecimal settlementAmount;
+
+    /** 结算状态(0未结算/1已结算) */
+    private Integer settlementStatus;
 }

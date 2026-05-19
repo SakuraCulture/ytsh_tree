@@ -24,7 +24,7 @@ import java.util.List;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
-@Tag(name = "鐢ㄦ埛 APP - 鏂囩珷")
+@Tag(name = "用户 APP - 文章")
 @RestController
 @RequestMapping("/promotion/article")
 @Validated
@@ -34,10 +34,11 @@ public class AppArticleController {
     private ArticleService articleService;
 
     @RequestMapping("/list")
-    @Operation(summary = "鑾峰緱鏂囩珷璇︽儏鍒楄〃")
+    @Operation(summary = "获得文章详情列表")
     @Parameters({
-            @Parameter(name = "recommendHot", description = "鏄惁鐑棬", example = "false"), // 鍦烘櫙涓€锛氭煡鐪嬫寚瀹氱殑鏂囩珷
-            @Parameter(name = "recommendBanner", description = "鏄惁杞挱鍥?, example = "false") // 鍦烘櫙浜岋細鏌ョ湅鎸囧畾鐨勬枃绔?    })
+            @Parameter(name = "recommendHot", description = "是否热门", example = "false"), // 场景一：查看指定的文章
+            @Parameter(name = "recommendBanner", description = "是否轮播图", example = "false") // 场景二：查看指定的文章
+    })
     public CommonResult<List<AppArticleRespVO>> getArticleList(
             @RequestParam(value = "recommendHot", required = false) Boolean recommendHot,
             @RequestParam(value = "recommendBanner", required = false) Boolean recommendBanner) {
@@ -46,16 +47,16 @@ public class AppArticleController {
     }
 
     @RequestMapping("/page")
-    @Operation(summary = "鑾峰緱鏂囩珷璇︽儏鍒嗛〉")
+    @Operation(summary = "获得文章详情分页")
     public CommonResult<PageResult<AppArticleRespVO>> getArticlePage(AppArticlePageReqVO pageReqVO) {
         return success(ArticleConvert.INSTANCE.convertPage02(articleService.getArticlePage(pageReqVO)));
     }
 
     @RequestMapping("/get")
-    @Operation(summary = "鑾峰緱鏂囩珷璇︽儏")
+    @Operation(summary = "获得文章详情")
     @Parameters({
-            @Parameter(name = "id", description = "鏂囩珷缂栧彿", example = "1024"),
-            @Parameter(name = "title", description = "鏂囩珷鏍囬", example = "1024"),
+            @Parameter(name = "id", description = "文章编号", example = "1024"),
+            @Parameter(name = "title", description = "文章标题", example = "1024"),
     })
     public CommonResult<AppArticleRespVO> getArticle(@RequestParam(value = "id", required = false) Long id,
                                                      @RequestParam(value = "title", required = false) String title) {
@@ -65,8 +66,8 @@ public class AppArticleController {
     }
 
     @PutMapping("/add-browse-count")
-    @Operation(summary = "澧炲姞鏂囩珷娴忚閲?)
-    @Parameter(name = "id", description = "鏂囩珷缂栧彿", example = "1024")
+    @Operation(summary = "增加文章浏览量")
+    @Parameter(name = "id", description = "文章编号", example = "1024")
     public CommonResult<Boolean> addBrowseCount(@RequestParam("id") Long id) {
         articleService.addArticleBrowseCount(id);
         return success(true);

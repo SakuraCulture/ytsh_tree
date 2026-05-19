@@ -12,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
+import java.time.LocalDateTime;
+
 /**
  * 操作日志 Service 实现类
  *
@@ -44,6 +46,23 @@ public class OperateLogServiceImpl implements OperateLogService {
     @Override
     public PageResult<OperateLogDO> getOperateLogPage(OperateLogPageReqDTO pageReqDTO) {
         return operateLogMapper.selectPage(pageReqDTO);
+    }
+
+    @Override
+    @SuppressWarnings("DuplicatedCode")
+    public Integer cleanOperateLog(Integer exceedDay, Integer deleteLimit) {
+        int count = 0;
+        LocalDateTime expireDate = LocalDateTime.now().minusDays(exceedDay);
+        // 循环删除，直到没有满足条件的数据
+        for (int i = 0; i < Short.MAX_VALUE; i++) {
+            int deleteCount = operateLogMapper.deleteByCreateTimeLt(expireDate, deleteLimit);
+            count += deleteCount;
+            // 达到删除预期条数，说明到底了
+            if (deleteCount < deleteLimit) {
+                break;
+            }
+        }
+        return count;
     }
 
 }

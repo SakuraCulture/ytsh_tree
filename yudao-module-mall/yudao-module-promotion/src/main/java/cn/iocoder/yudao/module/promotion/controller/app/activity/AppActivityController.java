@@ -25,7 +25,7 @@ import java.util.List;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
-@Tag(name = "鐢ㄦ埛 APP - 钀ラ攢娲诲姩") // 鐢ㄤ簬鎻愪緵璺ㄥ涓椿鍔ㄧ殑 HTTP 鎺ュ彛
+@Tag(name = "用户 APP - 营销活动") // 用于提供跨多个活动的 HTTP 接口
 @RestController
 @RequestMapping("/promotion/activity")
 @Validated
@@ -39,23 +39,23 @@ public class AppActivityController {
     private BargainActivityService bargainActivityService;
 
     @GetMapping("/list-by-spu-id")
-    @Operation(summary = "鑾峰緱鍗曚釜鍟嗗搧锛岃繘琛屼腑鐨勬嫾鍥€佺鏉€銆佺爫浠锋椿鍔ㄤ俊鎭?, description = "姣忕娲诲姩锛屽彧杩斿洖涓€涓?)
-    @Parameter(name = "spuId", description = "鍟嗗搧缂栧彿", required = true)
+    @Operation(summary = "获得单个商品，进行中的拼团、秒杀、砍价活动信息", description = "每种活动，只返回一个")
+    @Parameter(name = "spuId", description = "商品编号", required = true)
     public CommonResult<List<AppActivityRespVO>> getActivityListBySpuId(@RequestParam("spuId") Long spuId) {
         List<AppActivityRespVO> activityVOList = new ArrayList<>();
-        // 1. 鎷煎洟娲诲姩
+        // 1. 拼团活动
         CombinationActivityDO combinationActivity = combinationActivityService.getMatchCombinationActivityBySpuId(spuId);
         if (combinationActivity != null) {
             activityVOList.add(new AppActivityRespVO(combinationActivity.getId(), PromotionTypeEnum.COMBINATION_ACTIVITY.getType(),
                     combinationActivity.getName(), combinationActivity.getSpuId(), combinationActivity.getStartTime(), combinationActivity.getEndTime()));
         }
-        // 2. 绉掓潃娲诲姩
+        // 2. 秒杀活动
         SeckillActivityDO seckillActivity = seckillActivityService.getMatchSeckillActivityBySpuId(spuId);
         if (seckillActivity != null) {
             activityVOList.add(new AppActivityRespVO(seckillActivity.getId(), PromotionTypeEnum.SECKILL_ACTIVITY.getType(),
                     seckillActivity.getName(), seckillActivity.getSpuId(), seckillActivity.getStartTime(), seckillActivity.getEndTime()));
         }
-        // 3. 鐮嶄环娲诲姩
+        // 3. 砍价活动
         BargainActivityDO bargainActivity = bargainActivityService.getMatchBargainActivityBySpuId(spuId);
         if (bargainActivity != null) {
             activityVOList.add(new AppActivityRespVO(bargainActivity.getId(), PromotionTypeEnum.BARGAIN_ACTIVITY.getType(),

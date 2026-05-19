@@ -34,14 +34,14 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 import static cn.iocoder.yudao.framework.common.util.cache.CacheUtils.buildAsyncReloadingCache;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertList;
 
-@Tag(name = "鐢ㄦ埛 App - 鐮嶄环娲诲姩")
+@Tag(name = "用户 App - 砍价活动")
 @RestController
 @RequestMapping("/promotion/bargain-activity")
 @Validated
 public class AppBargainActivityController {
 
     /**
-     * {@link AppBargainActivityRespVO} 缂撳瓨锛岄€氳繃瀹冨紓姝ュ埛鏂?{@link #getBargainActivityList0(Integer)} 鎵€瑕佺殑棣栭〉鏁版嵁
+     * {@link AppBargainActivityRespVO} 缓存，通过它异步刷新 {@link #getBargainActivityList0(Integer)} 所要的首页数据
      */
     private final LoadingCache<Integer, List<AppBargainActivityRespVO>> bargainActivityListCache = buildAsyncReloadingCache(Duration.ofSeconds(10L),
             new CacheLoader<Integer, List<AppBargainActivityRespVO>>() {
@@ -62,8 +62,8 @@ public class AppBargainActivityController {
     private ProductSpuApi spuApi;
 
     @GetMapping("/list")
-    @Operation(summary = "鑾峰緱鐮嶄环娲诲姩鍒楄〃", description = "鐢ㄤ簬灏忕▼搴忛椤?)
-    @Parameter(name = "count", description = "闇€瑕佸睍绀虹殑鏁伴噺", example = "6")
+    @Operation(summary = "获得砍价活动列表", description = "用于小程序首页")
+    @Parameter(name = "count", description = "需要展示的数量", example = "6")
     public CommonResult<List<AppBargainActivityRespVO>> getBargainActivityList(
             @RequestParam(name = "count", defaultValue = "6") Integer count) {
         return success(bargainActivityListCache.getUnchecked(count));
@@ -74,32 +74,32 @@ public class AppBargainActivityController {
         if (CollUtil.isEmpty(list)) {
             return Collections.emptyList();
         }
-        // 鎷兼帴鏁版嵁
+        // 拼接数据
         List<ProductSpuRespDTO> spuList = spuApi.getSpuList(convertList(list, BargainActivityDO::getSpuId));
         return BargainActivityConvert.INSTANCE.convertAppList(list, spuList);
     }
 
     @GetMapping("/page")
-    @Operation(summary = "鑾峰緱鐮嶄环娲诲姩鍒嗛〉")
+    @Operation(summary = "获得砍价活动分页")
     public CommonResult<PageResult<AppBargainActivityRespVO>> getBargainActivityPage(PageParam pageReqVO) {
         PageResult<BargainActivityDO> result = bargainActivityService.getBargainActivityPage(pageReqVO);
         if (CollUtil.isEmpty(result.getList())) {
             return success(PageResult.empty(result.getTotal()));
         }
-        // 鎷兼帴鏁版嵁
+        // 拼接数据
         List<ProductSpuRespDTO> spuList = spuApi.getSpuList(convertList(result.getList(), BargainActivityDO::getSpuId));
         return success(BargainActivityConvert.INSTANCE.convertAppPage(result, spuList));
     }
 
     @GetMapping("/get-detail")
-    @Operation(summary = "鑾峰緱鐮嶄环娲诲姩璇︽儏")
-    @Parameter(name = "id", description = "娲诲姩缂栧彿", example = "1")
+    @Operation(summary = "获得砍价活动详情")
+    @Parameter(name = "id", description = "活动编号", example = "1")
     public CommonResult<AppBargainActivityDetailRespVO> getBargainActivityDetail(@RequestParam("id") Long id) {
         BargainActivityDO activity = bargainActivityService.getBargainActivity(id);
         if (activity == null) {
             return success(null);
         }
-        // 鎷兼帴鏁版嵁
+        // 拼接数据
         Integer successUserCount = bargainRecordService.getBargainRecordUserCount(id, BargainRecordStatusEnum.SUCCESS.getStatus());
         ProductSpuRespDTO spu = spuApi.getSpu(activity.getSpuId());
         return success(BargainActivityConvert.INSTANCE.convert(activity, successUserCount, spu));

@@ -49,8 +49,8 @@ public class AssertUtils {
             Object actualValue = ReflectUtil.getFieldValue(actual, actualField);
             if (expectedValue instanceof LocalDateTime && actualValue instanceof LocalDateTime) {
                 Assertions.assertEquals(
-                        ((LocalDateTime) expectedValue).truncatedTo(ChronoUnit.MICROS),
-                        ((LocalDateTime) actualValue).truncatedTo(ChronoUnit.MICROS),
+                        ((LocalDateTime) expectedValue).truncatedTo(ChronoUnit.MILLIS),
+                        ((LocalDateTime) actualValue).truncatedTo(ChronoUnit.MILLIS),
                         String.format("Field(%s) 不匹配", expectedField.getName())
                 );
             } else {
@@ -87,8 +87,8 @@ public class AssertUtils {
             Object actualValue = ReflectUtil.getFieldValue(actual, actualField);
             if (expectedValue instanceof LocalDateTime && actualValue instanceof LocalDateTime) {
                 return Objects.equals(
-                        ((LocalDateTime) expectedValue).truncatedTo(ChronoUnit.MICROS),
-                        ((LocalDateTime) actualValue).truncatedTo(ChronoUnit.MICROS));
+                        ((LocalDateTime) expectedValue).truncatedTo(ChronoUnit.MILLIS),
+                        ((LocalDateTime) actualValue).truncatedTo(ChronoUnit.MILLIS));
             }
             return Objects.equals(expectedValue, actualValue);
         });

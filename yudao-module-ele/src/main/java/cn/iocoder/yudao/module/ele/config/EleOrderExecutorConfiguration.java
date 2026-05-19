@@ -27,6 +27,18 @@ public class EleOrderExecutorConfiguration {
                 awaitTerminationSeconds, "ele-order-sync-");
     }
 
+    @Bean(name = "eleOrderDetailEnrichExecutor", destroyMethod = "shutdown")
+    public ThreadPoolTaskExecutor eleOrderDetailEnrichExecutor(
+            @Value("${ele.order.detail.pool.core-size:3}") int coreSize,
+            @Value("${ele.order.detail.pool.max-size:5}") int maxSize,
+            @Value("${ele.order.detail.pool.queue-capacity:200}") int queueCapacity,
+            @Value("${ele.order.detail.pool.keep-alive-seconds:60}") int keepAliveSeconds,
+            @Value("${ele.order.sync.shutdown.await-termination:true}") boolean awaitTermination,
+            @Value("${ele.order.sync.shutdown.await-termination-seconds:60}") int awaitTerminationSeconds) {
+        return buildExecutor(coreSize, maxSize, queueCapacity, keepAliveSeconds, awaitTermination,
+                awaitTerminationSeconds, "ele-order-detail-enrich-");
+    }
+
     @Bean(name = "eleStoreGoodsFullSyncExecutor", destroyMethod = "shutdown")
     public ThreadPoolTaskExecutor eleStoreGoodsFullSyncExecutor(
             @Value("${ele.store.goods.full-sync.pool.core-size:12}") int coreSize,

@@ -935,6 +935,33 @@ public class StoreServiceImpl implements StoreService {
         return result;
     }
 
+    @Override
+    public List<StoreSimpleRespVO> getAllSimpleList(Long platformId) {
+        List<StorePlatformInfoRespVO> cachedList = storePlatformCacheService.getStorePlatformListFromRedis();
+        if (CollUtil.isEmpty(cachedList)) {
+            return Collections.emptyList();
+        }
+
+        List<StoreSimpleRespVO> result = new ArrayList<>();
+        for (StorePlatformInfoRespVO cached : cachedList) {
+            if (platformId != null && !Objects.equals(platformId, cached.getPlatformId())) {
+                continue;
+            }
+            String normalizedPlatformStoreId = StrUtil.trim(cached.getPlatformStoreId());
+            if (StrUtil.isBlank(normalizedPlatformStoreId)) {
+                continue;
+            }
+            StoreSimpleRespVO vo = new StoreSimpleRespVO();
+            vo.setStoreId(cached.getStoreId());
+            vo.setStoreName(cached.getStoreName());
+            vo.setPlatformId(cached.getPlatformId());
+            vo.setPlatformStoreId(normalizedPlatformStoreId);
+            vo.setStoreStatus(cached.getStoreStatus());
+            result.add(vo);
+        }
+        return result;
+    }
+
     private Set<String> findMatchedStoreIds(String keyword) {
         if (StrUtil.isBlank(keyword)) {
             return Collections.emptySet();

@@ -4,16 +4,21 @@ import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
+import cn.iocoder.yudao.module.ele.config.EleOrderSchedulerProperties;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderFailRecordRespVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderScheduleConfigReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleOrderStatusLogRespVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.OrderBillVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.OrderPushSettingVO;
 import cn.iocoder.yudao.module.ele.dal.mysql.OrderMapper;
+import cn.iocoder.yudao.module.ele.dal.redis.OrderSyncProgressCache;
 import cn.iocoder.yudao.module.ele.exception.EleOrderSyncException;
 import cn.iocoder.yudao.module.ele.service.EleOrderService;
+import cn.iocoder.yudao.module.ele.service.EleBillSyncService;
+import cn.iocoder.yudao.module.ele.service.EleApiRateLimiter;
 import cn.iocoder.yudao.module.ele.service.ShutdownStateManager;
+import cn.iocoder.yudao.module.ele.service.dto.StoreSyncProgress;
 import cn.iocoder.yudao.module.ele.service.dto.EleCompensateProgressDTO;
-import cn.iocoder.yudao.module.ele.service.dto.EleSyncSubmitRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderDetailRespDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListReqDTO;
 import cn.iocoder.yudao.module.ele.service.dto.OrderListRespDTO;
@@ -22,13 +27,6 @@ import cn.iocoder.yudao.module.system.api.user.dto.AdminUserRespDTO;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONObject;
-import cn.hutool.json.JSONUtil;
-import cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobSaveReqVO;
-import cn.iocoder.yudao.module.infra.dal.dataobject.job.JobDO;
-import cn.iocoder.yudao.module.infra.enums.job.JobStatusEnum;
-import cn.iocoder.yudao.module.infra.service.job.JobService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,14 +37,11 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.annotation.security.PermitAll;
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 翱象订单管理接口
@@ -77,13 +72,16 @@ public class EleOrderController {
     private EleOrderService eleOrderService;
 
     @Resource
+    private EleBillSyncService eleBillSyncService;
+
+    @Resource
     private OrderMapper orderMapper;
 
     @Resource
     private ShutdownStateManager shutdownStateManager;
 
     @Resource
-    private JobService jobService;
+    private OrderSyncProgressCache orderSyncProgressCache;
 
     @Resource
     private AdminUserApi adminUserApi;
@@ -91,9 +89,11 @@ public class EleOrderController {
     @Resource
     private JdbcTemplate jdbcTemplate;
 
-    private static final String SYNC_JOB_HANDLER_NAME = "eleOrderSyncJob";
+    @Resource
+    private EleApiRateLimiter eleApiRateLimiter;
 
-    private static final Pattern CRON_INTERVAL_PATTERN = Pattern.compile("\\*/(\\d+)|0/(\\d+)");
+    @Resource
+    private EleOrderSchedulerProperties eleOrderSchedulerProperties;
 
     @GetMapping("/list")
     @Operation(summary = "翱象订单列表查询（本地数据库）")
@@ -105,10 +105,23 @@ public class EleOrderController {
             @Parameter(description = "起始时间(unix秒)") @RequestParam(required = false) Long startTime,
             @Parameter(description = "结束时间(unix秒)") @RequestParam(required = false) Long endTime,
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNo,
-            @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") Integer pageSize) {
+            @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") Integer pageSize,
+            @Parameter(description = "订单ID/订单小号") @RequestParam(required = false) String orderId,
+            @Parameter(description = "渠道订单号") @RequestParam(required = false) String channelOrderId,
+            @Parameter(description = "收货人") @RequestParam(required = false) String buyerName,
+            @Parameter(description = "手机号后缀") @RequestParam(required = false) String buyerPhoneSuffix,
+            @Parameter(description = "商品名称") @RequestParam(required = false) String skuName,
+            @Parameter(description = "渠道类型") @RequestParam(required = false) String channelType,
+            @Parameter(description = "订单类型/到达类型") @RequestParam(required = false) Integer arriveType,
+            @Parameter(description = "订单异常 normal/exception") @RequestParam(required = false) String exceptionType,
+            @Parameter(description = "配送类型 1平台配送 2自配送 3自提") @RequestParam(required = false) Integer deliveryMode,
+            @Parameter(description = "收货地址") @RequestParam(required = false) String address,
+            @Parameter(description = "排序") @RequestParam(required = false) String orderSort) {
 
         PageResult<OrderListRespDTO.OrderDetail> result = eleOrderService.getOrdersFromLocal(
-                platformStoreId, storeId, status, startTime, endTime, pageNo, pageSize);
+                platformStoreId, storeId, status, startTime, endTime, pageNo, pageSize,
+                orderId, channelOrderId, buyerName, buyerPhoneSuffix, skuName, channelType, arriveType,
+                exceptionType, deliveryMode, address, orderSort);
         return CommonResult.success(result);
     }
 
@@ -118,9 +131,20 @@ public class EleOrderController {
     public CommonResult<Map<Integer, Long>> getOrderStatusCounts(
             @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
             @Parameter(description = "起始时间(unix秒)") @RequestParam(required = false) Long startTime,
-            @Parameter(description = "结束时间(unix秒)") @RequestParam(required = false) Long endTime) {
+            @Parameter(description = "结束时间(unix秒)") @RequestParam(required = false) Long endTime,
+            @Parameter(description = "订单ID/订单小号") @RequestParam(required = false) String orderId,
+            @Parameter(description = "渠道订单号") @RequestParam(required = false) String channelOrderId,
+            @Parameter(description = "收货人") @RequestParam(required = false) String buyerName,
+            @Parameter(description = "手机号后缀") @RequestParam(required = false) String buyerPhoneSuffix,
+            @Parameter(description = "商品名称") @RequestParam(required = false) String skuName,
+            @Parameter(description = "渠道类型") @RequestParam(required = false) String channelType,
+            @Parameter(description = "订单类型/到达类型") @RequestParam(required = false) Integer arriveType,
+            @Parameter(description = "订单异常 normal/exception") @RequestParam(required = false) String exceptionType,
+            @Parameter(description = "配送类型 1平台配送 2自配送 3自提") @RequestParam(required = false) Integer deliveryMode,
+            @Parameter(description = "收货地址") @RequestParam(required = false) String address) {
 
-        Map<Integer, Long> counts = orderMapper.selectCountGroupByStatus(platformStoreId, startTime, endTime);
+        Map<Integer, Long> counts = eleOrderService.getStatusCounts(platformStoreId, startTime, endTime,
+                orderId, channelOrderId, buyerName, buyerPhoneSuffix, skuName, channelType, arriveType, exceptionType, deliveryMode, address);
         return CommonResult.success(counts);
     }
 
@@ -200,6 +224,26 @@ public class EleOrderController {
         return CommonResult.success(result);
     }
 
+    @GetMapping("/rate-limit/status")
+    @Operation(summary = "查询翱象接口全局限流状态")
+    @PermitAll
+    public CommonResult<java.util.Map<String, Object>> getApiRateLimitStatus() {
+        java.util.Map<String, Object> status = new java.util.LinkedHashMap<>();
+        int waitingCount = eleApiRateLimiter.getLocalWaitingCount();
+        java.util.List<EleApiRateLimiter.ApiRateLimitStatus> apiStatuses = eleApiRateLimiter.getApiStatuses();
+        status.put("globalQps", eleApiRateLimiter.getGlobalQps());
+        status.put("hasBacklog", eleApiRateLimiter.hasBacklog());
+        status.put("waitingCount", waitingCount);
+        status.put("localWaitingCount", waitingCount);
+        status.put("queueAlert", waitingCount > 0);
+        status.put("apis", apiStatuses);
+        status.put("message", waitingCount > 0
+                ? "翱象接口请求已触发接口级限流，后续请求正在暂停排队"
+                : "翱象接口限流状态正常");
+        status.put("timestamp", System.currentTimeMillis());
+        return CommonResult.success(status);
+    }
+
     @GetMapping("/sync/status")
     @Operation(summary = "查询当前同步任务状态")
     @PermitAll
@@ -244,48 +288,29 @@ public class EleOrderController {
         return CommonResult.success(true);
     }
 
-    @PostMapping("/sync")
-    @Operation(summary = "订单增量同步")
-    @PermitAll
-    public CommonResult<Boolean> syncOrders(
-            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
-            @Parameter(description = "saas商家编码") @RequestParam(required = false) String merchantCode,
-            @Parameter(description = "外部门店编码") @RequestParam(required = false) String erpStoreCode) {
-
-        eleOrderService.syncOrders(platformStoreId, merchantCode, erpStoreCode);
-        return CommonResult.success(true);
-    }
-
-    @PostMapping("/sync/all")
-    @Operation(summary = "手动触发全部门店订单同步")
-    @PermitAll
-    public CommonResult<Boolean> syncAllStoresOrders(
-            @Parameter(description = "起始时间(秒级时间戳)") @RequestParam(required = false) Long startTime,
-            @Parameter(description = "结束时间(秒级时间戳)") @RequestParam(required = false) Long endTime) {
-        eleOrderService.syncAllStores(startTime, endTime);
-        return CommonResult.success(true);
-    }
-
-    @PostMapping("/sync/submit")
-    @Operation(summary = "提交同步/补偿任务")
-    @PermitAll
-    public CommonResult<EleSyncSubmitRespDTO> submitSyncTask(
-            @Parameter(description = "平台门店ID") @RequestParam(required = false) String platformStoreId,
-            @Parameter(description = "saas商家编码") @RequestParam(required = false) String merchantCode,
-            @Parameter(description = "外部门店编码") @RequestParam(required = false) String erpStoreCode,
-            @Parameter(description = "起始时间") @RequestParam(required = false) Long startTime,
-            @Parameter(description = "结束时间") @RequestParam(required = false) Long endTime,
-            @Parameter(description = "是否补偿") @RequestParam(defaultValue = "false") boolean compensate) {
-        return CommonResult.success(eleOrderService.submitSyncTask(platformStoreId, merchantCode, erpStoreCode,
-                startTime, endTime, compensate));
-    }
-
     @GetMapping("/sync/progress")
     @Operation(summary = "查询同步/补偿进度")
     @PreAuthorize("@ss.hasPermission('ele:order:query')")
     public CommonResult<EleCompensateProgressDTO> getSyncProgress(
             @Parameter(description = "任务ID", required = true) @RequestParam String taskId) {
         return CommonResult.success(eleOrderService.getSyncProgress(taskId));
+    }
+
+    @GetMapping("/sync/redis-progress")
+    @Operation(summary = "查询Redis缓存同步进度")
+    @PermitAll
+    public CommonResult<java.util.Map<String, Object>> getRedisSyncProgress(
+            @Parameter(description = "批次ID") @RequestParam String batchId,
+            @Parameter(description = "门店ID") @RequestParam(required = false) String platformStoreId) {
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        if (platformStoreId != null) {
+            StoreSyncProgress progress = orderSyncProgressCache.getStoreProgress(batchId, platformStoreId);
+            result.put("storeProgress", progress);
+        } else {
+            java.util.List<StoreSyncProgress> progressList = orderSyncProgressCache.getBatchProgress(batchId);
+            result.put("storeProgressList", progressList);
+        }
+        return CommonResult.success(result);
     }
 
     @GetMapping("/fail-record/list")
@@ -388,45 +413,17 @@ public class EleOrderController {
     @PermitAll
     public CommonResult<Map<String, Object>> getSyncScheduleConfig() {
         Map<String, Object> result = new LinkedHashMap<>();
-        JobDO job = findSyncJob();
-        if (job == null) {
-            result.put("exists", false);
-            return CommonResult.success(result);
-        }
-        result.put("exists", true);
-        result.put("enabled", JobStatusEnum.NORMAL.getStatus().equals(job.getStatus()));
-        result.put("cronExpression", job.getCronExpression());
-        result.put("jobId", job.getId());
-        result.put("jobStatus", job.getStatus());
+        long intervalSeconds = eleOrderSchedulerProperties.getIntervalSeconds();
+        long intervalHours = Math.max(1, intervalSeconds / 3600);
 
-        String handlerParam = job.getHandlerParam();
-        if (StrUtil.isNotBlank(handlerParam)) {
-            try {
-                JSONObject paramJson = JSONUtil.parseObj(handlerParam);
-                result.put("scheduleType", paramJson.getStr("scheduleType", "time"));
-                if (paramJson.containsKey("timePoints")) {
-                    result.put("timePoints", paramJson.get("timePoints"));
-                }
-                if (paramJson.containsKey("daysOfMonth")) {
-                    result.put("daysOfMonth", paramJson.get("daysOfMonth"));
-                }
-                if (paramJson.containsKey("dayOfMonthTime")) {
-                    result.put("dayOfMonthTime", paramJson.getStr("dayOfMonthTime"));
-                }
-                if (paramJson.containsKey("weekDays")) {
-                    result.put("weekDays", paramJson.get("weekDays"));
-                }
-                if (paramJson.containsKey("weekDayTime")) {
-                    result.put("weekDayTime", paramJson.getStr("weekDayTime"));
-                }
-            } catch (Exception e) {
-                result.put("scheduleType", "time");
-                result.put("intervalMinutes", parseIntervalFromCron(job.getCronExpression()));
-            }
-        } else {
-            result.put("scheduleType", "time");
-            result.put("intervalMinutes", parseIntervalFromCron(job.getCronExpression()));
-        }
+        result.put("exists", true);
+        result.put("enabled", eleOrderSchedulerProperties.isEnabled());
+        result.put("scheduleType", "interval");
+        result.put("intervalSeconds", intervalSeconds);
+        result.put("intervalHours", intervalHours);
+        result.put("initialDelaySeconds", eleOrderSchedulerProperties.getInitialDelaySeconds());
+        result.put("cronExpression", null);
+        result.put("source", "application-config");
         return CommonResult.success(result);
     }
 
@@ -435,88 +432,7 @@ public class EleOrderController {
     @PermitAll
     public CommonResult<Boolean> updateSyncScheduleConfig(
             @RequestBody EleOrderScheduleConfigReqVO reqVO) {
-        String cronExpression = reqVO.getCronExpression();
-
-        Map<String, Object> extParam = new HashMap<>();
-        extParam.put("scheduleType", reqVO.getScheduleType());
-        extParam.put("enabled", reqVO.getEnabled());
-        if (reqVO.getTimePoints() != null && !reqVO.getTimePoints().isEmpty()) {
-            extParam.put("timePoints", reqVO.getTimePoints());
-        }
-        if (reqVO.getDaysOfMonth() != null && !reqVO.getDaysOfMonth().isEmpty()) {
-            extParam.put("daysOfMonth", reqVO.getDaysOfMonth());
-        }
-        if (reqVO.getDayOfMonthTime() != null) {
-            extParam.put("dayOfMonthTime", reqVO.getDayOfMonthTime());
-        }
-        if (reqVO.getWeekDays() != null && !reqVO.getWeekDays().isEmpty()) {
-            extParam.put("weekDays", reqVO.getWeekDays());
-        }
-        if (reqVO.getWeekDayTime() != null) {
-            extParam.put("weekDayTime", reqVO.getWeekDayTime());
-        }
-        if (reqVO.getIntervalStartTime() != null) {
-            extParam.put("intervalStartTime", reqVO.getIntervalStartTime());
-        }
-        if (reqVO.getIntervalHours() != null) {
-            extParam.put("intervalHours", reqVO.getIntervalHours());
-        }
-        String handlerParam = JSONUtil.toJsonStr(extParam);
-
-        try {
-            JobDO job = findSyncJob();
-            if (job != null) {
-                jobService.deleteJob(job.getId());
-            }
-
-            if (StrUtil.isNotBlank(cronExpression)) {
-                JobSaveReqVO createReqVO = new JobSaveReqVO();
-                createReqVO.setName("翱象订单定时同步");
-                createReqVO.setHandlerName(SYNC_JOB_HANDLER_NAME);
-                createReqVO.setHandlerParam(handlerParam);
-                createReqVO.setCronExpression(cronExpression);
-                createReqVO.setRetryCount(0);
-                createReqVO.setRetryInterval(0);
-                createReqVO.setMonitorTimeout(0);
-                jobService.createJob(createReqVO);
-
-                if (!reqVO.getEnabled()) {
-                    job = findSyncJob();
-                    if (job != null) {
-                        jobService.updateJobStatus(job.getId(), JobStatusEnum.STOP.getStatus());
-                    }
-                }
-            }
-
-            return CommonResult.success(true);
-        } catch (Exception e) {
-            return CommonResult.error(500, "更新定时同步配置失败: " + e.getMessage());
-        }
-    }
-
-    private JobDO findSyncJob() {
-        cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO pageReq = new cn.iocoder.yudao.module.infra.controller.admin.job.vo.job.JobPageReqVO();
-        pageReq.setHandlerName(SYNC_JOB_HANDLER_NAME);
-        pageReq.setPageNo(1);
-        pageReq.setPageSize(1);
-        PageResult<JobDO> pageResult = jobService.getJobPage(pageReq);
-        List<JobDO> list = pageResult.getList();
-        return (list != null && !list.isEmpty()) ? list.get(0) : null;
-    }
-
-    private Integer parseIntervalFromCron(String cronExpression) {
-        if (cronExpression == null)
-            return null;
-        Matcher matcher = CRON_INTERVAL_PATTERN.matcher(cronExpression);
-        if (matcher.find()) {
-            String group = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
-            return Integer.parseInt(group);
-        }
-        return null;
-    }
-
-    private String buildCronFromInterval(int intervalMinutes) {
-        return "0 */" + intervalMinutes + " * * * ?";
+        return CommonResult.error(400, "定时同步间隔已改为后端配置文件控制，请修改 ele.order.scheduler 配置后重启服务");
     }
 
     @GetMapping("/list/all")
@@ -616,6 +532,15 @@ public class EleOrderController {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    @GetMapping("/bill-info")
+    @Operation(summary = "查询订单账单信息")
+    @Parameter(name = "orderId", description = "订单号", required = true, example = "123456")
+    @PreAuthorize("@ss.hasPermission('ele:order:query')")
+    public CommonResult<OrderBillVO> getOrderBillInfo(@RequestParam("orderId") String orderId) {
+        OrderBillVO billInfo = eleBillSyncService.getOrderBillInfo(orderId);
+        return CommonResult.success(billInfo);
     }
 
 }

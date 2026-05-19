@@ -50,6 +50,8 @@ public class EleOrderFailRecord {
 
     private String erpStoreCode;
 
+    private String tenantId;
+
     private Long createTime;
 
     private Long updateTime;

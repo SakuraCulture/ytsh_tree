@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.ele.service.executor;
 
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO;
+import cn.iocoder.yudao.module.ele.service.EleApiRateLimiter;
 import cn.iocoder.yudao.module.ele.service.ShutdownStateManager;
 import cn.iocoder.yudao.module.ele.service.threadpool.TaskRateLimiter;
 import jakarta.annotation.Resource;
@@ -37,9 +38,18 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
     @Resource
     private TaskRateLimiter rateLimiter;
 
+    @Resource
+    private EleApiRateLimiter eleApiRateLimiter;
+
     /** 每批提交的门店数量 */
     @Value("${ele.order.sync.batch-size:20}")
     private int batchSize;
+
+    @Value("${ele.order.sync.store-concurrent-enabled:false}")
+    private boolean storeConcurrentEnabled;
+
+    @Value("${ele.order.sync.store-concurrency:1}")
+    private int storeConcurrency;
 
     public EleOrderSyncTaskExecutorImpl(
             @Qualifier("eleOrderSyncExecutor") ThreadPoolTaskExecutor executor,
@@ -62,7 +72,8 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
             return new SyncResult(0, 0, 0, 0, List.of(), true);
         }
 
-        log.info("开始同步{}家门店订单，分批提交，每批{}家...", storeCount, batchSize);
+        log.info("开始同步{}家门店订单，门店并发enabled={}，并发数={}，每批{}家...",
+                storeCount, storeConcurrentEnabled, Math.max(1, storeConcurrency), batchSize);
 
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failCount = new AtomicInteger(0);
@@ -84,16 +95,26 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
             }
         };
 
+        if (!storeConcurrentEnabled || storeConcurrency <= 1) {
+            executeSerial(validStores, forcedStartTime, forcedEndTime, syncAction, successCount, failCount, failedStores);
+            long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+            log.info("门店订单串行同步完成，耗时{}秒，成功{}家，失败{}家",
+                    elapsed, successCount.get(), failCount.get());
+            return new SyncResult(storeCount, successCount.get(), failCount.get(),
+                    elapsed, failedStores, true);
+        }
+
         // 分批提交任务
-        int totalBatches = (storeCount + batchSize - 1) / batchSize;
+        int concurrentBatchSize = Math.max(1, Math.min(batchSize, storeConcurrency));
+        int totalBatches = (storeCount + concurrentBatchSize - 1) / concurrentBatchSize;
         for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
             if (shutdownStateManager.isShuttingDown()) {
                 log.warn("【订单同步】应用正在关闭，中断批量同步，剩余{}批未提交", totalBatches - batchIndex);
                 break;
             }
 
-            int fromIndex = batchIndex * batchSize;
-            int toIndex = Math.min(fromIndex + batchSize, storeCount);
+            int fromIndex = batchIndex * concurrentBatchSize;
+            int toIndex = Math.min(fromIndex + concurrentBatchSize, storeCount);
             List<StorePlatformRespVO> batchStores = validStores.subList(fromIndex, toIndex);
 
             log.info("提交第{}/{}批任务，门店数: {}", batchIndex + 1, totalBatches, batchStores.size());
@@ -157,6 +178,28 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
         this.syncDelegate = delegate;
     }
 
+    private void executeSerial(List<StorePlatformRespVO> validStores, Long forcedStartTime, Long forcedEndTime,
+            Consumer<StorePlatformRespVO> syncAction, AtomicInteger successCount, AtomicInteger failCount,
+            List<String> failedStores) {
+        int total = validStores.size();
+        for (int i = 0; i < total; i++) {
+            StorePlatformRespVO store = validStores.get(i);
+            if (shutdownStateManager.isShuttingDown()) {
+                log.warn("【门店串行同步】应用正在关闭，跳过剩余{}家门店", total - i);
+                break;
+            }
+            waitForApiBacklogDrainedBeforeSubmit();
+            log.info("【门店串行同步】开始同步第{}/{}个门店，platformStoreId={}",
+                    i + 1, total, store.getPlatformStoreId());
+            long storeStart = System.currentTimeMillis();
+            syncAction.accept(store);
+            log.info("【门店串行同步】第{}/{}个门店处理结束，platformStoreId={}，耗时{}秒，累计成功{}家，失败{}家",
+                    i + 1, total, store.getPlatformStoreId(),
+                    (System.currentTimeMillis() - storeStart) / 1000,
+                    successCount.get(), failCount.get());
+        }
+    }
+
     private void doSyncStore(StorePlatformRespVO store, Long forcedStartTime, Long forcedEndTime) {
         if (syncDelegate == null) {
             throw new IllegalStateException("StoreSyncDelegate 未设置");
@@ -165,6 +208,8 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
     }
 
     private void waitForSubmissionPermit() {
+        waitForApiBacklogDrainedBeforeSubmit();
+
         int waitCount = 0;
         while (!rateLimiter.tryAcquire()) {
             waitCount++;
@@ -184,6 +229,29 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("等待限流许可时被中断", e);
             }
+        }
+    }
+
+    private void waitForApiBacklogDrainedBeforeSubmit() {
+        boolean logged = false;
+        while (eleApiRateLimiter.hasBacklog()) {
+            if (shutdownStateManager.isShuttingDown()) {
+                throw new RuntimeException("应用正在关闭，停止等待翱象接口背压恢复");
+            }
+            if (!logged) {
+                log.warn("【翱象背压】门店任务提交暂停，接口请求正在排队，waiting={}",
+                        eleApiRateLimiter.getLocalWaitingCount());
+                logged = true;
+            }
+            try {
+                TimeUnit.MILLISECONDS.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("等待翱象接口排队清空时被中断", e);
+            }
+        }
+        if (logged) {
+            log.info("【翱象背压】接口排队清空，恢复门店任务提交");
         }
     }
 

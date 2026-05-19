@@ -67,6 +67,7 @@ public class SaasOrderGetResult {
         private String latitude;
         private String user_id;
         private Integer arrive_type;
+        private Integer estimated_income;
 
         public String getOrder_id() {
             return order_id;
@@ -338,6 +339,14 @@ public class SaasOrderGetResult {
 
         public void setArrive_type(Integer arrive_type) {
             this.arrive_type = arrive_type;
+        }
+
+        public Integer getEstimated_income() {
+            return estimated_income;
+        }
+
+        public void setEstimated_income(Integer estimated_income) {
+            this.estimated_income = estimated_income;
         }
     }
 

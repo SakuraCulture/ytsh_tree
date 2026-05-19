@@ -330,6 +330,14 @@ public interface StoreService {
      */
     List<StoreSimpleRespVO> getPlatformStoreSimpleList(Long platformId, List<String> platformStoreIds);
 
+    /**
+     * 获取所有门店简单信息列表
+     *
+     * @param platformId 平台ID（可选）
+     * @return 门店简单信息列表
+     */
+    List<StoreSimpleRespVO> getAllSimpleList(Long platformId);
+
     StoreSupplyLineRespVO getStoreSupplyLineSummary(String storeId);
 
     /**

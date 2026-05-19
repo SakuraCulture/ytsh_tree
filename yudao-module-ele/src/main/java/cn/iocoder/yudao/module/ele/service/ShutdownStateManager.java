@@ -48,6 +48,11 @@ public class ShutdownStateManager {
     private volatile boolean syncingBatch = false;
 
     /**
+     * 当前正在执行的补偿任务数
+     */
+    private final AtomicInteger activeCompensateTasks = new AtomicInteger(0);
+
+    /**
      * 当前正在同步的门店列表
      */
     private final List<String> syncingStores = new CopyOnWriteArrayList<>();
@@ -229,7 +234,7 @@ public class ShutdownStateManager {
      */
     public void registerStoreSyncFinished(String platformStoreId, boolean success) {
         syncingStores.removeIf(s -> s.contains(platformStoreId));
-        currentSyncingStoreCount.decrementAndGet();
+        currentSyncingStoreCount.updateAndGet(count -> Math.max(0, count - 1));
         completedStoreCount.incrementAndGet();
         if (success) {
             successStoreCount.incrementAndGet();

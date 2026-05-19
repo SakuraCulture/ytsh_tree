@@ -30,6 +30,8 @@ public class MeEleRetailSaasOrderListDetailResDto {
     private String erp_store_code;
     private String longitude;
     private String latitude;
+    private Integer arrive_type;
+    private Integer estimated_income;
 
     public String getOrder_id() {
         return order_id;
@@ -253,5 +255,21 @@ public class MeEleRetailSaasOrderListDetailResDto {
 
     public void setLatitude(String latitude) {
         this.latitude = latitude;
+    }
+
+    public Integer getArrive_type() {
+        return arrive_type;
+    }
+
+    public void setArrive_type(Integer arrive_type) {
+        this.arrive_type = arrive_type;
+    }
+
+    public Integer getEstimated_income() {
+        return estimated_income;
+    }
+
+    public void setEstimated_income(Integer estimated_income) {
+        this.estimated_income = estimated_income;
     }
 }

@@ -46,6 +46,23 @@ public class EleOrderRetryKafkaProducer {
         return future;
     }
 
+    public boolean sendRetryMessageAndWait(OrderRetryMessage message) {
+        String orderId = message.getOrderId();
+        log.info("【重试Kafka】发送重试消息到topic={}, orderId={}, retryCount={}",
+                retryTopic, orderId, message.getRetryCount());
+
+        try {
+            CompletableFuture<SendResult<String, OrderRetryMessage>> future = kafkaTemplate.send(retryTopic, orderId, message);
+            SendResult<String, OrderRetryMessage> result = future.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            log.info("【重试Kafka】重试消息发送成功，orderId={}, partition={}, offset={}",
+                    orderId, result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
+            return true;
+        } catch (Exception ex) {
+            log.error("【重试Kafka】重试消息发送失败，orderId={}, error={}", orderId, ex.getMessage());
+            return false;
+        }
+    }
+
     public CompletableFuture<SendResult<String, OrderRetryMessage>> sendDeadLetterMessage(OrderRetryMessage message) {
         String orderId = message.getOrderId();
         log.warn("【死信Kafka】发送死信消息到topic={}, orderId={}, retryCount={}",

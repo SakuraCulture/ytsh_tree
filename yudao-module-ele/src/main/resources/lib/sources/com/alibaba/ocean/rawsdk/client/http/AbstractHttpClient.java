@@ -45,6 +45,8 @@ public class AbstractHttpClient {
             conn.setDoInput(true);
             conn.setDoOutput(true);
             RequestPolicy clientPolicy = request.getOceanRequestPolicy();
+            conn.setConnectTimeout(clientPolicy.getTimeout());
+            conn.setReadTimeout(clientPolicy.getTimeout());
             Map<String, String> clientHttpHeader = HttpSupport.buildHttpHeader(clientPolicy);
             for (Map.Entry<String, String> entry : clientHttpHeader.entrySet()) {
                 conn.setRequestProperty(entry.getKey(), entry.getValue());

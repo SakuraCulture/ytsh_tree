@@ -17,7 +17,7 @@ import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -60,6 +60,10 @@ public class EleOrderKafkaConfig {
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 300000);
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30000);
+        props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 10000);
         if (!jaasConfig.isEmpty()) {
             props.put("sasl.mechanism", saslMechanism);
             props.put("security.protocol", securityProtocol);
@@ -69,9 +73,26 @@ public class EleOrderKafkaConfig {
     }
 
     private DefaultErrorHandler createErrorHandler() {
-        return new DefaultErrorHandler(
-                (record, ex) -> log.error("【Kafka消费】消费失败，record={}, error={}", record, ex.getMessage()),
-                new FixedBackOff(1000L, 1L));
+        ExponentialBackOff backOff = new ExponentialBackOff(
+                1000L,
+                2.0);
+        backOff.setMaxInterval(60000L);
+        backOff.setMaxElapsedTime(300000L);
+
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(
+                (record, ex) -> log.error("【Kafka消费】消费失败，record={}, error={}", record, ex.getMessage(), ex),
+                backOff);
+
+        errorHandler.setRetryListeners((record, ex, deliveryAttempt) ->
+                log.warn("【Kafka重试】第{}次重试失败，topic={}, partition={}, offset={}, error={}",
+                        deliveryAttempt,
+                        record.topic(),
+                        record.partition(),
+                        record.offset(),
+                        ex.getMessage())
+        );
+
+        return errorHandler;
     }
 
     @Bean

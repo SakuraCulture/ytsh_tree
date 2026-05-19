@@ -5,6 +5,7 @@ import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -14,6 +15,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class EleTrafficMetricsCollector {
@@ -25,253 +27,180 @@ public class EleTrafficMetricsCollector {
     private static final String STATS_KEY_PREFIX = TRAFFIC_KEY_PREFIX + "stats:";
     private static final String HOURLY_KEY_PREFIX = TRAFFIC_KEY_PREFIX + "hourly:";
     private static final String RPS_KEY_PREFIX = TRAFFIC_KEY_PREFIX + "api-rps:";
-    private static final int RETENTION_DAYS = 3;
-    private static final int MAX_RETRY_ATTEMPTS = 3;
-    private static final long RETRY_BASE_DELAY_MS = 100L;
-    private static final long DEGRADATION_CHECK_INTERVAL_MS = 30_000L;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private EleTrafficMetricsProperties properties;
 
     private volatile boolean redisDegraded = false;
     private volatile long lastDegradationTime = 0L;
     private final ConcurrentHashMap<String, AtomicInteger> fallbackStatsCounter = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicInteger>> fallbackHourlyCounter = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicLong> aggregateStatsCounter = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicLong>> aggregateHourlyCounter = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicLong> aggregateRpsCounter = new ConcurrentHashMap<>();
 
     public void recordRequest(String apiCode, String traceId, long requestBytes, long startTime) {
+        if (!properties.isEnabled()) {
+            return;
+        }
         try {
-            String recordKey = traceId != null ? traceId : apiCode + "_" + UUID.randomUUID().toString().substring(0, 8);
             String dateStr = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
-
-            RealtimeRecord record = new RealtimeRecord();
-            record.setApiCode(apiCode);
-            record.setTraceId(traceId);
-            record.setRequestBytes(requestBytes);
-            record.setTimestamp(LocalDateTime.now());
-            record.setStartTime(startTime);
-
-            String redisKey = RECORD_KEY_PREFIX + dateStr + ":" + recordKey;
-            stringRedisTemplate.opsForValue().set(redisKey, JSONUtil.toJsonStr(record), RETENTION_DAYS, TimeUnit.DAYS);
-
             incrementStats(dateStr, "request_count", 1);
             incrementStats(dateStr, "request_bytes", requestBytes);
             updateMaxStats(dateStr, "max_request_bytes", requestBytes);
-
             String hour = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH"));
-            incrementHourlyStats(dateStr, hour, requestBytes, 0, false, false, 0);
-
+            aggregateHourlyStats(dateStr, hour, requestBytes, 0, true, false, 0);
             incrementApiRpsCounter(apiCode);
-
-            log.info("[流量采集] apiCode={}, key={}, requestSize={} bytes, date={}", apiCode, recordKey, requestBytes,
-                    dateStr);
         } catch (Exception e) {
-            log.error("[流量采集] 记录请求失败, apiCode={}, error={}", apiCode, e.getMessage(), e);
+            log.debug("[流量采集] 请求采集降级, apiCode={}, error={}", apiCode, e.getMessage());
         }
     }
 
     public void recordResponse(String traceId, long responseBytes, boolean success, int durationMs) {
+        if (!properties.isEnabled()) {
+            return;
+        }
         try {
             String dateStr = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
-            String key = traceId != null ? traceId : "unknown_" + UUID.randomUUID().toString().substring(0, 8);
-
-            String redisKey = RECORD_KEY_PREFIX + dateStr + ":" + key;
-            String recordJson = stringRedisTemplate.opsForValue().get(redisKey);
-
-            RealtimeRecord record;
-            boolean isNewRecord = false;
-
-            if (recordJson == null) {
-                record = new RealtimeRecord();
-                record.setTraceId(traceId);
-                record.setTimestamp(LocalDateTime.now());
-                isNewRecord = true;
-            } else {
-                record = JSONUtil.toBean(recordJson, RealtimeRecord.class);
-            }
-
-            record.setResponseBytes(responseBytes);
-            record.setDurationMs(durationMs);
-            record.setSuccess(success);
-
-            stringRedisTemplate.opsForValue().set(redisKey, JSONUtil.toJsonStr(record), RETENTION_DAYS, TimeUnit.DAYS);
-
             incrementStats(dateStr, "response_bytes", responseBytes);
             incrementStats(dateStr, "total_duration_ms", durationMs);
             updateMaxStats(dateStr, "max_response_bytes", responseBytes);
-
-            if (success) {
-                incrementStats(dateStr, "success_count", 1);
-                log.info("[流量采集] traceId={}, responseSize={} bytes, success={}, duration={}ms, date={}",
-                        traceId, responseBytes, success, durationMs, dateStr);
-            } else {
-                incrementStats(dateStr, "failed_count", 1);
-                log.warn("[流量采集] 失败 traceId={}, responseSize={} bytes, duration={}ms, date={}",
-                        traceId, responseBytes, durationMs, dateStr);
-            }
-
+            incrementStats(dateStr, success ? "success_count" : "failed_count", 1);
             String hour = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH"));
-            if (isNewRecord) {
-                incrementHourlyStats(dateStr, hour, 0, responseBytes, success, true, durationMs);
-            } else {
-                incrementHourlyStats(dateStr, hour, record.getRequestBytes(), responseBytes, success, true, durationMs);
-            }
+            aggregateHourlyStats(dateStr, hour, 0, responseBytes, false, success, durationMs);
         } catch (Exception e) {
-            log.error("[流量采集] 记录响应失败, traceId={}, error={}", traceId, e.getMessage(), e);
+            log.debug("[流量采集] 响应采集降级, traceId={}, error={}", traceId, e.getMessage());
         }
     }
 
     private void incrementStats(String dateStr, String field, long value) {
-        String statsKey = STATS_KEY_PREFIX + dateStr;
-        String counterKey = statsKey + ":" + field;
-
-        if (redisDegraded) {
-            fallbackStatsCounter.computeIfAbsent(counterKey, k -> new AtomicInteger(0)).addAndGet((int) value);
-            return;
-        }
-
-        try {
-            executeWithRetry(() -> {
-                stringRedisTemplate.opsForHash().increment(statsKey, field, value);
-                stringRedisTemplate.expire(statsKey, RETENTION_DAYS, TimeUnit.DAYS);
-                return null;
-            }, "incrementStats:" + field);
-        } catch (Exception e) {
-            log.warn("[流量采集] Redis操作失败，启用降级，field={}, error={}", field, e.getMessage());
-            markRedisDegraded();
-            fallbackStatsCounter.computeIfAbsent(counterKey, k -> new AtomicInteger(0)).addAndGet((int) value);
-        }
+        aggregateStatsCounter.computeIfAbsent(dateStr + ":" + field, k -> new AtomicLong(0)).addAndGet(value);
     }
 
     private void updateMaxStats(String dateStr, String field, long value) {
-        String statsKey = STATS_KEY_PREFIX + dateStr;
+        aggregateStatsCounter.compute(dateStr + ":" + field, (key, old) -> {
+            AtomicLong counter = old == null ? new AtomicLong(0) : old;
+            counter.accumulateAndGet(value, Math::max);
+            return counter;
+        });
+    }
 
-        if (redisDegraded) {
-            return;
+    private void aggregateHourlyStats(String dateStr, String hour, long requestBytes, long responseBytes,
+            boolean requestEvent, boolean success, int durationMs) {
+        String hourlyKey = HOURLY_KEY_PREFIX + dateStr + ":" + hour;
+        ConcurrentHashMap<String, AtomicLong> fields = aggregateHourlyCounter.computeIfAbsent(hourlyKey,
+                key -> new ConcurrentHashMap<>());
+        if (requestEvent) {
+            fields.computeIfAbsent("request_count", key -> new AtomicLong(0)).incrementAndGet();
         }
-
-        try {
-            executeWithRetry(() -> {
-                String currentMaxStr = (String) stringRedisTemplate.opsForHash().get(statsKey, field);
-                long currentMax = currentMaxStr != null ? Long.parseLong(currentMaxStr) : 0L;
-                if (value > currentMax) {
-                    stringRedisTemplate.opsForHash().put(statsKey, field, String.valueOf(value));
-                    stringRedisTemplate.expire(statsKey, RETENTION_DAYS, TimeUnit.DAYS);
-                }
-                return null;
-            }, "updateMaxStats:" + field);
-        } catch (Exception e) {
-            log.warn("[流量采集] Redis操作失败，启用降级，field={}, error={}", field, e.getMessage());
-            markRedisDegraded();
+        if (requestBytes > 0) {
+            fields.computeIfAbsent("request_bytes", key -> new AtomicLong(0)).addAndGet(requestBytes);
+        }
+        if (responseBytes > 0) {
+            fields.computeIfAbsent("response_bytes", key -> new AtomicLong(0)).addAndGet(responseBytes);
+        }
+        if (durationMs > 0) {
+            fields.computeIfAbsent("total_duration_ms", key -> new AtomicLong(0)).addAndGet(durationMs);
+            fields.computeIfAbsent(success ? "success_count" : "failed_count", key -> new AtomicLong(0)).incrementAndGet();
         }
     }
 
     private void incrementHourlyStats(String dateStr, String hour, long requestBytes, long responseBytes,
             boolean success, boolean isComplete, int durationMs) {
-        if (!isComplete) {
-            return;
-        }
-
-        String hourlyKey = HOURLY_KEY_PREFIX + dateStr + ":" + hour;
-
-        if (redisDegraded) {
-            String counterKey = hourlyKey;
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("request_count", k -> new AtomicInteger(0)).incrementAndGet();
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("request_bytes", k -> new AtomicInteger(0)).addAndGet((int) requestBytes);
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("response_bytes", k -> new AtomicInteger(0)).addAndGet((int) responseBytes);
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("total_duration_ms", k -> new AtomicInteger(0)).addAndGet(durationMs);
-            if (success) {
-                fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                        .computeIfAbsent("success_count", k -> new AtomicInteger(0)).incrementAndGet();
-            } else {
-                fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                        .computeIfAbsent("failed_count", k -> new AtomicInteger(0)).incrementAndGet();
-            }
-            return;
-        }
-
-        try {
-            executeWithRetry(() -> {
-                stringRedisTemplate.opsForHash().increment(hourlyKey, "request_count", 1);
-                stringRedisTemplate.opsForHash().increment(hourlyKey, "request_bytes", requestBytes);
-                stringRedisTemplate.opsForHash().increment(hourlyKey, "response_bytes", responseBytes);
-                stringRedisTemplate.opsForHash().increment(hourlyKey, "total_duration_ms", durationMs);
-
-                if (success) {
-                    stringRedisTemplate.opsForHash().increment(hourlyKey, "success_count", 1);
-                } else {
-                    stringRedisTemplate.opsForHash().increment(hourlyKey, "failed_count", 1);
-                }
-                stringRedisTemplate.expire(hourlyKey, RETENTION_DAYS, TimeUnit.DAYS);
-                return null;
-            }, "incrementHourlyStats:hour" + hour);
-        } catch (Exception e) {
-            log.warn("[流量采集] Redis操作失败，启用降级，hour={}, error={}", hour, e.getMessage());
-            markRedisDegraded();
-
-            String counterKey = hourlyKey;
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("request_count", k -> new AtomicInteger(0)).incrementAndGet();
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("request_bytes", k -> new AtomicInteger(0)).addAndGet((int) requestBytes);
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("response_bytes", k -> new AtomicInteger(0)).addAndGet((int) responseBytes);
-            fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                    .computeIfAbsent("total_duration_ms", k -> new AtomicInteger(0)).addAndGet(durationMs);
-            if (success) {
-                fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                        .computeIfAbsent("success_count", k -> new AtomicInteger(0)).incrementAndGet();
-            } else {
-                fallbackHourlyCounter.computeIfAbsent(counterKey, k -> new ConcurrentHashMap<>())
-                        .computeIfAbsent("failed_count", k -> new AtomicInteger(0)).incrementAndGet();
-            }
-        }
+        aggregateHourlyStats(dateStr, hour, requestBytes, responseBytes, !isComplete, success, durationMs);
     }
 
     private <T> T executeWithRetry(RetryableOperation<T> operation, String operationName) throws Exception {
-        int attempts = 0;
-        Exception lastException = null;
-
-        while (attempts < MAX_RETRY_ATTEMPTS) {
-            try {
-                return operation.execute();
-            } catch (Exception e) {
-                lastException = e;
-                attempts++;
-
-                if (attempts >= MAX_RETRY_ATTEMPTS) {
-                    break;
-                }
-
-                long delay = RETRY_BASE_DELAY_MS * (long) Math.pow(2, attempts - 1);
-                log.debug("[流量采集] 第{}次重试，操作={}, 延迟={}ms, error={}", attempts, operationName, delay, e.getMessage());
-
-                try {
-                    Thread.sleep(delay);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("重试被中断", ie);
-                }
-            }
-        }
-
-        throw lastException;
+        return operation.execute();
     }
 
     private void markRedisDegraded() {
         long now = System.currentTimeMillis();
-        if (!redisDegraded || (now - lastDegradationTime) > DEGRADATION_CHECK_INTERVAL_MS) {
+        if (!redisDegraded || (now - lastDegradationTime) > properties.getDegradationCheckIntervalMs()) {
             this.redisDegraded = true;
             this.lastDegradationTime = now;
-            log.warn("[流量采集] Redis服务进入降级状态，使用内存计数器");
+            log.warn("[流量采集] Redis服务进入降级状态，采集暂存内存，不影响主流程");
         }
     }
 
+    @Scheduled(fixedDelayString = "${ele.traffic.metrics.flush-interval-ms:5000}")
+    public void flushAggregatedMetrics() {
+        if (!properties.isEnabled()) {
+            aggregateStatsCounter.clear();
+            aggregateHourlyCounter.clear();
+            aggregateRpsCounter.clear();
+            return;
+        }
+        if (redisDegraded && (System.currentTimeMillis() - lastDegradationTime) <= properties.getDegradationCheckIntervalMs()) {
+            return;
+        }
+        try {
+            if (redisDegraded) {
+                stringRedisTemplate.getConnectionFactory().getConnection().ping();
+                redisDegraded = false;
+                log.info("[流量采集] Redis服务已恢复，恢复批量刷写");
+            }
+            flushStatsAggregate();
+            flushHourlyAggregate();
+            flushRpsAggregate();
+        } catch (Exception e) {
+            markRedisDegraded();
+            log.warn("[流量采集] Redis批量刷写失败，已降级，不影响主流程，error={}", e.getMessage());
+        }
+    }
+
+    private void flushStatsAggregate() {
+        aggregateStatsCounter.forEach((counterKey, counter) -> {
+            long value = counter.getAndSet(0);
+            if (value <= 0) {
+                return;
+            }
+            String[] parts = counterKey.split(":", 2);
+            if (parts.length != 2) {
+                counter.addAndGet(value);
+                return;
+            }
+            String statsKey = STATS_KEY_PREFIX + parts[0];
+            String field = parts[1];
+            if (field.startsWith("max_")) {
+                Object current = stringRedisTemplate.opsForHash().get(statsKey, field);
+                long currentMax = current != null ? Long.parseLong(current.toString()) : 0L;
+                if (value > currentMax) {
+                    stringRedisTemplate.opsForHash().put(statsKey, field, String.valueOf(value));
+                }
+            } else {
+                stringRedisTemplate.opsForHash().increment(statsKey, field, value);
+            }
+            stringRedisTemplate.expire(statsKey, properties.getRetentionDays(), TimeUnit.DAYS);
+        });
+    }
+
+    private void flushHourlyAggregate() {
+        aggregateHourlyCounter.forEach((hourlyKey, fields) -> {
+            fields.forEach((field, counter) -> {
+                long value = counter.getAndSet(0);
+                if (value > 0) {
+                    stringRedisTemplate.opsForHash().increment(hourlyKey, field, value);
+                }
+            });
+            stringRedisTemplate.expire(hourlyKey, properties.getRetentionDays(), TimeUnit.DAYS);
+        });
+    }
+
+    private void flushRpsAggregate() {
+        aggregateRpsCounter.forEach((rpsKey, counter) -> {
+            long value = counter.getAndSet(0);
+            if (value > 0) {
+                stringRedisTemplate.opsForValue().increment(rpsKey, value);
+                stringRedisTemplate.expire(rpsKey, 120, TimeUnit.SECONDS);
+            }
+        });
+    }
+
     public void checkRedisRecovery() {
-        if (redisDegraded && (System.currentTimeMillis() - lastDegradationTime) > DEGRADATION_CHECK_INTERVAL_MS) {
+        if (redisDegraded && (System.currentTimeMillis() - lastDegradationTime) > properties.getDegradationCheckIntervalMs()) {
             try {
                 stringRedisTemplate.getConnectionFactory().getConnection().ping();
                 if (redisDegraded) {
@@ -286,44 +215,7 @@ public class EleTrafficMetricsCollector {
     }
 
     private void flushFallbackData() {
-        if (fallbackStatsCounter.isEmpty() && fallbackHourlyCounter.isEmpty()) {
-            return;
-        }
-
-        try {
-            log.info("[流量采集] 开始同步降级数据到Redis，stats数量={}, hourly数量={}",
-                    fallbackStatsCounter.size(), fallbackHourlyCounter.size());
-
-            for (Map.Entry<String, AtomicInteger> entry : fallbackStatsCounter.entrySet()) {
-                String[] parts = entry.getKey().split(":");
-                if (parts.length >= 2) {
-                    String statsKey = parts[0] + ":" + parts[1];
-                    String field = parts[2];
-                    int value = entry.getValue().get();
-                    if (value > 0) {
-                        stringRedisTemplate.opsForHash().increment(statsKey, field, value);
-                    }
-                }
-            }
-
-            for (Map.Entry<String, ConcurrentHashMap<String, AtomicInteger>> entry : fallbackHourlyCounter.entrySet()) {
-                String hourlyKey = entry.getKey();
-                for (Map.Entry<String, AtomicInteger> fieldEntry : entry.getValue().entrySet()) {
-                    int value = fieldEntry.getValue().get();
-                    if (value > 0) {
-                        stringRedisTemplate.opsForHash().increment(hourlyKey, fieldEntry.getKey(), value);
-                    }
-                }
-                stringRedisTemplate.expire(hourlyKey, RETENTION_DAYS, TimeUnit.DAYS);
-            }
-
-            fallbackStatsCounter.clear();
-            fallbackHourlyCounter.clear();
-
-            log.info("[流量采集] 降级数据同步完成");
-        } catch (Exception e) {
-            log.error("[流量采集] 同步降级数据失败, error={}", e.getMessage());
-        }
+        flushAggregatedMetrics();
     }
 
     @FunctionalInterface
@@ -421,14 +313,20 @@ public class EleTrafficMetricsCollector {
         try {
             String statsKey = STATS_KEY_PREFIX + dateStr;
             Object value = stringRedisTemplate.opsForHash().get(statsKey, field);
-            return value != null ? Long.parseLong(value.toString()) : 0L;
+            return (value != null ? Long.parseLong(value.toString()) : 0L) + getAggregateStatsValue(dateStr, field);
         } catch (Exception e) {
             log.error("[流量采集] 获取统计字段失败, dateStr={}, field={}, error={}", dateStr, field, e.getMessage());
 
             String counterKey = STATS_KEY_PREFIX + dateStr + ":" + field;
             AtomicInteger fallbackValue = fallbackStatsCounter.get(counterKey);
-            return fallbackValue != null ? fallbackValue.get() : 0L;
+            long fallback = fallbackValue != null ? fallbackValue.get() : 0L;
+            return fallback + getAggregateStatsValue(dateStr, field);
         }
+    }
+
+    private long getAggregateStatsValue(String dateStr, String field) {
+        AtomicLong value = aggregateStatsCounter.get(dateStr + ":" + field);
+        return value != null ? value.get() : 0L;
     }
 
     public int getRecordCount() {
@@ -535,21 +433,16 @@ public class EleTrafficMetricsCollector {
     public List<String> getAvailableDates() {
         List<String> dates = new ArrayList<>();
         LocalDate today = LocalDate.now();
-        for (int i = 0; i < RETENTION_DAYS; i++) {
+        for (int i = 0; i < properties.getRetentionDays(); i++) {
             dates.add(today.minusDays(i).format(DateTimeFormatter.BASIC_ISO_DATE));
         }
         return dates;
     }
 
     private void incrementApiRpsCounter(String apiCode) {
-        try {
-            long currentSecond = System.currentTimeMillis() / 1000;
-            String rpsKey = RPS_KEY_PREFIX + apiCode + ":" + currentSecond;
-            stringRedisTemplate.opsForValue().increment(rpsKey, 1);
-            stringRedisTemplate.expire(rpsKey, 120, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.warn("[流量采集] 更新RPS计数器失败, apiCode={}, error={}", apiCode, e.getMessage());
-        }
+        long currentSecond = System.currentTimeMillis() / 1000;
+        String rpsKey = RPS_KEY_PREFIX + apiCode + ":" + currentSecond;
+        aggregateRpsCounter.computeIfAbsent(rpsKey, key -> new AtomicLong(0)).incrementAndGet();
     }
 
     public Map<String, Integer> getApiRpsForSecond(String apiCode, long timestampSecond) {
@@ -557,10 +450,11 @@ public class EleTrafficMetricsCollector {
         try {
             String rpsKey = RPS_KEY_PREFIX + apiCode + ":" + timestampSecond;
             String value = stringRedisTemplate.opsForValue().get(rpsKey);
-            result.put("current", value != null ? Integer.parseInt(value) : 0);
+            int local = getAggregateRpsValue(rpsKey);
+            result.put("current", (value != null ? Integer.parseInt(value) : 0) + local);
         } catch (Exception e) {
             log.warn("[流量采集] 获取RPS失败, apiCode={}, error={}", apiCode, e.getMessage());
-            result.put("current", 0);
+            result.put("current", getAggregateRpsValue(RPS_KEY_PREFIX + apiCode + ":" + timestampSecond));
         }
         return result;
     }
@@ -573,7 +467,7 @@ public class EleTrafficMetricsCollector {
                 String rpsKey = RPS_KEY_PREFIX + apiCode + ":" + (currentSecond - i);
                 String value = stringRedisTemplate.opsForValue().get(rpsKey);
                 if (value != null) {
-                    total += Integer.parseInt(value);
+                    total += Integer.parseInt(value) + getAggregateRpsValue(rpsKey);
                 }
             }
             return total / windowSeconds;
@@ -591,7 +485,7 @@ public class EleTrafficMetricsCollector {
                 String rpsKey = RPS_KEY_PREFIX + apiCode + ":" + (currentSecond - i);
                 String value = stringRedisTemplate.opsForValue().get(rpsKey);
                 if (value != null) {
-                    int count = Integer.parseInt(value);
+                    int count = Integer.parseInt(value) + getAggregateRpsValue(rpsKey);
                     if (count > max) {
                         max = count;
                     }
@@ -611,7 +505,7 @@ public class EleTrafficMetricsCollector {
             for (int i = seconds - 1; i >= 0; i--) {
                 String rpsKey = RPS_KEY_PREFIX + apiCode + ":" + (currentSecond - i);
                 String value = stringRedisTemplate.opsForValue().get(rpsKey);
-                history.add(value != null ? Integer.parseInt(value) : 0);
+                history.add((value != null ? Integer.parseInt(value) : 0) + getAggregateRpsValue(RPS_KEY_PREFIX + apiCode + ":" + (currentSecond - i)));
             }
         } catch (Exception e) {
             log.warn("[流量采集] 获取RPS历史失败, apiCode={}, error={}", apiCode, e.getMessage());
@@ -620,6 +514,11 @@ public class EleTrafficMetricsCollector {
             }
         }
         return history;
+    }
+
+    private int getAggregateRpsValue(String rpsKey) {
+        AtomicLong value = aggregateRpsCounter.get(rpsKey);
+        return value != null ? (int) value.get() : 0;
     }
 
     public static class RealtimeRecord {

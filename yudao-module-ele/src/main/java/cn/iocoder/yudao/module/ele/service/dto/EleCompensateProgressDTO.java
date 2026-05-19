@@ -8,6 +8,7 @@ import java.io.Serializable;
 public class EleCompensateProgressDTO implements Serializable {
 
     private String status;
+    private String taskType;
     private String platformStoreId;
     private String merchantCode;
     private String erpStoreCode;

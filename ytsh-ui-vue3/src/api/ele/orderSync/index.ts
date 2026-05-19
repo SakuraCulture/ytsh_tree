@@ -1,25 +1,5 @@
 import request from '@/config/axios'
 
-export interface SyncRangeReqVO {
-  startTime: number
-  endTime: number
-}
-
-export interface PullSingleStoreReqVO {
-  platformStoreId: string
-  startTime: number
-  endTime: number
-}
-
-export interface SyncResultVO {
-  totalCount: number
-  successCount: number
-  failCount: number
-  elapsedSeconds: number
-  completed: boolean
-  failedStores: string[]
-}
-
 export interface SyncLogPageReqVO {
   platformStoreId?: string
   status?: number
@@ -84,6 +64,46 @@ export interface BatchSyncProgressVO {
   startTime: number
 }
 
+export interface StoreSyncProgressVO {
+  batchId?: string
+  platformStoreId?: string
+  storeName?: string
+  status?: string
+  apiStatusCounts?: Record<number, number>
+  savedStatusCounts?: Record<number, number>
+  pageCounts?: Record<number, number>
+  totalApiCount?: number
+  totalSavedCount?: number
+  discrepancyRate?: number
+  reconciliationStatus?: string
+  retryCount?: number
+  pullErrors?: any[]
+  saveErrors?: any[]
+  reconciliationErrors?: any[]
+  startTime?: number
+  endTime?: number
+  elapsedSeconds?: number
+}
+
+export interface SyncErrorDetailVO {
+  syncLogId: number
+  storeName: string
+  syncStartTime: string
+  pullError: { code: string; detail: any }
+  saveError: { code: string; detail: any }
+  reconciliationError: { code: string; detail: any }
+  reconciliation: {
+    expectedTotal: number
+    actualTotal: number
+    savedTotal: number
+    discrepancyRate: number
+    dataIntegrity: number
+    retryCount: number
+    apiStatusCounts: any
+    savedStatusCounts: any
+  }
+}
+
 export interface SyncScheduleConfigVO {
   exists: boolean
   enabled?: boolean
@@ -126,24 +146,23 @@ export const updateSyncScheduleConfig = async (data: SyncScheduleConfigReqVO) =>
   })
 }
 
-export const pullOrdersByRange = async (params: SyncRangeReqVO) => {
-  return await request.post<SyncResultVO>({
-    url: '/ele/order/sync/all',
+export const pullOrdersByRange = async (params: { startTime?: number; endTime?: number; platformStoreId?: string }) => {
+  return await request.post<Map<string, any>>({
+    url: '/ele/order-sync/sync-all',
     params
   })
 }
 
-export const pullSingleStore = async (params: PullSingleStoreReqVO) => {
-  return await request.post<SyncResultVO>({
-    url: '/ele/order/sync/submit',
-    params
-  })
-}
-
-export const pullAllStores = async (params?: { startTime?: number; endTime?: number }) => {
-  return await request.post<boolean>({
-    url: '/ele/order/sync/all',
-    params
+export const triggerCompensation = async (data: {
+  platformStoreId: string
+  merchantCode: string
+  erpStoreCode: string
+  startTime: number
+  endTime: number
+}) => {
+  return await request.post<{ success: boolean; message: string; compensatedCount: number }>({
+    url: '/ele/order-sync/compensation/trigger',
+    data
   })
 }
 
@@ -164,4 +183,18 @@ export const getSyncProgress = async (taskId: string) => {
 
 export const getBatchSyncProgress = async () => {
   return await request.get<BatchSyncProgressVO>({ url: '/ele/order/sync/batch-progress' })
+}
+
+export const getRedisSyncProgress = async (batchId: string, platformStoreId?: string) => {
+  return await request.get<StoreSyncProgressVO>({
+    url: '/ele/order/sync/redis-progress',
+    params: { batchId, platformStoreId }
+  })
+}
+
+export const getErrorDetail = async (syncLogId: number) => {
+  return await request.get<SyncErrorDetailVO>({
+    url: '/ele/order-sync/error-detail',
+    params: { syncLogId }
+  })
 }
