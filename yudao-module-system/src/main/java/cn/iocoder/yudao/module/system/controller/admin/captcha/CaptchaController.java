@@ -11,12 +11,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.annotation.security.PermitAll;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "管理后台 - 验证码")
+@Slf4j
 @RestController("adminCaptchaController")
 @RequestMapping("/system/captcha")
 public class CaptchaController {
@@ -29,9 +31,17 @@ public class CaptchaController {
     @PermitAll
     @TenantIgnore
     public ResponseModel get(@RequestBody CaptchaVO data, HttpServletRequest request) {
-        assert request.getRemoteHost() != null;
-        data.setBrowserInfo(getRemoteId(request));
-        return captchaService.get(data);
+        try {
+            log.info("[验证码] 接收到验证码生成请求, captchaType: {}", data.getCaptchaType());
+            assert request.getRemoteHost() != null;
+            data.setBrowserInfo(getRemoteId(request));
+            ResponseModel response = captchaService.get(data);
+            log.info("[验证码] 生成结果, repCode: {}, repMsg: {}", response.getRepCode(), response.getRepMsg());
+            return response;
+        } catch (Exception e) {
+            log.error("[验证码] 生成验证码失败", e);
+            throw e;
+        }
     }
 
     @PostMapping("/check")

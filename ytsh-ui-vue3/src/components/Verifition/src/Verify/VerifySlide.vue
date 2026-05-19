@@ -364,6 +364,11 @@ const getPictrue = async () => {
     captchaType: captchaType.value
   }
   const res = await getCode(data)
+  console.log('[验证码] 后端返回的原始响应:', res)
+  console.log('[验证码] res.repCode:', res.repCode)
+  console.log('[验证码] res.repData:', res.repData)
+  console.log('[验证码] res.code:', res.code)
+  console.log('[验证码] res.data:', res.data)
   if (res.repCode == '0000') {
     backImgBase.value = res.repData.originalImageBase64
     blockBackImgBase.value = res.repData.jigsawImageBase64

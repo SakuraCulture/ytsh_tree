@@ -217,7 +217,12 @@ const getCode = async () => {
   } else {
     // 情况二，已开启：则展示验证码；只有完成验证码的情况，才进行登录
     // 弹出验证码
-    verify.value.show()
+    if (verify.value) {
+      verify.value.show()
+    } else {
+      console.error('验证码组件未初始化，请检查验证码组件是否正确渲染')
+      message.error('验证码组件加载失败，请刷新页面重试')
+    }
   }
 }
 // 获取租户 ID
@@ -289,7 +294,8 @@ const handleLogin = async (params: any) => {
     }
   } finally {
     loginLoading.value = false
-    loading.value.close()
+    loading.value?.close()
+    loading.value = undefined
   }
 }
 

@@ -132,7 +132,7 @@ export default {
           componentType.value = 'VerifyPoints'
           break
       }
-    })
+    }, { flush: 'sync' })
 
     return {
       t,

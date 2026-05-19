@@ -214,7 +214,8 @@ const handleRegister = async (params: any) => {
     }
   } finally {
     loginLoading.value = false
-    loading.value.close()
+    loading.value?.close()
+    loading.value = undefined
   }
 }
 

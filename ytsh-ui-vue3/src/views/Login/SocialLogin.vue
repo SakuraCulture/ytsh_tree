@@ -313,7 +313,8 @@ const handleLogin = async (params) => {
     }
   } finally {
     loginLoading.value = false
-    loading.value.close()
+    loading.value?.close()
+    loading.value = undefined
   }
 }
 
