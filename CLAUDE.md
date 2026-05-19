@@ -140,6 +140,26 @@ The codebase follows a consistent layered module pattern:
 - `yudao-module-business`: custom business domain for product/category/store management.
 - `yudao-module-ele`: custom Ele order integration module. It depends on `yudao-module-business` and packages local SDK jars from `src/main/resources/lib/` via `system` scope.
 
+### `business` and `ele` mental model
+
+- `yudao-module-business` is the local master-data and operations backbone for stores, products, tags, and warehouse flows. Treat its tables and services as the system of record for store/product/tag/warehouse formal data.
+- `yudao-module-business` store-related services are especially important to cross-module work:
+  - `service/store/StoreServiceImpl.java` is the main entry for store CRUD, platform-store mapping queries, and “open platform store” lookups.
+  - `service/store/StorePlatformCacheService.java` owns the Redis cache for store-platform mappings; changes to mapping logic usually need cache-sync awareness.
+  - `service/store/StoreProductSyncWriteServiceImpl.java` is the formal upsert path for synced store-product rows.
+- `yudao-module-ele` is the Ele.me integration and synchronization module, not the source of truth for local store/product master data.
+- The main Ele subdomains are:
+  - orders: `service/EleOrderServiceImpl.java`, `job/EleOrderAutoSyncScheduler.java`, and the Kafka consumers/producers under `mq/`
+  - store goods: `service/EleStoreGoodsSyncServiceImpl.java`, plus shadow/governance flows under `EleStoreGoods*`
+  - inventory: `service/EleSkuInventoryQueryServiceImpl.java`, `service/EleStoreInventoryIngestServiceImpl.java`, `service/EleStoreInventoryBatchServiceImpl.java`, and `job/EleStoreInventoryBatchJob.java`
+  - bills: `service/EleBillSyncServiceImpl.java` and `job/EleBillSyncJob.java`
+- Dependency direction is primarily `ele -> business`:
+  - Ele resolves store/platform identity through business services such as `StoreService` and `StorePlatformCacheService`.
+  - Ele matches upstream SKU/store rows against local SKU, store-product, and stock data from business before writing formal records.
+  - In store goods / inventory sync flows, matched rows are written into business-owned formal tables; unmatched or conflicting rows stay in ele-owned shadow/governance tables for follow-up.
+- `service/client/EleOpenApiClientImpl.java` is the default wrapper for Ele upstream calls, traffic accounting, and external API logging. New Ele API integrations should normally go through it instead of calling the SDK directly.
+- One coupling detail worth knowing: business defines some query-facing abstractions that are implemented inside ele, for example `StoreProductShadowQueryService`. So formal data lives in business, while ele also exposes shadow data back to business through interfaces.
+
 ### Test architecture
 
 - Module tests typically extend shared bases from `yudao-framework/yudao-spring-boot-starter-test`, especially `BaseDbUnitTest` and related classes.
