@@ -33,3 +33,13 @@ test('影子商品库存卡支持快照与刷新入口', () => {
   assert.match(card, /findMatchingInventoryRow/)
   assert.doesNotMatch(card, /inventoryRows\?\.\[0\]/)
 })
+
+test('影子商品详情响应包含库存快照字段', () => {
+  const backendVo = readFile(
+    '../yudao-module-ele/src/main/java/cn/iocoder/yudao/module/ele/controller/admin/vo/EleStoreGoodsShadowRespVO.java'
+  )
+
+  assert.match(backendVo, /private Integer physicalStockTotalAmount;/)
+  assert.match(backendVo, /private Integer availableForSale;/)
+  assert.match(backendVo, /private LocalDateTime lastQueryTime;/)
+})

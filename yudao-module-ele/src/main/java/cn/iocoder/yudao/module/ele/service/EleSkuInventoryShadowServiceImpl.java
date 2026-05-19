@@ -26,13 +26,19 @@ public class EleSkuInventoryShadowServiceImpl implements EleSkuInventoryShadowSe
     public EleStoreInventoryShadowDO upsert(EleSkuInventoryShadowUpsertReqBO reqBO, String matchStatus, String reasonCode) {
         validate(reqBO, matchStatus, reasonCode);
         EleStoreInventoryShadowDO exist = selectByAnyBizKey(reqBO.getPlatformId(), reqBO.getMerchantCode(),
-                reqBO.getErpStoreCode(), reqBO.getSkuCode(), reqBO.getSubSkuCode());
+                reqBO.getErpStoreCode(), reqBO.getSkuCode(), reqBO.getSubSkuCode(), true);
         if (exist == null) {
             return insertOrRetryUpdate(reqBO, matchStatus, reasonCode);
         }
         updateExisting(exist.getId(), reqBO, matchStatus, reasonCode);
         EleStoreInventoryShadowDO updated = shadowMapper.selectById(exist.getId());
         return updated == null ? exist : updated;
+    }
+
+    @Override
+    public EleStoreInventoryShadowDO getByBizKey(Long platformId, String merchantCode, String erpStoreCode,
+                                                  String skuCode, String subSkuCode) {
+        return selectByAnyBizKey(platformId, merchantCode, erpStoreCode, skuCode, subSkuCode, false);
     }
 
     private EleStoreInventoryShadowDO insertOrRetryUpdate(EleSkuInventoryShadowUpsertReqBO reqBO, String matchStatus,
@@ -45,7 +51,7 @@ public class EleSkuInventoryShadowServiceImpl implements EleSkuInventoryShadowSe
             return row;
         } catch (DuplicateKeyException ex) {
             EleStoreInventoryShadowDO exist = selectByAnyBizKey(reqBO.getPlatformId(), reqBO.getMerchantCode(),
-                    reqBO.getErpStoreCode(), reqBO.getSkuCode(), reqBO.getSubSkuCode());
+                    reqBO.getErpStoreCode(), reqBO.getSkuCode(), reqBO.getSubSkuCode(), true);
             if (exist == null) {
                 throw ex;
             }
@@ -110,7 +116,7 @@ public class EleSkuInventoryShadowServiceImpl implements EleSkuInventoryShadowSe
     }
 
     private EleStoreInventoryShadowDO selectByAnyBizKey(Long platformId, String merchantCode, String erpStoreCode,
-                                                         String skuCode, String subSkuCode) {
+                                                         String skuCode, String subSkuCode, boolean retireConflictOnRead) {
         String trimmedMerchantCode = StrUtil.trim(merchantCode);
         String trimmedErpStoreCode = StrUtil.trim(erpStoreCode);
         String trimmedSkuCode = StrUtil.trim(skuCode);
@@ -124,7 +130,9 @@ public class EleSkuInventoryShadowServiceImpl implements EleSkuInventoryShadowSe
             subSkuRow = shadowMapper.selectBySubSkuCodeKey(platformId, trimmedMerchantCode, trimmedErpStoreCode, trimmedSubSkuCode);
         }
         if (skuRow != null && subSkuRow != null && !skuRow.getId().equals(subSkuRow.getId())) {
-            retireDuplicate(subSkuRow.getId());
+            if (retireConflictOnRead) {
+                retireDuplicate(subSkuRow.getId());
+            }
             return skuRow;
         }
         return skuRow != null ? skuRow : subSkuRow;

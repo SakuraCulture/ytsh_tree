@@ -132,3 +132,15 @@ test('findMatchingInventoryRow prefers exact sku and subSku key match', () => {
 
   assert.equal(row?.physicalStockTotalAmount, 9)
 })
+
+test('findMatchingInventoryRow falls back to unique sku match when exact subSku is missing', () => {
+  const row = findMatchingInventoryRow(
+    [{ skuCode: 'SKU-1', subSkuCode: '', physicalStockTotalAmount: 9 }],
+    {
+      skuCode: 'SKU-1',
+      subSkuCode: 'SUB-1'
+    }
+  )
+
+  assert.equal(row?.physicalStockTotalAmount, 9)
+})

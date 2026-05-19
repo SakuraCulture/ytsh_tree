@@ -198,9 +198,10 @@
       <el-table-column type="expand">
         <template #default="{ row }">
           <div v-if="canExpandRow(row)" class="expand-content">
-            <StockExpandCard :store-product-id="row.storeProductId" />
+            <StockExpandCard v-if="isFormalRow(row)" :store-product-id="row.storeProductId" />
+            <ShadowInventoryExpandCard v-else :row="row" />
           </div>
-          <div v-else class="expand-placeholder">影子商品暂无库存明细</div>
+          <div v-else class="expand-placeholder">暂无库存明细</div>
         </template>
       </el-table-column>
       <el-table-column label="门店名称" align="center" prop="storeName" min-width="150" />
@@ -306,6 +307,7 @@ import { TagValueApi, type TagSelectableValue } from '@/api/business/tag/value'
 import StoreProductBatchTagForm from './StoreProductBatchTagForm.vue'
 import StoreProductForm from './StoreProductForm.vue'
 import StoreProductTagForm from './StoreProductTagForm.vue'
+import ShadowInventoryExpandCard from './components/ShadowInventoryExpandCard.vue'
 import StockExpandCard from './components/StockExpandCard.vue'
 
 defineOptions({ name: 'StoreProduct' })
@@ -416,7 +418,8 @@ const handleDeleteBatch = async () => {
 
 const isShadowRow = (row: StoreProductTable) => row.rowSource === 'SHADOW' || !!row.shadowId
 const isFormalRow = (row: StoreProductTable) => !isShadowRow(row)
-const canExpandRow = (row: StoreProductTable) => isFormalRow(row) && !!row.storeProductId
+const canExpandRow = (row: StoreProductTable) =>
+  (isFormalRow(row) && !!row.storeProductId) || (isShadowRow(row) && !!row.shadowId)
 const isSelectableRow = (row: StoreProductTable) => isFormalRow(row) && !!row.storeProductId
 const getRowKey = (row: StoreProductTable) => {
   if (row.storeProductId) {

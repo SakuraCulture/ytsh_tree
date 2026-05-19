@@ -156,11 +156,21 @@ export const findMatchingInventoryRow = <T extends EleInventoryRowLike>(
 
   const targetSkuCode = normalizeInventoryKey(target.skuCode)
   const targetSubSkuCode = normalizeInventoryKey(target.subSkuCode)
-
-  return rows.find((row) => {
+  const exactMatch = rows.find((row) => {
     return (
       normalizeInventoryKey(row.skuCode) === targetSkuCode &&
       normalizeInventoryKey(row.subSkuCode) === targetSubSkuCode
     )
   })
+
+  if (exactMatch) {
+    return exactMatch
+  }
+
+  if (!targetSkuCode) {
+    return undefined
+  }
+
+  const sameSkuRows = rows.filter((row) => normalizeInventoryKey(row.skuCode) === targetSkuCode)
+  return sameSkuRows.length === 1 ? sameSkuRows[0] : undefined
 }

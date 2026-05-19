@@ -67,6 +67,30 @@ public class EleStoreGoodsShadowRespVO {
     @Schema(description = "冲突原因")
     private String conflictReason;
 
+    @Schema(description = "库存原因说明")
+    private String reasonMsg;
+
+    @Schema(description = "总库存")
+    private Integer physicalStockTotalAmount;
+
+    @Schema(description = "可售库存")
+    private Integer availableForSale;
+
+    @Schema(description = "物理可用库存")
+    private Integer physicalStockAvailableAmount;
+
+    @Schema(description = "物理在途库存")
+    private Integer physicalStockIntransitAmount;
+
+    @Schema(description = "预留库存")
+    private Integer reservedAmount;
+
+    @Schema(description = "物理占用库存")
+    private Integer physicalStockOccupiedAmount;
+
+    @Schema(description = "最近库存查询时间")
+    private LocalDateTime lastQueryTime;
+
     @Schema(description = "原始报文")
     private String rawPayload;
 

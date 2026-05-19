@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.business.service.store.bo.StoreProductSyncUpsertR
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsShadowPageReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsShadowRespVO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsShadowDO;
+import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreInventoryShadowDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsShadowMapper;
 import cn.iocoder.yudao.module.ele.enums.EleStoreGoodsShadowStatus;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsShadowUpsertReqBO;
@@ -44,6 +45,8 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
 
     @Resource
     private EleStoreGoodsShadowMapper shadowMapper;
+    @Resource
+    private EleSkuInventoryShadowService eleSkuInventoryShadowService;
     @Resource
     private SkuTableMapper skuTableMapper;
     @Resource
@@ -104,7 +107,23 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
 
     @Override
     public EleStoreGoodsShadowRespVO getShadow(Long id) {
-        return BeanUtils.toBean(getRequiredShadow(id), EleStoreGoodsShadowRespVO.class);
+        EleStoreGoodsShadowDO shadow = getRequiredShadow(id);
+        EleStoreGoodsShadowRespVO respVO = BeanUtils.toBean(shadow, EleStoreGoodsShadowRespVO.class);
+        EleStoreInventoryShadowDO inventoryShadow = eleSkuInventoryShadowService.getByBizKey(
+                shadow.getPlatformId(), shadow.getMerchantCode(), shadow.getErpStoreCode(),
+                shadow.getSkuCode(), shadow.getSubSkuCode());
+        if (inventoryShadow == null) {
+            return respVO;
+        }
+        respVO.setReasonMsg(inventoryShadow.getReasonMsg());
+        respVO.setPhysicalStockTotalAmount(inventoryShadow.getPhysicalStockTotalAmount());
+        respVO.setAvailableForSale(inventoryShadow.getAvailableForSale());
+        respVO.setPhysicalStockAvailableAmount(inventoryShadow.getPhysicalStockAvailableAmount());
+        respVO.setPhysicalStockIntransitAmount(inventoryShadow.getPhysicalStockIntransitAmount());
+        respVO.setReservedAmount(inventoryShadow.getReservedAmount());
+        respVO.setPhysicalStockOccupiedAmount(inventoryShadow.getPhysicalStockOccupiedAmount());
+        respVO.setLastQueryTime(inventoryShadow.getLastQueryTime());
+        return respVO;
     }
 
     @Override
