@@ -6,6 +6,7 @@ import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsShadowPageReqVO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsShadowDO;
+import cn.iocoder.yudao.module.ele.enums.EleStoreGoodsShadowStatus;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -157,6 +158,7 @@ public interface EleStoreGoodsShadowMapper extends BaseMapperX<EleStoreGoodsShad
         return selectList(new LambdaQueryWrapperX<EleStoreGoodsShadowDO>()
                 .eqIfPresent(EleStoreGoodsShadowDO::getErpStoreCode, erpStoreCode)
                 .eq(EleStoreGoodsShadowDO::getIsActive, 1)
+                .ne(EleStoreGoodsShadowDO::getMatchStatus, EleStoreGoodsShadowStatus.UNMATCHED)
                 .orderByDesc(EleStoreGoodsShadowDO::getUpdateTime))
                 .stream()
                 .map(EleStoreGoodsShadowDO::getSkuCode)

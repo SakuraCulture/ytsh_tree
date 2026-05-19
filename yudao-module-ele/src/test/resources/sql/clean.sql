@@ -1,0 +1,2 @@
+DELETE FROM `ele_store_inventory_shadow`;
+DELETE FROM `ele_store_goods_shadow`;
