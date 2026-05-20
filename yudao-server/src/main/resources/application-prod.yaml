@@ -1,353 +1,425 @@
 server:
-  port: 48080
-
---- #################### 接口文档配置（生产环境关闭） ####################
-
-springdoc:
-  api-docs:
-    enabled: false
-  swagger-ui:
-    enabled: false
-
-knife4j:
-  enable: false
-  basic:
-    enable: false
-
---- #################### 数据库相关配置 ####################
+    port: 8080
+    address: 0.0.0.0 # 允许局域网访问
+    shutdown: graceful # 启用优雅关闭
 spring:
-  autoconfigure:
-    # noinspection SpringBootApplicationYaml
-    exclude:
-      - org.springframework.boot.autoconfigure.quartz.QuartzAutoConfiguration # 默认 local 环境，不开启 Quartz 的自动配置
-      - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration # 禁用 AI 模块的 Qdrant，手动创建
-      - org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration # 禁用 AI 模块的 Milvus，手动创建
-  # 数据源配置项
-  datasource:
-    druid: # Druid 【监控】相关的全局配置
-      web-stat-filter:
-        enabled: true
-      stat-view-servlet:
-        enabled: true
-        allow: # 设置白名单，不填则允许所有访问
-        url-pattern: /druid/*
-        login-username: # 控制台管理用户名和密码
-        login-password:
-      filter:
-        stat:
-          enabled: true
-          log-slow-sql: true # 慢 SQL 记录
-          slow-sql-millis: 100
-          merge-sql: true
-        wall:
-          config:
-            multi-statement-allow: true
-    dynamic: # 多数据源配置
-      druid: # Druid 【连接池】相关的全局配置
-        initial-size: 1 # 初始连接数
-        min-idle: 1 # 最小连接池数量
-        max-active: 20 # 最大连接池数量
-        max-wait: 60000 # 配置获取连接等待超时的时间，单位：毫秒（1 分钟）
-        time-between-eviction-runs-millis: 60000 # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接，单位：毫秒（1 分钟）
-        min-evictable-idle-time-millis: 600000 # 配置一个连接在池中最小生存的时间，单位：毫秒（10 分钟）
-        max-evictable-idle-time-millis: 1800000 # 配置一个连接在池中最大生存的时间，单位：毫秒（30 分钟）
-        validation-query: SELECT 1 FROM DUAL # 配置检测连接是否有效
-        test-while-idle: true
-        test-on-borrow: false # 关闭借连接时校验，减少每次获取连接的额外检查
-        test-on-return: false
-        keep-alive: true # 保持连接活性，减少远程链路空闲断开
-        pool-prepared-statements: true # 是否开启 PreparedStatement 缓存
-        max-pool-prepared-statement-per-connection-size: 20 # 每个连接缓存的 PreparedStatement 数量
-      primary: master
-      datasource:
-        master:
-          url: jdbc:mysql://rm-2ze347fljj75ppe856o.mysql.rds.aliyuncs.com:3306/ruoyi-vue-pro?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
-          #          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=true&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true # MySQL Connector/J 5.X 连接的示例
-          #          url: jdbc:postgresql://127.0.0.1:5432/ruoyi-vue-pro # PostgreSQL 连接的示例
-          #          url: jdbc:oracle:thin:@127.0.0.1:1521:xe # Oracle 连接的示例
-          #          url: jdbc:sqlserver://127.0.0.1:1433;DatabaseName=ruoyi-vue-pro;SelectMethod=cursor;encrypt=false;rewriteBatchedStatements=true;useUnicode=true;characterEncoding=utf-8 # SQLServer 连接的示例
-          #          url: jdbc:dm://127.0.0.1:5236?schema=RUOYI_VUE_PRO # DM 连接的示例
-          #          url: jdbc:kingbase8://127.0.0.1:54321/test  # 人大金仓 KingbaseES 连接的示例
-          #          url: jdbc:postgresql://127.0.0.1:5432/postgres # OpenGauss 连接的示例
-          username: root
-          password: mysql$prod2026@ytsh
-          #          username: sa # SQL Server 连接的示例
-          #          password: Yudao@2024 # SQL Server 连接的示例
-          #          username: SYSDBA # DM 连接的示例
-          #          password: SYSDBA001 # DM 连接的示例
-          #          username: root # OpenGauss 连接的示例
-          #          password: Yudao@2024 # OpenGauss 连接的示例
-        slave: # 模拟从库，可根据自己需要修改
-          lazy: true # 开启懒加载，保证启动速度
-          url: jdbc:mysql://rm-2ze347fljj75ppe856o.mysql.rds.aliyuncs.com:3306/ytsh_prod?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
-          username: root
-          password: mysql$prod2026@ytsh
-#        tdengine: # IoT 数据库（需要 IoT 物联网再开启噢！）
-#          lazy: true # 开启懒加载，保证启动速度
-#          url: jdbc:TAOS-WS://127.0.0.1:6041/ruoyi_vue_pro?varcharAsString=true
-#          driver-class-name: com.taosdata.jdbc.ws.WebSocketDriver
-#          username: root
-#          password: taosdata
-#          druid:
-#            validation-query: SELECT SERVER_STATUS() # TDengine 数据源的有效性检查 SQL
+    lifecycle:
+        timeout-per-shutdown-phase: 60s # 优雅关闭超时时间
+    main:
+        lazy-initialization: true # 启动耗时排查：延迟初始化 Bean，观察启动时间是否明显下降
+    autoconfigure:
+        # noinspection SpringBootApplicationYaml
+        exclude:
+            - org.springframework.ai.vectorstore.qdrant.autoconfigure.QdrantVectorStoreAutoConfiguration # 禁用 AI 模块的 Qdrant，手动创建
+            - org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration # 禁用 AI 模块的 Milvus，手动创建
+    # 数据源配置项
+    datasource:
+        druid: # Druid 【监控】相关的全局配置
+            web-stat-filter:
+                enabled: true
+                session-stat-enable: false # 关闭 Session 统计，避免 sessionStatMap is full 警告
+            stat-view-servlet:
+                enabled: true
+                allow: # 设置白名单，不填则允许所有访问
+                url-pattern: /druid/*
+                login-username: # 控制台管理用户名和密码
+                login-password:
+            filter:
+                stat:
+                    enabled: true
+                    log-slow-sql: true # 慢 SQL 记录
+                    slow-sql-millis: 100
+                    merge-sql: true
+                wall:
+                    config:
+                        multi-statement-allow: true
+        dynamic: # 多数据源配置
+            druid: # Druid 【连接池】相关的全局配置
+                initial-size: 20 # 初始连接数（从5提升到20，快速预热连接池）
+                min-idle: 20 # 最小空闲连接数（从5提升到20，保持更多可用连接）
+                max-active: 200 # 最大连接池数量（从100提升到200，阿里云RDS最大2000连接，当前仅占10%，充分利用数据库资源）
+                max-wait: 30000 # 配置获取连接等待超时的时间，单位：毫秒（30秒）
+                time-between-eviction-runs-millis: 15000 # 15 秒巡检一次空闲连接，降低远程链路空闲断开概率
+                min-evictable-idle-time-millis: 120000 # 空闲 2 分钟后参与回收/保活检测
+                max-evictable-idle-time-millis: 600000 # 空闲连接最长保留 10 分钟
+                validation-query: SELECT 1 # MySQL 连接有效性检查
+                test-while-idle: true
+                test-on-borrow: true # 借连接时校验，避免拿到已断开的远程连接
+                test-on-return: false
+                keep-alive: true # 保持连接活性，减少远程链路空闲断开
+                pool-prepared-statements: true # 是否开启 PreparedStatement 缓存
+                max-pool-prepared-statement-per-connection-size: 20 # 每个连接缓存的 PreparedStatement 数量
+                remove-abandoned: true # 自动回收泄漏连接
+                remove-abandoned-timeout: 300 # 超过 5 分钟的连接强制回收
+                log-abandoned: true # 记录泄漏连接日志
+            primary: master
+            datasource:
+                master:
+                    url: jdbc:mysql://rm-2ze347fljj75ppe85.mysql.rds.aliyuncs.com:3306/ytsh_prod?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&connectTimeout=10000&socketTimeout=120000&tcpKeepAlive=true
+                    username: root
+                    password: mysql$prod2026@ytsh
+                slave:
+                    lazy: true
+                    url: jdbc:mysql://rm-2ze347fljj75ppe85.mysql.rds.aliyuncs.com:3306/ytsh_prod?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&connectTimeout=10000&socketTimeout=120000&tcpKeepAlive=true
+                    username: root
+                    password: mysql$prod2026@ytsh
 
-  # Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优
-  data:
-    redis:
-      host: 101.200.47.193 # 地址
-      port: 6379 # 端口
-      username: default
-      password: YTSH$redis@ytsh2026
-      database: 1 # 数据库索引
-      connect-timeout: 30s
-      timeout: 60s
-      redisson:
-        config: |
-          singleServerConfig:
-            address: "redis://101.200.47.193:6379"
-            username: "default"
-            password: "YTSH$redis@ytsh2026"
-            database: 1
-            connectTimeout: 30000
-            timeout: 60000
-            pingConnectionInterval: 3000
-            keepAlive: true
-            tcpNoDelay: true
-            idleConnectionTimeout: 60000
-            connectionMinimumIdleSize: 20
-            connectionPoolSize: 128
-            retryAttempts: 10
-            retryInterval: 2000
-            subscriptionConnectionMinimumIdleSize: 2
-            subscriptionConnectionPoolSize: 8
-          threads: 32
-          nettyThreads: 64
-          codec: !<org.redisson.codec.Kryo5Codec> {}
-          transportMode: "NIO"
-#      password: dev # 密码，建议生产环境开启
+    # Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优
+    data:
+        redis:
+            host: 127.0.0.1 # 地址
+            port: 6579 # 端口
+            username: default
+            password: YTSH+redis@2026
+            #      password: YTSH_redis_2026
+            database: 0 # 数据库索引
+            connect-timeout: 10000ms # 建连超时
+            timeout: 10000ms # 命令执行超时
+            lettuce:
+                pool:
+                    min-idle: 20 # 连接池最小空闲连接数
+                    max-idle: 80 # 连接池最大空闲连接数
+                    max-active: 200 # 连接池最大连接数
+                    max-wait: 5000 # 获取连接最大等待时间（毫秒）
+                shutdown-timeout: 200ms # 关闭超时
+            redisson:
+                config: |
+                    singleServerConfig:
+                      address: "redis://127.0.0.1:6579"
+                      username: "default"
+                      password: "YTSH+redis@2026"
+                      database: 0
+                      connectTimeout: 30000          # 从10000升到30000,避免建连超时
+                      timeout: 60000                 # 从10000升到60000,放宽命令执行超时
+                      pingConnectionInterval: 3000   # 从5000降到3000,更频繁心跳检测连接活性
+                      keepAlive: true                # 启用TCP KeepAlive
+                      tcpNoDelay: true               # 禁用Nagle算法,降低延迟
+                      idleConnectionTimeout: 120000  # 从180000降到120000,及时清理空闲连接
+                      connectionMinimumIdleSize: 80  # 从64升到80,保持更多可用连接
+                      connectionPoolSize: 350        # 从256升到350,提升并发能力
+                      retryAttempts: 15              # 从5升到15,网络抖动时充分重试
+                      retryInterval: 1500            # 从2000降到1500,加快重试频率
+                      reconnectConnectionTimeout: 3000
+                      subscriptionConnectionMinimumIdleSize: 4
+                      subscriptionConnectionPoolSize: 16
+                    threads: 128
+                    nettyThreads: 256                # Netty线程池,处理异步IO
+                    codec: !<org.redisson.codec.Kryo5Codec> {}
+                    transportMode: "NIO"
 
---- #################### 饿了么订单同步相关配置 ####################
 
-# 饿了么订单同步线程池配置
-ele:
-  order:
-    sync:
-      batch-size: 5 # 每批提交门店数(降低并发锁数量，减少Redisson看门狗续期压力)
-      pool:
-        core-size: 5 # 核心线程数(降低并发数，减少Redis连接和锁续期压力)
-        max-size: 10 # 最大线程数(限制最大并发，避免Redis续期超时)
-        queue-capacity: 200 # 队列容量
-        keep-alive-seconds: 120 # 空闲线程存活时间(秒)
-      shutdown:
-        await-termination: true # 关闭时等待任务完成
-        await-termination-seconds: 60 # 最多等待时间（秒）
-    compensate:
-      pool:
-        core-size: 2 # 核心线程数
-        max-size: 5 # 最大线程数
-        queue-capacity: 100 # 队列容量
-        keep-alive-seconds: 60 # 空闲线程存活时间（秒）
-    retry:
-      pool:
-        core-size: 5 # 核心线程数
-        max-size: 10 # 最大线程数
-        queue-capacity: 500 # 队列容量
-        keep-alive-seconds: 60 # 空闲线程存活时间（秒）
-      alarm:
-        queue-threshold: 70 # 队列使用率告警阈值（%）
-        active-threshold: 80 # 活跃率告警阈值（%）
-        enabled: true # 是否启用告警
-    failed-retry:
-      cron: '0 0 2 * * ?' # 每天凌晨2点自动重试全部失败订单
-      enabled: true # 是否启用定时重试
-
+#    password: 123456 # 密码，建议生产环境开启
 --- #################### 定时任务相关配置 ####################
 
 # Quartz 配置项，对应 QuartzProperties 配置类
 spring:
-  quartz:
-    auto-startup: true # 本地开发环境，尽量不要开启 Job
-    scheduler-name: schedulerName # Scheduler 名字。默认为 schedulerName
-    job-store-type: jdbc # Job 存储器类型。默认为 memory 表示内存，可选 jdbc 使用数据库。
-    wait-for-jobs-to-complete-on-shutdown: true # 应用关闭时，是否等待定时任务执行完成。默认为 false ，建议设置为 true
-    properties: # 添加 Quartz Scheduler 附加属性，更多可以看 http://www.quartz-scheduler.org/documentation/2.4.0-SNAPSHOT/configuration.html 文档
-      org:
-        quartz:
-          # Scheduler 相关配置
-          scheduler:
-            instanceName: schedulerName
-            instanceId: AUTO # 自动生成 instance ID
-          # JobStore 相关配置
-          jobStore:
-            # JobStore 实现类。可见博客：https://blog.csdn.net/weixin_42458219/article/details/122247162
-            class: org.springframework.scheduling.quartz.LocalDataSourceJobStore
-            isClustered: true # 是集群模式
-            clusterCheckinInterval: 15000 # 集群检查频率，单位：毫秒。默认为 15000，即 15 秒
-            misfireThreshold: 60000 # misfire 阀值，单位：毫秒。
-          # 线程池相关配置
-          threadPool:
-            threadCount: 25 # 线程池大小。默认为 10 。
-            threadPriority: 5 # 线程优先级
-            class: org.quartz.simpl.SimpleThreadPool # 线程池类型
-    jdbc: # 使用 JDBC 的 JobStore 的时候，JDBC 的配置
-      initialize-schema: NEVER # 是否自动使用 SQL 初始化 Quartz 表结构。这里设置成 never ，我们手动创建表结构。
+    quartz:
+        auto-startup: false # 开发环境关闭 sQuartz
+        scheduler-name: schedulerName # Scheduler 名字。默认为 schedulerName
+        job-store-type: jdbc # Job 存储器类型。默认为 memory 表示内存，可选 jdbc 使用数据库。
+        wait-for-jobs-to-complete-on-shutdown: true # 应用关闭时，是否等待定时任务执行完成。默认为 false ，建议设置为 true
+        properties: # 添加 Quartz Scheduler 附加属性，更多可以看 http://www.quartz-scheduler.org/documentation/2.4.0-SNAPSHOT/configuration.html 文档
+            org:
+                quartz:
+                    # Scheduler 相关配置
+                    scheduler:
+                        instanceName: schedulerName
+                        instanceId: AUTO # 自动生成 instance ID
+                    # JobStore 相关配置
+                    jobStore:
+                        # JobStore 实现类。可见博客：https://blog.csdn.net/weixin_42458219/article/details/122247162
+                        class: org.springframework.scheduling.quartz.LocalDataSourceJobStore
+                        isClustered: true # 是集群模式
+                        clusterCheckinInterval: 15000 # 集群检查频率，单位：毫秒。默认为 15000，即 15 秒
+                        misfireThreshold: 60000 # misfire 阀值，单位：毫秒。
+                    # 线程池相关配置
+                    threadPool:
+                        threadCount: 25 # 线程池大小。默认为 10 。
+                        threadPriority: 5 # 线程优先级
+                        class: org.quartz.simpl.SimpleThreadPool # 线程池类型
+        jdbc: # 使用 JDBC 的 JobStore 的时候，JDBC 的配置
+            initialize-schema: NEVER # 是否自动使用 SQL 初始化 Quartz 表结构。这里设置成 never ，我们手动创建表结构。
+    task:
+        scheduling:
+            enabled: false # 开发环境关闭 Spring @Scheduled 定时任务
+
+# 饿了么订单同步线程池配置
+ele:
+    bill:
+        scheduler:
+            enabled: true
+            time: '01:00'
+            offset-days: 3
+    traffic:
+        metrics:
+            enabled: false # 是否启用翱象接口流量采集
+            realtime-record-enabled: false # 大批量拉单时关闭逐请求明细，仅保留聚合统计，降低Redis压力
+            flush-interval-ms: 5000 # 本地内存聚合刷入Redis间隔
+            degradation-check-interval-ms: 30000 # Redis异常后恢复探测间隔
+            retention-days: 3 # 流量统计保留天数
+    saas:
+        push:
+            enabled: false # SaaS推送总开关（Controller和Consumer共用），默认关闭
+    api:
+        rate-limit:
+            enabled: true # 是否启用翱象接口级全局限流
+            wait-interval-ms: 100 # 超过QPS时排队轮询等待间隔
+            backlog-pause-enabled: true # 有接口请求排队时暂停后续批量请求生产
+            apis:
+                orderList:
+                    api-code: me.ele.retail:saas.order.list
+                    display-name: 订单列表查询
+                    qps: 200 # 官方200QPS，门店串行后保留余量
+                orderGet:
+                    api-code: me.ele.retail:saas.order.get
+                    display-name: 正向订单详情查询
+                    qps: 360 # 官方400QPS，详情补全小并发保守限流
+    order:
+        sync:
+            store-concurrent-enabled: false # 关闭门店级并发，门店串行同步
+            store-concurrency: 1 # 门店并发数，关闭并发时固定为1
+            batch-size: 20 # 串行模式下用于批次日志和进度控制
+            page-size: 100 # 订单列表分页大小，最大100
+            page-timeout-seconds: 120 # 订单列表单页安全阀
+            detail-enrich:
+                enabled: true # 是否在分页同步中补全详情
+                concurrency: 5 # 单页详情补全并发数
+                timeout-seconds: 30 # 单页详情补全总预算
+                single-timeout-seconds: 10 # 单个详情等待超时
+                max-per-page: 100 # 单页最多补全详情数量，默认覆盖整页订单
+                degrade-on-timeout: true # 详情超时降级，不影响分页和整店同步
+                fail-record-enabled: true # 详情失败/超时写入待重试记录
+                statuses: '' # 空表示所有标准状态都补详情；如需过滤可配置为 2,3
+            pool:
+                core-size: 10 # 订单同步核心线程数（生产环境）
+                max-size: 20 # 订单同步最大线程数（生产环境）
+                queue-capacity: 200 # 队列容量
+                keep-alive-seconds: 60 # 空闲线程存活时间（秒）
+            shutdown:
+                await-termination: true # 关闭时等待任务完成
+                await-termination-seconds: 60 # 最多等待时间（秒）
+        detail:
+            pool:
+                core-size: 10 # 详情补全核心线程数（生产环境）
+                max-size: 20 # 详情补全最大线程数（生产环境）
+                queue-capacity: 300 # 详情补全队列容量
+                keep-alive-seconds: 60 # 空闲线程存活时间（秒）
+        compensate:
+            pool:
+                core-size: 10 # 核心线程数
+                max-size: 12 # 最大线程数
+                queue-capacity: 500 # 队列容量
+                keep-alive-seconds: 60 # 空闲线程存活时间（秒）
+        retry:
+            pool:
+                core-size: 10 # 核心线程数
+                max-size: 12 # 最大线程数
+                queue-capacity: 500 # 队列容量
+                keep-alive-seconds: 60 # 空闲线程存活时间（秒）
+            alarm:
+                queue-threshold: 70 # 队列使用率告警阈值（%）
+                active-threshold: 80 # 活跃率告警阈值（%）
+                enabled: true # 是否启用告警
+        failed-retry:
+            cron: '0 0 1 * * ?' # 每天凌晨1点自动重试全部失败订单（可通过前端修改）
+            enabled: true # 是否启用定时重试
+        scheduler:
+            enabled: false # 定时同步总开关（true=启用，false=禁用）
+            interval-seconds: 1800 # 拉取间隔（秒）
+            initial-delay-seconds: 30 # 启动后延迟首次执行时间（秒），生产环境多等一会儿
+        shutdown:
+            graceful-timeout-seconds: 60 # 优雅关闭超时时间（秒）
+            force-shutdown-after-seconds: 90 # 强制关闭前等待时间（秒）
+            enabled: false # 是否启用优雅关闭
+        saas:
+            push:
+                enabled: false
+                kafka:
+                    topic: order-status-change
+                    consumer-group-id: order-status-+consumer
+                redis:
+                    idempotent-key-prefix: 'order:push:consume:'
+                    expire-seconds: 3600
+                retry:
+                    max-attempts: 3
+                    retry-interval-ms: 2000
+        kafka:
+            topic:
+                realtime: ele-order-realtime
+            consumer:
+                group-id: ele-order-realtime-consumer
+            retry:
+                topic: ele-order-retry
+                dlq-topic: ele-order-retry-dlq
+                max-retry-count: 3
+                consumer:
+                    group-id: ele-order-retry-consumer
+                    dlq-group-id: ele-order-retry-dlq-consumer
+                    concurrency: 5
 
 --- #################### 消息队列相关 ####################
 
 # rocketmq 配置项，对应 RocketMQProperties 配置类
 rocketmq:
-  name-server: 127.0.0.1:9876 # RocketMQ Namesrv
+    name-server: 127.0.0.1:9876 # RocketMQ Namesrv
 
 spring:
-  # RabbitMQ 配置项，对应 RabbitProperties 配置类
-  rabbitmq:
-    host: 127.0.0.1 # RabbitMQ 服务的地址
-    port: 5672 # RabbitMQ 服务的端口
-    username: rabbit # RabbitMQ 服务的账号
-    password: rabbit # RabbitMQ 服务的密码
-  # Kafka 配置项，对应 KafkaProperties 配置类
-  kafka:
-    bootstrap-servers: 127.0.0.1:9092 # 指定 Kafka Broker 地址，可以设置多个，以逗号分隔
+    # RabbitMQ 配置项，对应 RabbitProperties 配置类
+    rabbitmq:
+        host: 127.0.0.1 # RabbitMQ 服务的地址
+        port: 5672 # RabbitMQ 服务的端口
+        username: guest # RabbitMQ 服务的账号
+        password: guest # RabbitMQ 服务的密码
+    # Kafka 配置项
+    kafka:
+        bootstrap-servers: 127.0.0.1:9092 # Kafka Broker 地址（本地连接）
+        # Producer 配置
+        producer:
+            acks: all # 所有 leader 和 follower 应答
+            retries: 3 # 重试次数
+            key-serializer: org.apache.kafka.common.serialization.StringSerializer
+            value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+        # Consumer 配置
+        consumer:
+            auto-offset-reset: earliest # 从最早 offset 开始消费
+            key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+            value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+            enable-auto-commit: false # 手动提交，确保消息被正确处理后才提交
+            max-poll-interval-ms: 300000 # 消费处理最大间隔（5分钟）
+            session-timeout-ms: 30000 # 会话超时
+            heartbeat-interval-ms: 10000 # 心跳间隔
+        # Listener 配置
+        listener:
+            missing-topics-fatal: false # 主题不存在不报错
+            ack-mode: manual # 手动确认模式
+            concurrency: 3 # 默认并发消费者数量
+        properties:
+            spring:
+                json:
+                    trusted:
+                        packages: '*'
+
+# WebSocket 配置（使用 Kafka 作为消息发送）
+yudao:
+    websocket:
+        enable: true
+        sender-type: kafka
+        sender-kafka:
+            topic: ${spring.application.name}-websocket # WebSocket 消息 Topic
+            consumer-group: ${spring.application.name}-websocket-consumer
 
 --- #################### 服务保障相关配置 ####################
 
 # Lock4j 配置项
 lock4j:
-  acquire-timeout: 3000 # 获取分布式锁超时时间，默认为 3000 毫秒
-  expire: 30000 # 分布式锁的超时时间，默认为 30 毫秒
+    acquire-timeout: 10000 # 获取分布式锁超时时间，默认为 3000 毫秒
+    expire: 60000 # 分布式锁的超时时间，默认为 30 毫秒
 
 --- #################### 监控相关配置 ####################
 
 # Actuator 监控端点的配置项
 management:
-  endpoints:
-    web:
-      base-path: /actuator # Actuator 提供的 API 接口的根目录。默认为 /actuator
-      exposure:
-        include: '*' # 需要开放的端点。默认值只打开 health 和 info 两个端点。通过设置 * ，可以开放所有端点。
+    endpoints:
+        web:
+            base-path: /actuator # Actuator 提供的 API 接口的根目录。默认为 /actuator
+            exposure:
+                include: '*' # 需要开放的端点。默认值只打开 health 和 info 两个端点。通过设置 * ，可以开放所有端点。
 
 # Spring Boot Admin 配置项
 spring:
-  boot:
-    admin:
-      # Spring Boot Admin Client 客户端的相关配置
-      client:
-        url: http://127.0.0.1:${server.port}/${spring.boot.admin.context-path} # 设置 Spring Boot Admin Server 地址
-        instance:
-          service-host-type: IP # 注册实例时，优先使用 IP [IP, HOST_NAME, CANONICAL_HOST_NAME]
-        username: admin
-        password: admin
-      # Spring Boot Admin Server 服务端的相关配置
-      context-path: /admin # 配置 Spring
+    boot:
+        admin:
+            # Spring Boot Admin Client 客户端的相关配置
+            client:
+                url: http://127.0.0.1:${server.port}/${spring.boot.admin.context-path} # 设置 Spring Boot Admin Server 地址
+                instance:
+                    service-host-type: IP # 注册实例时，优先使用 IP [IP, HOST_NAME, CANONICAL_HOST_NAME]
+                username: admin
+                password: admin
+            # Spring Boot Admin Server 服务端的相关配置
+            context-path: /admin # 配置 Spring
 
 # 日志文件配置
 logging:
-  file:
-    name: /data/logs/yudao-server.log # 日志文件名，全路径
-  level:
-    # 配置自己写的 MyBatis Mapper 打印日志
-    cn.iocoder.yudao.module.bpm.dal.mysql: debug
-    cn.iocoder.yudao.module.infra.dal.mysql: debug
-    cn.iocoder.yudao.module.infra.dal.mysql.logger.ApiErrorLogMapper: INFO # 配置 ApiErrorLogMapper 的日志级别为 info，避免和 GlobalExceptionHandler 重复打印
-    cn.iocoder.yudao.module.infra.dal.mysql.job.JobLogMapper: INFO # 配置 JobLogMapper 的日志级别为 info
-    cn.iocoder.yudao.module.infra.dal.mysql.file.FileConfigMapper: INFO # 配置 FileConfigMapper 的日志级别为 info
-    cn.iocoder.yudao.module.pay.dal.mysql: debug
-    cn.iocoder.yudao.module.pay.dal.mysql.notify.PayNotifyTaskMapper: INFO # 配置 PayNotifyTaskMapper 的日志级别为 info
-    cn.iocoder.yudao.module.system.dal.mysql: debug
-    cn.iocoder.yudao.module.system.dal.mysql.sms.SmsChannelMapper: INFO # 配置 SmsChannelMapper 的日志级别为 info
-    cn.iocoder.yudao.module.tool.dal.mysql: debug
-    cn.iocoder.yudao.module.member.dal.mysql: debug
-    cn.iocoder.yudao.module.trade.dal.mysql: debug
-    cn.iocoder.yudao.module.promotion.dal.mysql: debug
-    cn.iocoder.yudao.module.statistics.dal.mysql: debug
-    cn.iocoder.yudao.module.crm.dal.mysql: debug
-    cn.iocoder.yudao.module.erp.dal.mysql: debug
-    cn.iocoder.yudao.module.iot.dal.mysql: debug
-    cn.iocoder.yudao.module.iot.dal.tdengine: DEBUG
-    cn.iocoder.yudao.module.iot.service.rule: debug
-    cn.iocoder.yudao.module.ai.dal.mysql: debug
-    org.springframework.context.support.PostProcessorRegistrationDelegate: ERROR # TODO 芋艿：先禁用，Spring Boot 3.X 存在部分错误的 WARN 提示
+    file:
+        name: ${user.home}/logs/${spring.application.name}.log # 日志文件名，全路径
+    level:
+        # Spring Security 请求认证与授权流程
+        org.springframework.security: WARN
+        # Spring MVC 请求路由匹配
+        org.springframework.web.servlet: WARN
+        # Token 认证过滤器、业务代码
+        cn.iocoder.yudao: WARN
+        # 将 MyBatis-Plus 的日志级别调整为 WARN 或 ERROR，过滤SQL详细日志
+        cn.iocoder.yudao.module.*.dal.mysql: WARN
+        com.baomidou.mybatisplus: WARN
+        # 关闭饿了么SDK详细日志输出
+        ApiExecutor: WARN
+        AbstractHttpClient: WARN
+        me.ele: WARN
+        lib.ele: WARN
+        ocean: WARN
 
-debug: false
-
---- #################### 微信公众号、小程序相关配置 ####################
-wx:
-  mp: # 公众号配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-mp-spring-boot-starter/README.md 文档
-#    app-id: wx041349c6f39b268b # 测试号（牛希尧提供的）
-#    secret: 5abee519483bc9f8cb37ce280e814bd0
-#    app-id: wx5b23ba7a5589ecbb # 测试号（自己的）
-#    secret: 2a7b3b20c537e52e74afd395eb85f61f
-    app-id: wxf56b1542b9e85f8a # 测试号（Kongdy 提供的）
-    secret: 496379dcef1ba869e9234de8d598cfd3
-    # 存储配置，解决 AccessToken 的跨节点的共享
-    config-storage:
-      type: RedisTemplate # 采用 RedisTemplate 操作 Redis，会自动从 Spring 中获取
-      key-prefix: wx # Redis Key 的前缀
-      http-client-type: HttpClient # 采用 HttpClient 请求微信公众号平台
-  miniapp: # 小程序配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-miniapp-spring-boot-starter/README.md 文档
-    #    appid: wx62056c0d5e8db250 # 测试号（牛希尧提供的）
-    #    secret: 333ae72f41552af1e998fe1f54e1584a
-#    appid: wx63c280fe3248a3e7 # wenhualian的接口测试号
-#    secret: 6f270509224a7ae1296bbf1c8cb97aed
-    appid: wxc4598c446f8a9cb3 # 测试号（Kongdy 提供的）
-    secret: 4a1a04e07f6a4a0751b39c3064a92c8b
-#    appid: wx66186af0759f47c9 # 测试号（puhui 提供的）
-#    secret: 3218bcbd112cbc614c7264ceb20144ac
-    config-storage:
-      type: RedisTemplate # 采用 RedisTemplate 操作 Redis，会自动从 Spring 中获取
-      key-prefix: wa # Redis Key 的前缀
-      http-client-type: HttpClient # 采用 HttpClient 请求微信公众号平台
-
+--- #################### 微信公众号相关配置 ####################
+wx: # 参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-mp-spring-boot-starter/README.md 文档
+    mp:
+        # 公众号配置(必填)
+        app-id: wx041349c6f39b268b
+        secret: 5abee519483bc9f8cb37ce280e814bd0
+        # 存储配置，解决 AccessToken 的跨节点的共享
+        config-storage:
+            type: RedisTemplate # 采用 RedisTemplate 操作 Redis，会自动从 Spring 中获取
+            key-prefix: wx # Redis Key 的前缀
+            http-client-type: HttpClient # 采用 HttpClient 请求微信公众号平台
+    miniapp: # 小程序配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-miniapp-spring-boot-starter/README.md 文档
+        appid: wx63c280fe3248a3e7
+        secret: 6f270509224a7ae1296bbf1c8cb97aed
+        config-storage:
+            type: RedisTemplate # 采用 RedisTemplate 操作 Redis，会自动从 Spring 中获取
+            key-prefix: wa # Redis Key 的前缀
+            http-client-type: HttpClient # 采用 HttpClient 请求微信公众号平台
 --- #################### 芋道相关配置 ####################
 
-# 芋道配置项，设置当前项目所有自定义的配置
+# 配置项，设置当前项目所有自定义的配置
 yudao:
-  captcha:
-    enable: false # 本地环境，暂时关闭图片验证码，方便登录等接口的测试；
-  security:
-    mock-enable: true
-  pay:
-    order-notify-url: https://yutou.mynatapp.cc/admin-api/pay/notify/order # 支付渠道的【支付】回调地址
-    refund-notify-url: https://yutou.mynatapp.cc/admin-api/pay/notify/refund # 支付渠道的【退款】回调地址
-    transfer-notify-url: https://yutou.mynatapp.cc/admin-api/pay/notify/transfer # 支付渠道的【转账】回调地址
-  access-log: # 访问日志的配置项
-    enable: false
-  demo: false # 关闭演示模式
-  wxa-code:
-    env-version: develop # 小程序版本: 正式版为 "release"；体验版为 "trial"；开发版为 "develop"
-  wxa-subscribe-message:
-    miniprogram-state: developer # 跳转小程序类型：开发版为 “developer”；体验版为 “trial”为；正式版为 “formal”
-  tencent-lbs-key: TVDBZ-TDILD-4ON4B-PFDZA-RNLKH-VVF6E # QQ 地图的密钥 https://lbs.qq.com/service/staticV2/staticGuide/staticDoc
+    info:
+        version: 20260513_PROD
+    pay:
+        order-notify-url: http://yunai.natapp1.cc/admin-api/pay/notify/order # 支付渠道的【支付】回调地址
+        refund-notify-url: http://yunai.natapp1.cc/admin-api/pay/notify/refund # 支付渠道的【退款】回调地址
+        transfer-notify-url: https://yunai.natapp1.cc/admin-api/pay/notify/transfer # 支付渠道的【转账】回调地址
+    demo: false # 开启演示模式
+    tencent-lbs-key: TVDBZ-TDILD-4ON4B-PFDZA-RNLKH-VVF6E # QQ 地图的密钥 https://lbs.qq.com/service/staticV2/staticGuide/staticDoc
 
 justauth:
-  enabled: true
-  type:
-    DINGTALK: # 钉钉
-      client-id: dingvrnreaje3yqvzhxg
-      client-secret: i8E6iZyDvZj51JIb0tYsYfVQYOks9Cq1lgryEjFRqC79P3iJcrxEwT6Qk2QvLrLI
-      ignore-check-redirect-uri: true
-    WECHAT_ENTERPRISE: # 企业微信
-      client-id: wwd411c69a39ad2e54
-      client-secret: 1wTb7hYxnpT2TUbIeHGXGo7T0odav1ic10mLdyyATOw
-      agent-id: 1000004
-      ignore-check-redirect-uri: true
-    # noinspection SpringBootApplicationYaml
-    WECHAT_MINI_PROGRAM: # 微信小程序
-      client-id: ${wx.miniapp.appid}
-      client-secret: ${wx.miniapp.secret}
-      ignore-check-redirect-uri: true
-      ignore-check-state: true # 微信小程序，不会使用到 state，所以不进行校验
-    WECHAT_MP: # 微信公众号
-      client-id: ${wx.mp.app-id}
-      client-secret: ${wx.mp.secret}
-      ignore-check-redirect-uri: true
-    ALIPAY: # 支付宝小程序
-      client-id: xx
-      client-secret: xx
-      alipay-public-key: xx
-      ignore-check-redirect-uri: true
-      ignore-check-state: true
-  cache:
-    type: REDIS
-    prefix: 'social_auth_state:' # 缓存前缀，目前只对 Redis 缓存生效，默认 JUSTAUTH::STATE::
-    timeout: 24h # 超时时长，目前只对 Redis 缓存生效，默认 3 分钟
+    enabled: true
+    type:
+        DINGTALK: # 钉钉
+            client-id: dingvrnreaje3yqvzhxg
+            client-secret: i8E6iZyDvZj51JIb0tYsYfVQYOks9Cq1lgryEjFRqC79P3iJcrxEwT6Qk2QvLrLI
+            ignore-check-redirect-uri: true
+        WECHAT_ENTERPRISE: # 企业微信
+            client-id: wwd411c69a39ad2e54
+            client-secret: 1wTb7hYxnpT2TUbIeHGXGo7T0odav1ic10mLdyyATOw
+            agent-id: 1000004
+            ignore-check-redirect-uri: true
+        # noinspection SpringBootApplicationYaml
+        WECHAT_MINI_PROGRAM: # 微信小程序
+            client-id: ${wx.miniapp.appid}
+            client-secret: ${wx.miniapp.secret}
+            ignore-check-redirect-uri: true
+            ignore-check-state: true # 微信小程序，不会使用到 state，所以不进行校验
+        WECHAT_MP: # 微信公众号
+            client-id: ${wx.mp.app-id}
+            client-secret: ${wx.mp.secret}
+            ignore-check-redirect-uri: true
+        ALIPAY: # 支付宝小程序
+            client-id: xx
+            client-secret: xx
+            alipay-public-key: xx
+            ignore-check-redirect-uri: true
+            ignore-check-state: true
+    cache:
+        type: REDIS
+        prefix: 'social_auth_state:' # 缓存前缀，目前只对 Redis 缓存生效，默认 JUSTAUTH::STATE::
+        timeout: 24h # 超时时长，目前只对 Redis 缓存生效，默认 3 分钟
