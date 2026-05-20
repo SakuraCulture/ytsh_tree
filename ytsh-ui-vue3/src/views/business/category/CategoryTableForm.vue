@@ -148,7 +148,12 @@
 
 <script setup lang="ts">
 import { CategoryTableApi, CategoryTable } from '@/api/business/category'
-import { defaultProps, handleTree } from '@/utils/tree'
+import {
+  buildCategoryMap,
+  buildCategoryPathNames,
+  deriveCategoryFieldsByParent
+} from './categoryFormLogic'
+import { handleTree } from '@/utils/tree'
 
 defineOptions({ name: 'CategoryTableForm' })
 
@@ -195,59 +200,23 @@ const handleLevelChange = (value: string) => {
   }
 }
 
-const handleParentChange = async (parentId: number | undefined) => {
-  if (parentId === undefined || parentId === 0) {
-    formData.value.categoryLevel = '1'
-    formData.value.categoryPath = ''
-    formData.value.categoryPathNames = '-'
-    return
-  }
+const syncDerivedCategoryFields = (parentId: string | number | undefined | null) => {
+  Object.assign(formData.value, deriveCategoryFieldsByParent(parentId, categoryMap.value))
+}
 
-  const parent = categoryMap.value.get(parentId)
-  if (parent) {
-    const parentLevel = parseInt(parent.categoryLevel || '0')
-    if (parentLevel < 3) {
-      formData.value.categoryLevel = String(parentLevel + 1)
-    } else {
-      formData.value.categoryLevel = '3'
+const handleParentChange = (parentId: string | number | undefined) => {
+  syncDerivedCategoryFields(parentId)
+}
+
+watch(
+  () => formData.value.parentId,
+  (parentId, previousParentId) => {
+    if (!dialogVisible.value || parentId === previousParentId) {
+      return
     }
-
-    const parentPath = parent.categoryPath || ''
-    formData.value.categoryPath = parentPath ? `${parentPath}${parentId}/` : `${parentId}/`
-    formData.value.categoryPathNames = buildPathByParentId(parentId)
+    syncDerivedCategoryFields(parentId)
   }
-}
-
-const buildPathByParentId = (parentId: number | undefined): string => {
-  if (!parentId || parentId === 0) {
-    return '-'
-  }
-
-  const pathNames: string[] = []
-  let currentParentId = parentId
-
-  while (currentParentId && currentParentId !== 0) {
-    const parent = categoryMap.value.get(currentParentId)
-    if (parent) {
-      pathNames.unshift(parent.categoryName)
-      currentParentId = parent.parentId
-    } else {
-      break
-    }
-  }
-
-  return pathNames.length > 0 ? pathNames.join(' / ') : '-'
-}
-
-const buildCategoryPathNames = (path: string): string => {
-  if (!path) return '-'
-  const pathIds = path.split('/').filter(id => id && id !== '0')
-  const pathNames = pathIds.map(id => {
-    const category = categoryMap.value.get(parseInt(id))
-    return category?.categoryName || id
-  })
-  return pathNames.join(' / ') || '-'
-}
+)
 
 const handleIconPreview = () => {
   iconError.value = false
@@ -269,6 +238,8 @@ const open = async (type: string, id?: number) => {
   formType.value = type
   resetForm()
 
+  await preloadCategoryOptions()
+
   if (formType.value === 'create') {
     formData.value.status = '1'
   }
@@ -276,7 +247,6 @@ const open = async (type: string, id?: number) => {
   if (id) {
     formLoading.value = true
     try {
-      await getCategoryTableListForForm()
       const data = await CategoryTableApi.getCategoryTable(id)
       formData.value = {
         ...data,
@@ -293,16 +263,11 @@ const open = async (type: string, id?: number) => {
       } else {
         formData.value.parentCategoryName = '-'
       }
-      if (data.categoryPath) {
-        formData.value.categoryPathNames = buildCategoryPathNames(data.categoryPath)
-      } else {
-        formData.value.categoryPathNames = '-'
-      }
+      formData.value.categoryPathNames = buildCategoryPathNames(data.categoryPath, categoryMap.value)
     } finally {
       formLoading.value = false
     }
   }
-  await getCategoryTableTree()
 }
 
 defineExpose({ open })
@@ -360,23 +325,18 @@ const resetForm = () => {
   formRef.value?.resetFields()
 }
 
-const getCategoryTableListForForm = async () => {
-  const data = await CategoryTableApi.getCategoryTableList()
+const preloadCategoryOptions = async () => {
+  const data = await CategoryTableApi.getCategoryTableList({ pageNo: 1, pageSize: 999999 })
   const list = data.list || data || []
   allCategoryList.value = list
-  categoryMap.value = new Map()
-  list.forEach(item => {
-    categoryMap.value.set(item.categoryId, item)
-  })
-}
-
-const getCategoryTableTree = async () => {
-  categoryTableTree.value = []
-  const data = await CategoryTableApi.getCategoryTableList()
-  const list = data.list || data || []
-  const root = { categoryId: 0, categoryName: '顶级（无父类目）', children: [] }
-  root.children = handleTree(list, 'categoryId', 'parentId')
-  categoryTableTree.value.push(root)
+  categoryMap.value = buildCategoryMap(list)
+  categoryTableTree.value = [
+    {
+      categoryId: 0,
+      categoryName: '顶级（无父类目）',
+      children: handleTree(list, 'categoryId', 'parentId')
+    }
+  ]
 }
 </script>
 
