@@ -14,22 +14,22 @@ public interface OrderBillMapper extends BaseMapperX<OrderBillDO> {
 
     @Insert("INSERT INTO order_bill_table " +
             "(bill_id, order_id, order_date, refund_id, merchant_code, store_code, shop_id, store_name, " +
-            "channel_type, bill_date, status, bill_amount, item_price, package_fee, delivery_fee, " +
+            "channel_type, bill_date, request_bill_date, status, bill_amount, item_price, package_fee, delivery_fee, " +
             "shop_marketing_fee, platform_fee, donation_fee, user_pay_shipping_amount, " +
             "user_online_pay_amount, product_preferences, not_product_preferences, " +
             "performance_service_fee, platform_charge_fee, activity_amount, " +
-            "bill_type_desc, shipping_type, settle_order_id, sync_time, create_time, update_time, tenant_id, deleted) " +
+            "bill_type_desc, shipping_type, settle_order_id, sync_time, db_create_time, db_update_time, create_time, update_time, tenant_id, deleted) " +
             "VALUES " +
             "(#{billId}, #{orderId}, #{orderDate}, #{refundId}, #{merchantCode}, #{storeCode}, #{shopId}, #{storeName}, " +
-            "#{channelType}, #{billDate}, #{status}, #{billAmount}, #{itemPrice}, #{packageFee}, #{deliveryFee}, " +
+            "#{channelType}, #{billDate}, #{requestBillDate}, #{status}, #{billAmount}, #{itemPrice}, #{packageFee}, #{deliveryFee}, " +
             "#{shopMarketingFee}, #{platformFee}, #{donationFee}, #{userPayShippingAmount}, " +
             "#{userOnlinePayAmount}, #{productPreferences}, #{notProductPreferences}, " +
             "#{performanceServiceFee}, #{platformChargeFee}, #{activityAmount}, " +
-            "#{billTypeDesc}, #{shippingType}, #{settleOrderId}, #{syncTime}, #{createTime}, #{updateTime}, #{tenantId}, #{deleted}) " +
+            "#{billTypeDesc}, #{shippingType}, #{settleOrderId}, #{syncTime}, #{dbCreateTime}, #{dbUpdateTime}, #{createTime}, #{updateTime}, #{tenantId}, #{deleted}) " +
             "ON DUPLICATE KEY UPDATE " +
             "order_date=VALUES(order_date), refund_id=VALUES(refund_id), " +
             "merchant_code=VALUES(merchant_code), store_code=VALUES(store_code), shop_id=VALUES(shop_id), " +
-            "store_name=VALUES(store_name), channel_type=VALUES(channel_type), bill_date=VALUES(bill_date), " +
+            "store_name=VALUES(store_name), channel_type=VALUES(channel_type), bill_date=VALUES(bill_date), request_bill_date=VALUES(request_bill_date), " +
             "status=VALUES(status), bill_amount=VALUES(bill_amount), " +
             "item_price=VALUES(item_price), package_fee=VALUES(package_fee), " +
             "delivery_fee=VALUES(delivery_fee), shop_marketing_fee=VALUES(shop_marketing_fee), " +
@@ -40,7 +40,7 @@ public interface OrderBillMapper extends BaseMapperX<OrderBillDO> {
             "performance_service_fee=VALUES(performance_service_fee), " +
             "platform_charge_fee=VALUES(platform_charge_fee), activity_amount=VALUES(activity_amount), " +
             "bill_type_desc=VALUES(bill_type_desc), shipping_type=VALUES(shipping_type), " +
-            "settle_order_id=VALUES(settle_order_id), sync_time=VALUES(sync_time), update_time=VALUES(update_time)")
+            "settle_order_id=VALUES(settle_order_id), sync_time=VALUES(sync_time), db_update_time=VALUES(db_update_time), create_time=VALUES(create_time), update_time=VALUES(update_time)")
     int rawInsertOrUpdate(OrderBillDO billDO);
 
     @Select("SELECT * FROM order_bill_table WHERE order_id = #{orderId} AND deleted = 0 ORDER BY bill_date DESC LIMIT 1")

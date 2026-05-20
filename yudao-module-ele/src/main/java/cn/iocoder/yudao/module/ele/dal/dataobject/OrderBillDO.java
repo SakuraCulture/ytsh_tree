@@ -34,6 +34,8 @@ public class OrderBillDO {
 
     private LocalDate billDate;
 
+    private LocalDate requestBillDate;
+
     private Integer status;
 
     private Long billAmount;
@@ -71,6 +73,10 @@ public class OrderBillDO {
     private String settleOrderId;
 
     private Date syncTime;
+
+    private Date dbCreateTime;
+
+    private Date dbUpdateTime;
 
     private Long createTime;
 

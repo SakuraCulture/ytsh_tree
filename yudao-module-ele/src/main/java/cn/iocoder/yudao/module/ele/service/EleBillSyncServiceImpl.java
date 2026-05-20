@@ -43,6 +43,8 @@ import java.util.stream.Collectors;
 public class EleBillSyncServiceImpl implements EleBillSyncService {
 
     private static final String BILL_SYNC_LOCK_PREFIX = "ele:bill:sync:";
+    private static final DateTimeFormatter BILL_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter BILL_DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Resource
     private EleOpenApiClient eleOpenApiClient;
@@ -394,24 +396,39 @@ public class EleBillSyncServiceImpl implements EleBillSyncService {
         if (CollUtil.isEmpty(bills)) {
             return;
         }
-        long now = System.currentTimeMillis();
         String tenantId = TenantContextHolder.getTenantId() != null ? TenantContextHolder.getTenantId().toString() : "1";
+        LocalDate requestBillDate = LocalDate.parse(billDate, BILL_DATE_FORMATTER);
         for (BillListRespDTO.BillDetailDTO bill : bills) {
+            LocalDate sourceBillDate = parseBillDate(bill.getBillDate());
+            if (sourceBillDate == null) {
+                sourceBillDate = requestBillDate;
+            }
+            Long sourceCreateTime = parseBillDateTimeMillis(bill.getCreateTime());
+            Long sourceUpdateTime = parseBillDateTimeMillis(bill.getUpdateTime());
+            if (!isValidBillRow(bill, sourceBillDate, sourceCreateTime, sourceUpdateTime, requestBillDate)) {
+                continue;
+            }
+
+            Date now = new Date();
             OrderBillDO billDO = new OrderBillDO();
             String settleId = StrUtil.isNotBlank(bill.getSettleOrderId()) ? bill.getSettleOrderId() : bill.getOrderId();
-            String billType = StrUtil.isNotBlank(bill.getBillTypeDesc()) ? bill.getBillTypeDesc() : "NORMAL";
-            billDO.setBillId(settleId + "_" + billDate + "_" + billType);
+            String billType = bill.getBillTypeDesc();
+            billDO.setBillId(settleId + "_" + sourceBillDate + "_" + billType);
             billDO.setOrderId(bill.getOrderId());
-            if (StrUtil.isNotBlank(bill.getOrderDate())) {
-                billDO.setOrderDate(LocalDate.parse(bill.getOrderDate()));
+            LocalDate orderDate = parseBillDate(bill.getOrderDate());
+            if (orderDate == null && StrUtil.isNotBlank(bill.getOrderDate())) {
+                log.warn("【账单同步】orderDate格式非法，orderId={}, storeCode={}, requestBillDate={}, rawOrderDate={}",
+                        bill.getOrderId(), bill.getStoreCode(), requestBillDate, bill.getOrderDate());
             }
+            billDO.setOrderDate(orderDate);
             billDO.setRefundId(bill.getRefundId());
             billDO.setMerchantCode(bill.getMerchantCode());
             billDO.setStoreCode(bill.getStoreCode());
             billDO.setShopId(bill.getShopId());
             billDO.setStoreName(bill.getStoreName());
             billDO.setChannelType(bill.getChannelType());
-            billDO.setBillDate(LocalDate.parse(billDate));
+            billDO.setBillDate(sourceBillDate);
+            billDO.setRequestBillDate(requestBillDate);
             billDO.setStatus(bill.getStatus());
             billDO.setBillAmount(bill.getBillAmount());
             billDO.setItemPrice(bill.getItemPrice());
@@ -426,16 +443,101 @@ public class EleBillSyncServiceImpl implements EleBillSyncService {
             billDO.setNotProductPreferences(bill.getNotProductPreferences());
             billDO.setPerformanceServiceFee(bill.getPerformanceServiceFee());
             billDO.setPlatformChargeFee(bill.getPlatformChargeFee());
-            billDO.setActivityAmount(MoneyUtils.parseStringToLong(bill.getActivityAmount()));
-            billDO.setBillTypeDesc(bill.getBillTypeDesc());
+            billDO.setActivityAmount(parseActivityAmount(bill, requestBillDate));
+            billDO.setBillTypeDesc(billType);
             billDO.setShippingType(bill.getShippingType());
             billDO.setSettleOrderId(bill.getSettleOrderId());
-            billDO.setSyncTime(new Date());
-            billDO.setCreateTime(now);
-            billDO.setUpdateTime(now);
+            billDO.setSyncTime(now);
+            billDO.setDbCreateTime(now);
+            billDO.setDbUpdateTime(now);
+            billDO.setCreateTime(sourceCreateTime);
+            billDO.setUpdateTime(sourceUpdateTime);
             billDO.setTenantId(tenantId);
             billDO.setDeleted(false);
             orderBillMapper.rawInsertOrUpdate(billDO);
+        }
+    }
+
+    private boolean isValidBillRow(BillListRespDTO.BillDetailDTO bill, LocalDate sourceBillDate,
+                                   Long sourceCreateTime, Long sourceUpdateTime, LocalDate requestBillDate) {
+        if (StrUtil.isBlank(bill.getOrderId())) {
+            log.error("【账单同步】跳过账单，orderId为空，storeCode={}, requestBillDate={}", bill.getStoreCode(), requestBillDate);
+            return false;
+        }
+        if (StrUtil.isBlank(bill.getMerchantCode())) {
+            log.error("【账单同步】跳过账单，merchantCode为空，orderId={}, storeCode={}, requestBillDate={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate);
+            return false;
+        }
+        if (StrUtil.isBlank(bill.getStoreCode())) {
+            log.error("【账单同步】跳过账单，storeCode为空，orderId={}, requestBillDate={}", bill.getOrderId(), requestBillDate);
+            return false;
+        }
+        if (sourceBillDate == null) {
+            log.error("【账单同步】跳过账单，billDate为空或格式非法，orderId={}, storeCode={}, requestBillDate={}, sourceBillDate={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate, bill.getBillDate());
+            return false;
+        }
+        if (sourceCreateTime == null) {
+            log.error("【账单同步】跳过账单，createTime为空或格式非法，orderId={}, storeCode={}, requestBillDate={}, sourceCreateTime={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate, bill.getCreateTime());
+            return false;
+        }
+        if (sourceUpdateTime == null) {
+            log.error("【账单同步】跳过账单，updateTime为空或格式非法，orderId={}, storeCode={}, requestBillDate={}, sourceUpdateTime={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate, bill.getUpdateTime());
+            return false;
+        }
+        if (bill.getStatus() == null) {
+            log.error("【账单同步】跳过账单，status为空，orderId={}, storeCode={}, requestBillDate={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate);
+            return false;
+        }
+        if (bill.getBillAmount() == null) {
+            log.error("【账单同步】跳过账单，billAmount为空，orderId={}, storeCode={}, requestBillDate={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate);
+            return false;
+        }
+        if (StrUtil.isBlank(bill.getBillTypeDesc())) {
+            log.error("【账单同步】跳过账单，billTypeDesc为空，orderId={}, storeCode={}, requestBillDate={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate);
+            return false;
+        }
+        return true;
+    }
+
+    private Long parseActivityAmount(BillListRespDTO.BillDetailDTO bill, LocalDate requestBillDate) {
+        if (StrUtil.isBlank(bill.getActivityAmount())) {
+            return null;
+        }
+        Long activityAmount = MoneyUtils.parseStringToLong(bill.getActivityAmount());
+        if (activityAmount == null) {
+            log.warn("【账单同步】activityAmount转换失败，orderId={}, storeCode={}, requestBillDate={}, rawValue={}",
+                    bill.getOrderId(), bill.getStoreCode(), requestBillDate, bill.getActivityAmount());
+        }
+        return activityAmount;
+    }
+
+    private LocalDate parseBillDate(String value) {
+        if (StrUtil.isBlank(value)) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value.trim(), BILL_DATE_FORMATTER);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Long parseBillDateTimeMillis(String value) {
+        if (StrUtil.isBlank(value)) {
+            return null;
+        }
+        try {
+            LocalDateTime dateTime = LocalDateTime.parse(value.trim(), BILL_DATETIME_FORMATTER);
+            return dateTime.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            return null;
         }
     }
 
