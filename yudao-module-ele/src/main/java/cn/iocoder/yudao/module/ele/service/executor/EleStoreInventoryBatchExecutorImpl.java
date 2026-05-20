@@ -10,6 +10,8 @@ import cn.iocoder.yudao.module.ele.service.EleSkuInventoryQueryService;
 import cn.iocoder.yudao.module.ele.service.EleStoreInventorySkuScopeService;
 import cn.iocoder.yudao.module.ele.service.bo.EleSkuInventoryBatchQueryReqBO;
 import cn.iocoder.yudao.module.ele.service.dto.EleSkuInventoryBatchQueryRespDTO;
+import cn.iocoder.yudao.module.ele.service.guard.StoreExecutionGuard;
+import cn.iocoder.yudao.module.ele.service.guard.StoreExecutionScenario;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -43,6 +45,8 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
     @Resource
     private EleStoreInventorySkuScopeService skuScopeService;
     @Resource
+    private StoreExecutionGuard storeExecutionGuard;
+    @Resource
     @Qualifier("eleStoreInventoryBatchExecutor")
     private ThreadPoolTaskExecutor batchExecutor;
 
@@ -59,13 +63,16 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
             log.warn("【饿了么门店库存批量任务】任务不存在, taskId={}", taskId);
             return;
         }
+        if (!claimTask(taskId)) {
+            log.info("【饿了么门店库存批量任务】任务已被其他执行流领取, taskId={}", taskId);
+            return;
+        }
         List<EleStoreInventoryBatchTaskStoreDO> taskStores = taskStoreMapper.selectListByTaskId(taskId);
         if (CollUtil.isEmpty(taskStores)) {
             markTaskFailed(taskId, "任务没有门店明细");
             return;
         }
 
-        updateTaskRunning(taskId);
         forceRefreshTaskAggregate(taskId);
         int initialMaxInFlight = resolveMaxInFlight();
         List<CompletableFuture<Void>> inFlightFutures = new ArrayList<>(Math.min(taskStores.size(), initialMaxInFlight));
@@ -96,44 +103,54 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         StoreTaskSummary summary = new StoreTaskSummary();
         String errorMsg = null;
         try {
-            updateStoreRunning(taskStore.getId());
+            if (!updateStoreRunning(taskStore.getId())) {
+                log.info("【饿了么门店库存批量任务】门店明细已被恢复流程接管, 跳过执行, taskStoreId={}", taskStore.getId());
+                return;
+            }
             if (isCancelled(task.getId())) {
                 finishStore(taskStore.getId(), STATUS_CANCELLED, null, summary);
                 return;
             }
 
-            List<String> skuCodes = skuScopeService.listStoreSkuScope(taskStore.getStoreId(), taskStore.getErpStoreCode());
-            if (CollUtil.isEmpty(skuCodes)) {
-                finishStore(taskStore.getId(), STATUS_SUCCESS, null, summary);
-                return;
-            }
-
-            List<List<String>> skuBatches = CollUtil.split(skuCodes, SKU_BATCH_SIZE);
-            summary.totalBatchNo = skuBatches.size();
-            for (int i = 0; i < skuBatches.size(); i++) {
-                if (isCancelled(task.getId())) {
-                    finishStore(taskStore.getId(), STATUS_CANCELLED, errorMsg, summary);
-                    return;
-                }
-                List<String> batch = skuBatches.get(i);
-                EleSkuInventoryBatchQueryRespDTO respDTO = queryStoreInventory(taskStore, batch);
-                summary.finishedBatchNo = i + 1;
-                summary.totalSkuCount += batch.size();
-                summary.formalSuccessCount += valueOf(respDTO.getFormalSuccessCount());
-                summary.shadowSuccessCount += valueOf(respDTO.getShadowSuccessCount());
-                summary.governanceCount += valueOf(respDTO.getGovernanceCount());
-                summary.failureCount += valueOf(respDTO.getFailureCount()) + valueOf(respDTO.getMissingRowCount());
-                errorMsg = appendError(errorMsg, joinErrors(respDTO.getErrorDetails()));
-                updateStoreProgress(taskStore.getId(), summary);
-            }
-
+            storeExecutionGuard.runWithStoreLock(StoreExecutionScenario.STORE_INVENTORY,
+                    taskStore.getPlatformStoreId(), () -> executeStoreBatches(task, taskStore, summary));
+            errorMsg = summary.errorMsg;
             finishStore(taskStore.getId(), resolveStoreStatus(summary, errorMsg), errorMsg, summary);
+        } catch (TaskCancelledException ex) {
+            finishStore(taskStore.getId(), STATUS_CANCELLED, summary.errorMsg, summary);
         } catch (Exception ex) {
             log.error("【饿了么门店库存批量任务】门店任务执行失败, taskId={}, storeId={}", task.getId(), taskStore.getStoreId(), ex);
             summary.failureCount++;
             finishStore(taskStore.getId(), STATUS_FAILED, ex.getMessage(), summary);
         } finally {
             forceRefreshTaskAggregate(task.getId());
+        }
+    }
+
+    private void executeStoreBatches(EleStoreInventoryBatchTaskDO task,
+                                     EleStoreInventoryBatchTaskStoreDO taskStore,
+                                     StoreTaskSummary summary) {
+        List<String> skuCodes = skuScopeService.listStoreSkuScope(taskStore.getStoreId(), taskStore.getErpStoreCode());
+        if (CollUtil.isEmpty(skuCodes)) {
+            return;
+        }
+
+        List<List<String>> skuBatches = CollUtil.split(skuCodes, SKU_BATCH_SIZE);
+        summary.totalBatchNo = skuBatches.size();
+        for (int i = 0; i < skuBatches.size(); i++) {
+            if (isCancelled(task.getId())) {
+                throw new TaskCancelledException();
+            }
+            List<String> batch = skuBatches.get(i);
+            EleSkuInventoryBatchQueryRespDTO respDTO = queryStoreInventory(taskStore, batch);
+            summary.finishedBatchNo = i + 1;
+            summary.totalSkuCount += batch.size();
+            summary.formalSuccessCount += valueOf(respDTO.getFormalSuccessCount());
+            summary.shadowSuccessCount += valueOf(respDTO.getShadowSuccessCount());
+            summary.governanceCount += valueOf(respDTO.getGovernanceCount());
+            summary.failureCount += valueOf(respDTO.getFailureCount());
+            summary.errorMsg = appendError(summary.errorMsg, joinErrors(respDTO.getErrorDetails()));
+            updateStoreProgress(taskStore.getId(), summary);
         }
     }
 
@@ -160,7 +177,6 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
     private void updateStoreProgress(Long taskStoreId, StoreTaskSummary summary) {
         EleStoreInventoryBatchTaskStoreDO updateObj = new EleStoreInventoryBatchTaskStoreDO();
         updateObj.setId(taskStoreId);
-        updateObj.setStatus(STATUS_RUNNING);
         updateObj.setCurrentBatchNo(summary.finishedBatchNo);
         updateObj.setTotalBatchNo(summary.totalBatchNo);
         updateObj.setTotalSkuCount(summary.totalSkuCount);
@@ -168,7 +184,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         updateObj.setShadowSuccessCount(summary.shadowSuccessCount);
         updateObj.setGovernanceCount(summary.governanceCount);
         updateObj.setFailureCount(summary.failureCount);
-        taskStoreMapper.updateById(updateObj);
+        taskStoreMapper.updateProgressIfRunning(taskStoreId, updateObj);
     }
 
     private int resolveMaxInFlight() {
@@ -202,28 +218,18 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         return task != null && STATUS_CANCELLED.equals(task.getStatus());
     }
 
-    private void updateTaskRunning(Long taskId) {
-        EleStoreInventoryBatchTaskDO updateObj = new EleStoreInventoryBatchTaskDO();
-        updateObj.setId(taskId);
-        updateObj.setStatus(STATUS_RUNNING);
-        updateObj.setStartedAt(LocalDateTime.now());
-        taskMapper.updateById(updateObj);
+    private boolean claimTask(Long taskId) {
+        return taskMapper.markRunningIfPending(taskId, LocalDateTime.now()) > 0;
     }
 
     private void markTaskFailed(Long taskId, String errorMsg) {
-        EleStoreInventoryBatchTaskDO updateObj = new EleStoreInventoryBatchTaskDO();
-        updateObj.setId(taskId);
-        updateObj.setStatus(STATUS_FAILED);
-        updateObj.setErrorMsg(errorMsg);
-        updateObj.setFinishedAt(LocalDateTime.now());
-        taskMapper.updateById(updateObj);
+        taskMapper.markFailedIfRunning(taskId, errorMsg, LocalDateTime.now());
     }
 
     private void finishTask(Long taskId) {
         TaskAggregate aggregate = buildAggregate(taskId);
         EleStoreInventoryBatchTaskDO updateObj = new EleStoreInventoryBatchTaskDO();
         updateObj.setId(taskId);
-        updateObj.setStatus(aggregate.failedStoreCount == 0 ? STATUS_SUCCESS : STATUS_PARTIAL_FAIL);
         updateObj.setFinishedStoreCount(aggregate.finishedStoreCount);
         updateObj.setTotalBatchCount(aggregate.totalBatchCount);
         updateObj.setFinishedBatchCount(aggregate.finishedBatchCount);
@@ -234,21 +240,16 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         updateObj.setFailureCount(aggregate.failureCount);
         updateObj.setErrorMsg(aggregate.joinedErrorMsg());
         updateObj.setFinishedAt(LocalDateTime.now());
-        taskMapper.updateById(updateObj);
+        taskMapper.finishIfRunning(taskId, aggregate.failedStoreCount == 0 ? STATUS_SUCCESS : STATUS_PARTIAL_FAIL, updateObj);
     }
 
-    private void updateStoreRunning(Long taskStoreId) {
-        EleStoreInventoryBatchTaskStoreDO updateObj = new EleStoreInventoryBatchTaskStoreDO();
-        updateObj.setId(taskStoreId);
-        updateObj.setStatus(STATUS_RUNNING);
-        updateObj.setStartedAt(LocalDateTime.now());
-        taskStoreMapper.updateById(updateObj);
+    private boolean updateStoreRunning(Long taskStoreId) {
+        return taskStoreMapper.markRunningIfPending(taskStoreId, LocalDateTime.now()) > 0;
     }
 
     private void finishStore(Long taskStoreId, String status, String errorMsg, StoreTaskSummary summary) {
         EleStoreInventoryBatchTaskStoreDO updateObj = new EleStoreInventoryBatchTaskStoreDO();
         updateObj.setId(taskStoreId);
-        updateObj.setStatus(status);
         updateObj.setCurrentBatchNo(summary.finishedBatchNo);
         updateObj.setTotalBatchNo(summary.totalBatchNo);
         updateObj.setTotalSkuCount(summary.totalSkuCount);
@@ -258,7 +259,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         updateObj.setFailureCount(summary.failureCount);
         updateObj.setErrorMsg(errorMsg);
         updateObj.setFinishedAt(LocalDateTime.now());
-        taskStoreMapper.updateById(updateObj);
+        taskStoreMapper.finishIfRunning(taskStoreId, status, updateObj);
     }
 
     private void refreshTaskAggregate(Long taskId) {
@@ -274,7 +275,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         updateObj.setGovernanceCount(aggregate.governanceCount);
         updateObj.setFailureCount(aggregate.failureCount);
         updateObj.setErrorMsg(aggregate.joinedErrorMsg());
-        taskMapper.updateById(updateObj);
+        taskMapper.refreshAggregateIfRunning(taskId, updateObj);
     }
 
     private void forceRefreshTaskAggregate(Long taskId) {
@@ -323,6 +324,10 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         private int shadowSuccessCount;
         private int governanceCount;
         private int failureCount;
+        private String errorMsg;
+    }
+
+    private static class TaskCancelledException extends RuntimeException {
     }
 
     private static class TaskAggregate {

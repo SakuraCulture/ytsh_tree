@@ -27,6 +27,10 @@ public class EleStoreGoodsSyncReqBO {
 
     private String storeId;
 
+    private String upstreamMerchantCode;
+
+    private String upstreamStoreCode;
+
     private String skuCode;
 
     private String subSkuCode;

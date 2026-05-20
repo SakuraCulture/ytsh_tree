@@ -36,4 +36,50 @@ public interface EleStoreInventoryBatchTaskStoreMapper extends BaseMapperX<EleSt
                 .eq(EleStoreInventoryBatchTaskStoreDO::getTaskId, taskId)
                 .eq(EleStoreInventoryBatchTaskStoreDO::getStatus, "PENDING"));
     }
+
+    default int failUnfinishedByTaskId(Long taskId, String errorMsg, LocalDateTime finishedAt) {
+        return update(new LambdaUpdateWrapper<EleStoreInventoryBatchTaskStoreDO>()
+                .set(EleStoreInventoryBatchTaskStoreDO::getStatus, "FAILED")
+                .set(EleStoreInventoryBatchTaskStoreDO::getErrorMsg, errorMsg)
+                .set(EleStoreInventoryBatchTaskStoreDO::getFinishedAt, finishedAt)
+                .eq(EleStoreInventoryBatchTaskStoreDO::getTaskId, taskId)
+                .in(EleStoreInventoryBatchTaskStoreDO::getStatus, "PENDING", "RUNNING"));
+    }
+
+    default int markRunningIfPending(Long taskStoreId, LocalDateTime startedAt) {
+        return update(new LambdaUpdateWrapper<EleStoreInventoryBatchTaskStoreDO>()
+                .set(EleStoreInventoryBatchTaskStoreDO::getStatus, "RUNNING")
+                .set(EleStoreInventoryBatchTaskStoreDO::getStartedAt, startedAt)
+                .eq(EleStoreInventoryBatchTaskStoreDO::getId, taskStoreId)
+                .eq(EleStoreInventoryBatchTaskStoreDO::getStatus, "PENDING"));
+    }
+
+    default int updateProgressIfRunning(Long taskStoreId, EleStoreInventoryBatchTaskStoreDO updateObj) {
+        return update(new LambdaUpdateWrapper<EleStoreInventoryBatchTaskStoreDO>()
+                .set(EleStoreInventoryBatchTaskStoreDO::getCurrentBatchNo, updateObj.getCurrentBatchNo())
+                .set(EleStoreInventoryBatchTaskStoreDO::getTotalBatchNo, updateObj.getTotalBatchNo())
+                .set(EleStoreInventoryBatchTaskStoreDO::getTotalSkuCount, updateObj.getTotalSkuCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getFormalSuccessCount, updateObj.getFormalSuccessCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getShadowSuccessCount, updateObj.getShadowSuccessCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getGovernanceCount, updateObj.getGovernanceCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getFailureCount, updateObj.getFailureCount())
+                .eq(EleStoreInventoryBatchTaskStoreDO::getId, taskStoreId)
+                .eq(EleStoreInventoryBatchTaskStoreDO::getStatus, "RUNNING"));
+    }
+
+    default int finishIfRunning(Long taskStoreId, String status, EleStoreInventoryBatchTaskStoreDO updateObj) {
+        return update(new LambdaUpdateWrapper<EleStoreInventoryBatchTaskStoreDO>()
+                .set(EleStoreInventoryBatchTaskStoreDO::getStatus, status)
+                .set(EleStoreInventoryBatchTaskStoreDO::getCurrentBatchNo, updateObj.getCurrentBatchNo())
+                .set(EleStoreInventoryBatchTaskStoreDO::getTotalBatchNo, updateObj.getTotalBatchNo())
+                .set(EleStoreInventoryBatchTaskStoreDO::getTotalSkuCount, updateObj.getTotalSkuCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getFormalSuccessCount, updateObj.getFormalSuccessCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getShadowSuccessCount, updateObj.getShadowSuccessCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getGovernanceCount, updateObj.getGovernanceCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getFailureCount, updateObj.getFailureCount())
+                .set(EleStoreInventoryBatchTaskStoreDO::getErrorMsg, updateObj.getErrorMsg())
+                .set(EleStoreInventoryBatchTaskStoreDO::getFinishedAt, updateObj.getFinishedAt())
+                .eq(EleStoreInventoryBatchTaskStoreDO::getId, taskStoreId)
+                .eq(EleStoreInventoryBatchTaskStoreDO::getStatus, "RUNNING"));
+    }
 }

@@ -37,16 +37,17 @@ public class EleStoreInventoryIngestServiceImpl implements EleStoreInventoryInge
     @Transactional(rollbackFor = Exception.class)
     public EleStoreInventoryIngestResultBO ingest(EleStoreInventoryIngestRowBO row) {
         validate(row);
+        String normalizedStoreId = normalizeNullable(row.getStoreId());
         String skuCode = normalizeNullable(row.getSkuCode());
         if (StrUtil.isNotBlank(skuCode)) {
             SkuTableDO sku = skuTableMapper.selectByProductSkuCode(skuCode);
-            if (sku != null && upsertFormalStock(row, sku)) {
+            if (sku != null && upsertFormalStock(row, normalizedStoreId, sku)) {
                 EleStoreInventoryIngestResultBO result = new EleStoreInventoryIngestResultBO();
                 result.setPersistStatus(PERSIST_STATUS_FORMAL);
                 return result;
             }
         }
-        EleSkuInventoryShadowUpsertReqBO shadowReq = buildShadowReq(row);
+        EleSkuInventoryShadowUpsertReqBO shadowReq = buildShadowReq(row, normalizedStoreId);
         EleStoreInventoryShadowDO shadow = shadowService.upsert(shadowReq, MATCH_STATUS_SKU_NOT_MATCHED, REASON_CODE_SKU_NOT_FOUND);
         Long governanceId = governanceService.createOrRefresh(buildGovernancePool(shadowReq, shadow));
         EleStoreInventoryIngestResultBO result = new EleStoreInventoryIngestResultBO();
@@ -57,12 +58,12 @@ public class EleStoreInventoryIngestServiceImpl implements EleStoreInventoryInge
         return result;
     }
 
-    private boolean upsertFormalStock(EleStoreInventoryIngestRowBO row, SkuTableDO sku) {
-        if (StrUtil.isBlank(row.getStoreId())) {
+    private boolean upsertFormalStock(EleStoreInventoryIngestRowBO row, String normalizedStoreId, SkuTableDO sku) {
+        if (StrUtil.isBlank(normalizedStoreId)) {
             return false;
         }
         StoreProductDO storeProduct = storeProductMapper.selectByStoreIdAndProductSkuId(
-                row.getStoreId(), String.valueOf(sku.getProductSkuId()));
+                normalizedStoreId, String.valueOf(sku.getProductSkuId()));
         if (storeProduct == null) {
             return false;
         }
@@ -86,13 +87,13 @@ public class EleStoreInventoryIngestServiceImpl implements EleStoreInventoryInge
         storeStock.setStoreStockFrozenQuantity(row.getReservedAmount());
     }
 
-    private EleSkuInventoryShadowUpsertReqBO buildShadowReq(EleStoreInventoryIngestRowBO row) {
+    private EleSkuInventoryShadowUpsertReqBO buildShadowReq(EleStoreInventoryIngestRowBO row, String normalizedStoreId) {
         EleSkuInventoryShadowUpsertReqBO reqBO = new EleSkuInventoryShadowUpsertReqBO();
         reqBO.setPlatformId(row.getPlatformId() == null ? DEFAULT_ELE_PLATFORM_ID : row.getPlatformId());
         reqBO.setMerchantCode(row.getMerchantCode());
         reqBO.setErpStoreCode(row.getErpStoreCode());
         reqBO.setPlatformStoreId(row.getPlatformStoreId());
-        reqBO.setStoreId(row.getStoreId());
+        reqBO.setStoreId(normalizedStoreId);
         reqBO.setSkuCode(normalizeNullable(row.getSkuCode()));
         reqBO.setSubSkuCode(normalizeNullable(row.getSubSkuCode()));
         reqBO.setAvailableForSale(row.getAvailableForSale());

@@ -19,6 +19,8 @@ import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsShadowUpsertReqBO;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsSyncReqBO;
 import cn.iocoder.yudao.module.ele.service.client.EleOpenApiClient;
 import cn.iocoder.yudao.module.ele.service.dto.EleStoreGoodsQueryRespDTO;
+import cn.iocoder.yudao.module.ele.service.validator.StoreIdentityValidationResult;
+import cn.iocoder.yudao.module.ele.service.validator.StoreIdentityValidator;
 import cn.iocoder.yudao.module.infra.api.config.ConfigApi;
 import com.alibaba.ocean.rawsdk.common.BizResultWrapper;
 import com.google.common.util.concurrent.RateLimiter;
@@ -81,13 +83,16 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
     private EleStoreGoodsShadowService shadowService;
     @Resource
     private TransactionTemplate transactionTemplate;
+    @Resource
+    private StoreIdentityValidator storeIdentityValidator;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void syncStoreGoods(EleStoreGoodsSyncReqBO reqBO) {
         SyncOutcome outcome = doSyncStoreGoods(reqBO);
         if (!outcome.success()) {
-            throw new RuntimeException("skuCode未匹配本地SKU: " + StrUtil.trim(reqBO.getSkuCode()));
+            throw new RuntimeException(StrUtil.blankToDefault(outcome.errorMessage(),
+                    "商品同步失败: " + StrUtil.trim(reqBO.getSkuCode())));
         }
     }
 
@@ -179,10 +184,12 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         EleStoreGoodsSyncReqBO syncReqBO = new EleStoreGoodsSyncReqBO();
         syncReqBO.setApiCode(STORE_GOODS_QUERY_BATCH_API_CODE);
         syncReqBO.setApiName(STORE_GOODS_QUERY_BATCH_API_NAME);
-        syncReqBO.setMerchantCode(StrUtil.blankToDefault(goodsItem.getMerchantCode(), queryResp.getMerchantCode()));
+        syncReqBO.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
         syncReqBO.setErpStoreCode(StrUtil.trim(reqBO.getErpStoreCode()));
         syncReqBO.setPlatformStoreId(null);
-        syncReqBO.setStoreId(StrUtil.blankToDefault(goodsItem.getStoreCode(), queryResp.getStoreCode()));
+        syncReqBO.setStoreId(null);
+        syncReqBO.setUpstreamMerchantCode(StrUtil.blankToDefault(goodsItem.getMerchantCode(), queryResp.getMerchantCode()));
+        syncReqBO.setUpstreamStoreCode(StrUtil.blankToDefault(goodsItem.getStoreCode(), queryResp.getStoreCode()));
         syncReqBO.setSpuCode(goodsItem.getSpuCode());
         syncReqBO.setTitle(goodsItem.getTitle());
         syncReqBO.setMainPic(goodsItem.getMainPic());
@@ -213,6 +220,7 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         String erpStoreCode = resolveErpStoreCode(reqBO);
         String platformStoreId = StrUtil.trim(reqBO.getPlatformStoreId());
         String storeId = StrUtil.trim(reqBO.getStoreId());
+        String upstreamStoreCode = StrUtil.trim(reqBO.getUpstreamStoreCode());
         String skuCode = StrUtil.trim(reqBO.getSkuCode());
         boolean testMode = Boolean.TRUE.equals(reqBO.getTestMode());
 
@@ -227,12 +235,24 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         }
         validateTestMode(testMode);
 
-        List<StorePlatformRespVO> stores = resolveStores(platformStoreId, storeId);
+        List<StorePlatformRespVO> stores = resolveStores(platformStoreId, upstreamStoreCode, storeId);
         if (CollUtil.isEmpty(stores)) {
-            String missingStoreKey = StrUtil.isNotBlank(platformStoreId) ? platformStoreId : storeId;
-            writeFailureLog(reqBO, null, "STORE_NOT_FOUND", appendTestMode(testMode, "未找到门店映射: " + missingStoreKey));
-            throw new RuntimeException("未找到门店映射: " + missingStoreKey);
+            String missingStoreKey = firstNonBlank(platformStoreId, upstreamStoreCode, storeId);
+            String errorMsg = "未找到门店映射: " + missingStoreKey;
+            writeFailureLog(reqBO, null, "STORE_NOT_FOUND", appendTestMode(testMode, errorMsg));
+            throw new RuntimeException(errorMsg);
         }
+
+        StoreIdentityValidationResult identityValidation = validateStoreIdentity(reqBO, stores);
+        if (identityValidation.getDecision() == StoreIdentityValidationResult.Decision.REJECT) {
+            applyIdentityValidation(reqBO, identityValidation);
+            StorePlatformRespVO failedStore = stores.get(0);
+            String errorMsg = "门店标识冲突，拒绝写入正式表";
+            writeFailureLog(reqBO, failedStore, StoreIdentityValidator.REASON_CODE_STORE_IDENTITY_MISMATCH,
+                    appendTestMode(testMode, errorMsg));
+            return SyncOutcome.failureResult(errorMsg);
+        }
+        applyIdentityValidation(reqBO, identityValidation);
 
         SkuTableDO sku = skuTableMapper.selectByProductSkuCode(skuCode);
         if (sku == null) {
@@ -250,6 +270,39 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
             writeSuccessLog(reqBO, store, testMode);
         }
         return SyncOutcome.successResult();
+    }
+
+    private StoreIdentityValidationResult validateStoreIdentity(EleStoreGoodsSyncReqBO reqBO, List<StorePlatformRespVO> stores) {
+        StoreIdentityValidationResult lastResult = null;
+        for (StorePlatformRespVO store : stores) {
+            StoreIdentityValidationResult result = storeIdentityValidator.validate(
+                    reqBO.getPlatformStoreId(),
+                    reqBO.getMerchantCode(),
+                    reqBO.getErpStoreCode(),
+                    reqBO.getStoreId(),
+                    new StoreIdentityValidator.StoreIdentityInput(store.getStoreId(),
+                            store.getPlatformStoreId(), store.getSettlementAccount()),
+                    reqBO.getUpstreamStoreCode(),
+                    reqBO.getUpstreamMerchantCode());
+            if (result.getDecision() == StoreIdentityValidationResult.Decision.REJECT) {
+                return result;
+            }
+            lastResult = result;
+        }
+        return lastResult == null
+                ? StoreIdentityValidationResult.reject(StoreIdentityValidator.REASON_CODE_STORE_IDENTITY_MISMATCH,
+                reqBO.getPlatformStoreId(), reqBO.getMerchantCode(), reqBO.getErpStoreCode(), reqBO.getStoreId())
+                : lastResult;
+    }
+
+    private void applyIdentityValidation(EleStoreGoodsSyncReqBO reqBO, StoreIdentityValidationResult validationResult) {
+        if (validationResult == null) {
+            return;
+        }
+        reqBO.setPlatformStoreId(validationResult.getPlatformStoreId());
+        reqBO.setMerchantCode(validationResult.getMerchantCode());
+        reqBO.setErpStoreCode(validationResult.getErpStoreCode());
+        reqBO.setStoreId(validationResult.getStoreId());
     }
 
     private EleStoreGoodsQueryRespDTO convertQueryResult(BizResultWrapper<SaasGoodsStoreQueryBatchResult> wrapper,
@@ -308,10 +361,7 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         StoreProductSyncUpsertReqBO upsertReqBO = new StoreProductSyncUpsertReqBO();
         upsertReqBO.setStoreId(store.getStoreId());
         upsertReqBO.setProductSkuId(String.valueOf(sku.getProductSkuId()));
-        upsertReqBO.setStoreProductOwnership(DEFAULT_OWNERSHIP);
         upsertReqBO.setStoreProductPrice(reqBO.getStoreProductPrice());
-        upsertReqBO.setStoreProductFirstDate(LocalDate.now());
-        upsertReqBO.setStoreProductShelfTime(LocalDateTime.now());
         if (OPERATION_DELETE.equalsIgnoreCase(StrUtil.blankToDefault(reqBO.getOperationType(), ""))) {
             upsertReqBO.setStoreProductIsActive(0);
             upsertReqBO.setStoreProductPosStatus(DEFAULT_POS_STATUS_OFF_SHELF);
@@ -431,6 +481,15 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         return resolved;
     }
 
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StrUtil.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     private Integer normalizePageNo(Integer pageNo) {
         return pageNo == null || pageNo < 1 ? 1 : pageNo;
     }
@@ -442,9 +501,15 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         return Math.min(pageSize, 20);
     }
 
-    private List<StorePlatformRespVO> resolveStores(String platformStoreId, String storeId) {
+    private List<StorePlatformRespVO> resolveStores(String platformStoreId, String upstreamStoreCode, String storeId) {
         if (StrUtil.isNotBlank(platformStoreId)) {
             List<StorePlatformRespVO> stores = storeService.getPlatformTableListByPlatformStoreId(ELE_PLATFORM_ID, platformStoreId);
+            if (CollUtil.isNotEmpty(stores)) {
+                return stores;
+            }
+        }
+        if (StrUtil.isNotBlank(upstreamStoreCode)) {
+            List<StorePlatformRespVO> stores = storeService.getPlatformTableListByPlatformStoreId(ELE_PLATFORM_ID, upstreamStoreCode);
             if (CollUtil.isNotEmpty(stores)) {
                 return stores;
             }
@@ -486,14 +551,18 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         return testMode ? TEST_MODE_MARK + " " + message : message;
     }
 
-    private record SyncOutcome(boolean success, boolean shadowed) {
+    private record SyncOutcome(boolean success, boolean shadowed, String errorMessage) {
 
         static SyncOutcome successResult() {
-            return new SyncOutcome(true, false);
+            return new SyncOutcome(true, false, null);
         }
 
         static SyncOutcome shadowedResult() {
-            return new SyncOutcome(false, true);
+            return new SyncOutcome(false, true, null);
+        }
+
+        static SyncOutcome failureResult(String errorMessage) {
+            return new SyncOutcome(false, false, errorMessage);
         }
     }
 }

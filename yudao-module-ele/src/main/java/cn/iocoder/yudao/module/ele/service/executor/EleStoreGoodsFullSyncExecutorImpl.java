@@ -8,6 +8,8 @@ import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsFullSyncTaskStoreMappe
 import cn.iocoder.yudao.module.ele.service.EleStoreGoodsSyncService;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsPageSyncResult;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreGoodsQueryReqBO;
+import cn.iocoder.yudao.module.ele.service.guard.StoreExecutionGuard;
+import cn.iocoder.yudao.module.ele.service.guard.StoreExecutionScenario;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,6 +46,8 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
     @Resource
     @Qualifier("eleStoreGoodsFullSyncExecutor")
     private ThreadPoolTaskExecutor fullSyncExecutor;
+    @Resource
+    private StoreExecutionGuard storeExecutionGuard;
 
     @Override
     @Async
@@ -58,13 +62,16 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
             log.warn("【饿了么门店商品全量同步】任务不存在, taskId={}", taskId);
             return;
         }
+        if (!claimTask(taskId)) {
+            log.info("【饿了么门店商品全量同步】任务已被其他执行流领取, taskId={}", taskId);
+            return;
+        }
         List<EleStoreGoodsFullSyncTaskStoreDO> taskStores = taskStoreMapper.selectListByTaskId(taskId);
         if (CollUtil.isEmpty(taskStores)) {
             markTaskFailed(taskId, "任务没有门店明细");
             return;
         }
 
-        updateTaskRunning(taskId);
         forceRefreshTaskAggregate(taskId);
         int initialMaxInFlight = resolveMaxInFlight();
         List<CompletableFuture<Void>> inFlightFutures = new ArrayList<>(Math.min(taskStores.size(), initialMaxInFlight));
@@ -103,41 +110,53 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
 
     private StoreSyncSummary syncStore(EleStoreGoodsFullSyncTaskDO task, EleStoreGoodsFullSyncTaskStoreDO taskStore) {
         StoreSyncSummary summary = new StoreSyncSummary();
-        updateStoreRunning(taskStore.getId());
+        if (!updateStoreRunning(taskStore.getId())) {
+            log.info("【饿了么门店商品全量同步】门店明细已被恢复流程接管, 跳过执行, taskStoreId={}", taskStore.getId());
+            return summary;
+        }
         try {
-            int pageNo = 1;
-            int pageSize = taskStore.getPageSize() == null || taskStore.getPageSize() < 1 ? 20 : taskStore.getPageSize();
-            int totalPage = 1;
-            do {
-                if (isCancelled(task.getId())) {
-                    finishStore(taskStore.getId(), STATUS_CANCELLED, null, summary);
-                    return summary;
-                }
-                EleStoreGoodsQueryReqBO reqBO = new EleStoreGoodsQueryReqBO();
-                reqBO.setMerchantCode(taskStore.getMerchantCode());
-                reqBO.setErpStoreCode(taskStore.getErpStoreCode());
-                reqBO.setPageNo(pageNo);
-                reqBO.setPageSize(pageSize);
-                EleStoreGoodsPageSyncResult pageResult = syncService.syncStoreGoodsPage(reqBO, task.getTestMode());
-                totalPage = calculateTotalPage(pageResult.getTotal(), pageResult.getPageSize());
-                summary.totalPage = totalPage;
-                summary.finishedPage = pageNo;
-                summary.totalSkuCount += value(pageResult.getSyncCount());
-                summary.successCount += value(pageResult.getSuccessCount());
-                summary.failCount += value(pageResult.getFailCount());
-                summary.governanceCount += value(pageResult.getGovernanceCount());
-                updateStoreProgress(taskStore.getId(), pageNo, totalPage, pageSize, summary);
-                refreshTaskAggregateIfNeeded(task.getId());
-                pageNo++;
-            } while (pageNo <= totalPage);
-            finishStore(taskStore.getId(), STATUS_SUCCESS, null, summary);
-            summary.success = true;
+            storeExecutionGuard.runWithStoreLock(StoreExecutionScenario.STORE_GOODS,
+                    taskStore.getPlatformStoreId(), () -> syncStorePages(task, taskStore, summary));
+            if (!summary.cancelled) {
+                finishStore(taskStore.getId(), STATUS_SUCCESS, null, summary);
+                summary.success = true;
+            }
         } catch (Exception ex) {
             summary.success = false;
             summary.errorMsg = ex.getMessage();
             finishStore(taskStore.getId(), STATUS_FAILED, ex.getMessage(), summary);
         }
         return summary;
+    }
+
+    private void syncStorePages(EleStoreGoodsFullSyncTaskDO task, EleStoreGoodsFullSyncTaskStoreDO taskStore,
+                                StoreSyncSummary summary) {
+        int pageNo = 1;
+        int pageSize = taskStore.getPageSize() == null || taskStore.getPageSize() < 1 ? 20 : taskStore.getPageSize();
+        int totalPage = 1;
+        do {
+            if (isCancelled(task.getId())) {
+                summary.cancelled = true;
+                finishStore(taskStore.getId(), STATUS_CANCELLED, null, summary);
+                return;
+            }
+            EleStoreGoodsQueryReqBO reqBO = new EleStoreGoodsQueryReqBO();
+            reqBO.setMerchantCode(taskStore.getMerchantCode());
+            reqBO.setErpStoreCode(taskStore.getErpStoreCode());
+            reqBO.setPageNo(pageNo);
+            reqBO.setPageSize(pageSize);
+            EleStoreGoodsPageSyncResult pageResult = syncService.syncStoreGoodsPage(reqBO, task.getTestMode());
+            totalPage = calculateTotalPage(pageResult.getTotal(), pageResult.getPageSize());
+            summary.totalPage = totalPage;
+            summary.finishedPage = pageNo;
+            summary.totalSkuCount += value(pageResult.getSyncCount());
+            summary.successCount += value(pageResult.getSuccessCount());
+            summary.failCount += value(pageResult.getFailCount());
+            summary.governanceCount += value(pageResult.getGovernanceCount());
+            updateStoreProgress(taskStore.getId(), pageNo, totalPage, pageSize, summary);
+            refreshTaskAggregateIfNeeded(task.getId());
+            pageNo++;
+        } while (pageNo <= totalPage);
     }
 
     private int calculateTotalPage(Integer total, Integer pageSize) {
@@ -177,28 +196,18 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         return task != null && STATUS_CANCELLED.equals(task.getStatus());
     }
 
-    private void updateTaskRunning(Long taskId) {
-        EleStoreGoodsFullSyncTaskDO updateObj = new EleStoreGoodsFullSyncTaskDO();
-        updateObj.setId(taskId);
-        updateObj.setStatus(STATUS_RUNNING);
-        updateObj.setStartedAt(LocalDateTime.now());
-        taskMapper.updateById(updateObj);
+    private boolean claimTask(Long taskId) {
+        return taskMapper.markRunningIfPending(taskId, LocalDateTime.now()) > 0;
     }
 
     private void markTaskFailed(Long taskId, String errorMsg) {
-        EleStoreGoodsFullSyncTaskDO updateObj = new EleStoreGoodsFullSyncTaskDO();
-        updateObj.setId(taskId);
-        updateObj.setStatus(STATUS_FAILED);
-        updateObj.setErrorMsg(errorMsg);
-        updateObj.setFinishedAt(LocalDateTime.now());
-        taskMapper.updateById(updateObj);
+        taskMapper.markFailedIfRunning(taskId, errorMsg, LocalDateTime.now());
     }
 
     private void finishTask(Long taskId) {
         TaskAggregate aggregate = buildAggregate(taskId);
         EleStoreGoodsFullSyncTaskDO updateObj = new EleStoreGoodsFullSyncTaskDO();
         updateObj.setId(taskId);
-        updateObj.setStatus(aggregate.failedStoreCount == 0 ? STATUS_SUCCESS : STATUS_PARTIAL_FAIL);
         updateObj.setFinishedStoreCount(aggregate.finishedStoreCount);
         updateObj.setTotalPageCount(aggregate.totalPageCount);
         updateObj.setFinishedPageCount(aggregate.finishedPageCount);
@@ -208,15 +217,11 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         updateObj.setGovernanceCount(aggregate.governanceCount);
         updateObj.setErrorMsg(aggregate.joinedErrorMsg());
         updateObj.setFinishedAt(LocalDateTime.now());
-        taskMapper.updateById(updateObj);
+        taskMapper.finishIfRunning(taskId, aggregate.failedStoreCount == 0 ? STATUS_SUCCESS : STATUS_PARTIAL_FAIL, updateObj);
     }
 
-    private void updateStoreRunning(Long taskStoreId) {
-        EleStoreGoodsFullSyncTaskStoreDO updateObj = new EleStoreGoodsFullSyncTaskStoreDO();
-        updateObj.setId(taskStoreId);
-        updateObj.setStatus(STATUS_RUNNING);
-        updateObj.setStartedAt(LocalDateTime.now());
-        taskStoreMapper.updateById(updateObj);
+    private boolean updateStoreRunning(Long taskStoreId) {
+        return taskStoreMapper.markRunningIfPending(taskStoreId, LocalDateTime.now()) > 0;
     }
 
     private void updateStoreProgress(Long taskStoreId, int currentPage, int totalPage, int pageSize, StoreSyncSummary summary) {
@@ -229,13 +234,12 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         updateObj.setSuccessCount(summary.successCount);
         updateObj.setFailCount(summary.failCount);
         updateObj.setGovernanceCount(summary.governanceCount);
-        taskStoreMapper.updateById(updateObj);
+        taskStoreMapper.updateProgressIfRunning(taskStoreId, updateObj);
     }
 
     private void finishStore(Long taskStoreId, String status, String errorMsg, StoreSyncSummary summary) {
         EleStoreGoodsFullSyncTaskStoreDO updateObj = new EleStoreGoodsFullSyncTaskStoreDO();
         updateObj.setId(taskStoreId);
-        updateObj.setStatus(status);
         updateObj.setCurrentPage(summary.finishedPage);
         updateObj.setTotalPage(summary.totalPage);
         updateObj.setTotalSkuCount(summary.totalSkuCount);
@@ -244,7 +248,7 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         updateObj.setGovernanceCount(summary.governanceCount);
         updateObj.setErrorMsg(errorMsg);
         updateObj.setFinishedAt(LocalDateTime.now());
-        taskStoreMapper.updateById(updateObj);
+        taskStoreMapper.finishIfRunning(taskStoreId, status, updateObj);
     }
 
     private void refreshTaskAggregate(Long taskId) {
@@ -259,7 +263,7 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         updateObj.setFailCount(aggregate.failCount);
         updateObj.setGovernanceCount(aggregate.governanceCount);
         updateObj.setErrorMsg(aggregate.joinedErrorMsg());
-        taskMapper.updateById(updateObj);
+        taskMapper.refreshAggregateIfRunning(taskId, updateObj);
         aggregateRefreshAtMap.put(taskId, System.currentTimeMillis());
     }
 
@@ -299,6 +303,7 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
 
     private static class StoreSyncSummary {
         private boolean success;
+        private boolean cancelled;
         private int totalPage;
         private int finishedPage;
         private int totalSkuCount;

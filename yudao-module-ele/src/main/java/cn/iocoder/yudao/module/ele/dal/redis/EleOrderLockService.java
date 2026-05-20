@@ -28,7 +28,15 @@ public interface EleOrderLockService {
 
     void unlockStoreGoodsFullSyncTask(String lockKey);
 
+    boolean tryLockStoreGoodsExecution(String platformStoreId, int waitSeconds, int leaseMinutes);
+
+    void unlockStoreGoodsExecution(String platformStoreId);
+
     void lockStoreInventoryBatchTask(String lockKey, int waitSeconds, int leaseMinutes);
 
     void unlockStoreInventoryBatchTask(String lockKey);
+
+    boolean tryLockStoreInventoryExecution(String platformStoreId, int waitSeconds, int leaseMinutes);
+
+    void unlockStoreInventoryExecution(String platformStoreId);
 }

@@ -103,6 +103,35 @@ public class EleStoreInventoryIngestServiceImplTest extends BaseMockitoUnitTest 
         verify(storeStockMapper, never()).updateById(any(StoreStockDO.class));
     }
 
+    @Test
+    public void testIngest_whenStoreIdMissing_thenSkipFormalAndPersistShadow() {
+        EleStoreInventoryIngestRowBO row = buildRow();
+        row.setStoreId(" ");
+        SkuTableDO sku = new SkuTableDO();
+        sku.setProductSkuId(11L);
+        EleStoreInventoryShadowDO shadow = new EleStoreInventoryShadowDO();
+        shadow.setId(188L);
+
+        when(skuTableMapper.selectByProductSkuCode("SKU-1")).thenReturn(sku);
+        when(shadowService.upsert(any(EleSkuInventoryShadowUpsertReqBO.class),
+                eq(EleStoreInventoryIngestService.MATCH_STATUS_SKU_NOT_MATCHED),
+                eq(EleStoreInventoryIngestService.REASON_CODE_SKU_NOT_FOUND))).thenReturn(shadow);
+        when(governanceService.createOrRefresh(any())).thenReturn(199L);
+
+        EleStoreInventoryIngestResultBO result = ingestService.ingest(row);
+
+        assertEquals(EleStoreInventoryIngestService.PERSIST_STATUS_SHADOW, result.getPersistStatus());
+        assertEquals(EleStoreInventoryIngestService.REASON_CODE_SKU_NOT_FOUND, result.getReasonCode());
+        assertEquals(188L, result.getShadowId());
+        assertEquals(199L, result.getGovernanceId());
+        verify(storeProductMapper, never()).selectByStoreIdAndProductSkuId(any(), any());
+        verify(storeStockMapper, never()).insert(any(StoreStockDO.class));
+        verify(storeStockMapper, never()).updateById(any(StoreStockDO.class));
+        verify(shadowService).upsert(argThat(req -> req.getStoreId() == null),
+                eq(EleStoreInventoryIngestService.MATCH_STATUS_SKU_NOT_MATCHED),
+                eq(EleStoreInventoryIngestService.REASON_CODE_SKU_NOT_FOUND));
+    }
+
     private EleStoreInventoryIngestRowBO buildRow() {
         EleStoreInventoryIngestRowBO row = new EleStoreInventoryIngestRowBO();
         row.setPlatformId(1L);

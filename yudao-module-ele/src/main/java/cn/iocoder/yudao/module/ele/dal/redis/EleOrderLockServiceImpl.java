@@ -216,6 +216,27 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
     }
 
     @Override
+    public boolean tryLockStoreGoodsExecution(String platformStoreId, int waitSeconds, int leaseMinutes) {
+        RLock lock = getStoreGoodsExecutionLock(platformStoreId);
+        boolean acquired = acquireLock(lock, waitSeconds, leaseMinutes, "门店商品执行", platformStoreId);
+        if (acquired) {
+            log.info("【分布式锁】门店商品执行{}锁获取成功", platformStoreId);
+        } else {
+            log.warn("【分布式锁】门店商品执行{}锁获取失败，任务正在执行", platformStoreId);
+        }
+        return acquired;
+    }
+
+    @Override
+    public void unlockStoreGoodsExecution(String platformStoreId) {
+        RLock lock = getStoreGoodsExecutionLock(platformStoreId);
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
+            log.info("【分布式锁】门店商品执行{}锁释放成功", platformStoreId);
+        }
+    }
+
+    @Override
     public void lockStoreInventoryBatchTask(String lockKey, int waitSeconds, int leaseMinutes) {
         RLock lock = getStoreInventoryBatchTaskLock(lockKey);
         boolean acquired = acquireLock(lock, waitSeconds, leaseMinutes, "门店库存批量任务", lockKey);
@@ -231,6 +252,27 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
         if (lock.isHeldByCurrentThread()) {
             lock.unlock();
             log.info("【分布式锁】门店库存批量任务{}锁释放成功", lockKey);
+        }
+    }
+
+    @Override
+    public boolean tryLockStoreInventoryExecution(String platformStoreId, int waitSeconds, int leaseMinutes) {
+        RLock lock = getStoreInventoryExecutionLock(platformStoreId);
+        boolean acquired = acquireLock(lock, waitSeconds, leaseMinutes, "门店库存执行", platformStoreId);
+        if (acquired) {
+            log.info("【分布式锁】门店库存执行{}锁获取成功", platformStoreId);
+        } else {
+            log.warn("【分布式锁】门店库存执行{}锁获取失败，任务正在执行", platformStoreId);
+        }
+        return acquired;
+    }
+
+    @Override
+    public void unlockStoreInventoryExecution(String platformStoreId) {
+        RLock lock = getStoreInventoryExecutionLock(platformStoreId);
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
+            log.info("【分布式锁】门店库存执行{}锁释放成功", platformStoreId);
         }
     }
 
@@ -268,8 +310,18 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
                 String.format(EleLockKeyConstants.STORE_GOODS_FULL_SYNC_TASK_LOCK, lockKey));
     }
 
+    private RLock getStoreGoodsExecutionLock(String platformStoreId) {
+        return redissonClient.getLock(
+                String.format(EleLockKeyConstants.STORE_GOODS_EXECUTION_LOCK, platformStoreId));
+    }
+
     private RLock getStoreInventoryBatchTaskLock(String lockKey) {
         return redissonClient.getLock(
                 String.format(EleLockKeyConstants.STORE_INVENTORY_BATCH_TASK_LOCK, lockKey));
+    }
+
+    private RLock getStoreInventoryExecutionLock(String platformStoreId) {
+        return redissonClient.getLock(
+                String.format(EleLockKeyConstants.STORE_INVENTORY_EXECUTION_LOCK, platformStoreId));
     }
 }
