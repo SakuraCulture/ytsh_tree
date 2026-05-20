@@ -56,3 +56,24 @@ ORDER BY order_from, 订单数量 DESC;
 SELECT * FROM order_table WHERE order_id ='5000034417220780215'
 -- 查询订单渠道类型
 SELECT * FROM order_platform_table WHERE order_id ='5000034417220780215'
+
+-- 根据门店erp_store_code和商品sku_code查询库存
+SELECT
+    eis.erp_store_code,
+    eis.sku_code,
+    sp.store_product_id,
+    ss.store_stock_qty,
+    ss.store_stock_available_qty,
+    ss.store_stock_transit_qty,
+    ss.store_stock_frozen_qty,
+    ss.update_time
+FROM ele_store_inventory_shadow eis
+         LEFT JOIN store_product_table sp
+                   ON sp.store_product_id = CAST(eis.matched_store_product_id AS UNSIGNED)
+                       AND sp.deleted = 0
+         LEFT JOIN store_stock_table ss
+                   ON ss.store_product_id = sp.store_product_id
+                       AND ss.deleted = 0
+WHERE eis.deleted = b'0'
+  AND eis.erp_store_code = 'ERP_STORE_001'
+  AND eis.sku_code = 'SKU_10001';
