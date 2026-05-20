@@ -52,8 +52,12 @@
             clearable
             class="!w-100%"
           >
-            <el-option label="总部" value="HQ" />
-            <el-option label="门店" value="STORE" />
+            <el-option
+              v-for="item in ownershipOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="POS状态" prop="posStatus">
@@ -209,9 +213,7 @@
       <el-table-column label="SKU名称" align="center" prop="skuName" min-width="150" />
       <el-table-column label="商品归属" align="center" prop="productAttribution" width="100">
         <template #default="scope">
-          <el-tag v-if="scope.row.productAttribution === 'HQ'" type="success">总部</el-tag>
-          <el-tag v-else-if="scope.row.productAttribution === 'STORE'" type="warning">门店</el-tag>
-          <span v-else>{{ scope.row.productAttribution }}</span>
+          <span>{{ formatOwnershipLabel(scope.row.productAttribution) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="POS状态" align="center" prop="posStatus" width="100">
@@ -301,9 +303,11 @@
 import { isEmpty } from '@/utils/is'
 import { dateFormatter } from '@/utils/formatTime'
 import download from '@/utils/download'
+import { downloadByData } from '@/utils/filt'
 import { StoreProductApi, StoreProductTable } from '@/api/business/store-product'
 import { TableApi } from '@/api/business/store'
 import { TagValueApi, type TagSelectableValue } from '@/api/business/tag/value'
+import { formatOwnershipLabel, getOwnershipOptions } from './storeProductOwnershipLogic'
 import StoreProductBatchTagForm from './StoreProductBatchTagForm.vue'
 import StoreProductForm from './StoreProductForm.vue'
 import StoreProductTagForm from './StoreProductTagForm.vue'
@@ -336,6 +340,7 @@ const exportLoading = ref(false)
 const storeLoading = ref(false)
 const storeList = ref<any[]>([])
 const selectableTagList = ref<TagSelectableValue[]>([])
+const ownershipOptions = computed(() => getOwnershipOptions(queryParams.productAttribution))
 
 const searchStoreSuggestions = async (queryString: string) => {
   if (!queryString) {
@@ -431,9 +436,11 @@ const getRowKey = (row: StoreProductTable) => {
   return `fallback-${row.storeId || ''}-${row.skuCode || ''}-${row.createTime || ''}`
 }
 
-const checkedIds = ref<number[] | string[]>([])
+const checkedIds = ref<Array<number | string>>([])
 const handleRowCheckboxChange = (records: StoreProductTable[]) => {
-  checkedIds.value = records.filter(isFormalRow).map((item) => item.storeProductId!)
+  checkedIds.value = records
+    .filter((item) => isFormalRow(item) && item.storeProductId !== undefined)
+    .map((item) => item.storeProductId as number | string)
 }
 
 const handleExpandChange = (row: StoreProductTable) => {
@@ -459,7 +466,7 @@ const handleDownloadTemplate = async (format: string = 'excel') => {
     const data = await StoreProductApi.getImportTemplate(format)
     const filename = format === 'csv' ? '门店商品导入模板.csv' : '门店商品导入模板.xls'
     if (format === 'csv') {
-      download.data(data, filename)
+      downloadByData(data, filename, 'text/csv;charset=utf-8')
     } else {
       download.excel(data, filename)
     }
@@ -470,11 +477,13 @@ const handleImport = async (file: File) => {
   try {
     await message.importConfirm()
     const res = await StoreProductApi.importTable(file, true)
-    if (res.createStoreProductIds?.length > 0) {
-      message.success(`成功创建 ${res.createStoreProductIds.length} 条数据`)
+    const createdIds = res.createStoreProductIds || []
+    const updatedIds = res.updateStoreProductIds || []
+    if (createdIds.length > 0) {
+      message.success(`成功创建 ${createdIds.length} 条数据`)
     }
-    if (res.updateStoreProductIds?.length > 0) {
-      message.success(`成功更新 ${res.updateStoreProductIds.length} 条数据`)
+    if (updatedIds.length > 0) {
+      message.success(`成功更新 ${updatedIds.length} 条数据`)
     }
     if (res.failureStoreProductIds && Object.keys(res.failureStoreProductIds).length > 0) {
       const failureText = Object.entries(res.failureStoreProductIds)

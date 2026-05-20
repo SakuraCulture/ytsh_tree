@@ -42,8 +42,9 @@
       </el-form-item>
       <el-form-item label="商品归属" prop="productAttribution">
         <el-radio-group v-model="formData.productAttribution">
-          <el-radio value="HQ">总部</el-radio>
-          <el-radio value="STORE">门店</el-radio>
+          <el-radio v-for="item in ownershipOptions" :key="item.value" :value="item.value">
+            {{ item.label }}
+          </el-radio>
         </el-radio-group>
       </el-form-item>
       <el-form-item label="门店零售价" prop="storeRetailPrice">
@@ -168,9 +169,14 @@
 </template>
 
 <script setup lang="ts">
-import { StoreProductApi, StoreProductDetailRespVO, StoreProductSaveReqVO, StoreProductTable } from '@/api/business/store-product'
+import { StoreProductApi, StoreProductDetailRespVO, StoreProductTable } from '@/api/business/store-product'
 import { TableApi } from '@/api/business/store'
 import { SpuTableApi, SpuTable, SkuTable } from '@/api/business/product'
+import {
+  buildStoreProductSavePayload,
+  fillStoreProductFormData,
+  getOwnershipOptions
+} from './storeProductOwnershipLogic'
 
 interface FormDataType {
   storeProductId?: string | number
@@ -204,6 +210,7 @@ const formRules = reactive({
   posStatus: [{ required: true, message: '请选择POS状态', trigger: 'change' }],
   enterShopStatus: [{ required: true, message: '请选择是否入店', trigger: 'change' }]
 })
+const ownershipOptions = computed(() => getOwnershipOptions(formData.value.productAttribution))
 
 const storeLoading = ref(false)
 const storeList = ref<any[]>([])
@@ -346,28 +353,13 @@ const fillSkuDisplay = (skuCode?: string, skuName?: string, productSkuId?: strin
   }
 }
 
-const normalizePosStatus = (value?: string | number) => {
-  if (value === undefined || value === null || value === '') {
-    return undefined
-  }
-  const normalizedValue = Number(value)
-  return Number.isNaN(normalizedValue) ? undefined : normalizedValue
-}
-
 const fillFormByDetail = (data: StoreProductDetailRespVO, row?: StoreProductTable) => {
-  const productSkuId = data.productSkuId != null ? String(data.productSkuId) : row?.productSkuId
+  const detailFormData = fillStoreProductFormData(data, row)
   formData.value = {
-    storeProductId: data.storeProductId,
-    storeId: data.storeId ?? row?.storeId,
-    productSkuId,
-    productAttribution: data.productAttribution ?? row?.productAttribution,
-    storeRetailPrice: data.storeRetailPrice ?? row?.storeRetailPrice,
-    firstEnterShopDate: data.firstEnterShopDate ?? row?.firstEnterShopDate,
-    posStatus: normalizePosStatus(data.posStatus ?? row?.posStatus),
-    enterShopStatus: data.enterShopStatus ?? row?.enterShopStatus
+    ...detailFormData
   }
   fillStoreOption(formData.value.storeId, data.storeName ?? row?.storeName)
-  fillSkuDisplay(data.skuCode ?? row?.skuCode, data.skuName ?? row?.skuName, productSkuId)
+  fillSkuDisplay(data.skuCode ?? row?.skuCode, data.skuName ?? row?.skuName, detailFormData.productSkuId)
 }
 
 const open = async (type: string, id?: number | string, row?: StoreProductTable) => {
@@ -392,17 +384,7 @@ const submitForm = async () => {
   await formRef.value.validate()
   formLoading.value = true
   try {
-    const payload: StoreProductSaveReqVO = {
-      storeProductId: formType.value === 'update' ? formData.value.storeProductId : undefined,
-      storeId: formData.value.storeId,
-      productSkuId: formData.value.productSkuId,
-      storeProductOwnership: formData.value.productAttribution,
-      storeProductPrice: formData.value.storeRetailPrice,
-      storeProductFirstDate: formData.value.firstEnterShopDate,
-      storeProductPosStatus:
-        formData.value.posStatus === undefined ? undefined : String(formData.value.posStatus),
-      storeProductIsActive: formData.value.enterShopStatus
-    }
+    const payload = buildStoreProductSavePayload(formData.value, formType.value)
     if (formType.value === 'create') {
       await StoreProductApi.createTable(payload)
       message.success(t('common.createSuccess'))
