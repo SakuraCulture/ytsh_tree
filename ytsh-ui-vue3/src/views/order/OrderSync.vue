@@ -1300,9 +1300,9 @@ const loadStoreList = async () => {
     const list = Array.isArray(rawData) ? rawData : []
     // console.log('门店列表加载成功:', list.length, '条数据', list)
     storeList.value = list.sort((a: any, b: any) => {
-      const aStatus = a.storeStatus ?? 1
-      const bStatus = b.storeStatus ?? 1
-      return bStatus - aStatus
+      const aStatus = a.storeStatus ?? 0
+      const bStatus = b.storeStatus ?? 0
+      return aStatus - bStatus
     })
   } catch (error) {
     // console.error('门店列表加载失败:', error)

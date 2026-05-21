@@ -43,9 +43,9 @@ import { resolveDefaultStoreState } from './defaultStoreState.mjs'
 
 test('picks the first open store and enables auto query', () => {
   const result = resolveDefaultStoreState([
-    { platformStoreId: 'closed-1', storeStatus: 1 },
-    { platformStoreId: 'open-1', storeStatus: 0 },
-    { platformStoreId: 'open-2', storeStatus: 0 }
+    { platformStoreId: 'closed-1', storeStatus: 0 },
+    { platformStoreId: 'open-1', storeStatus: 1 },
+    { platformStoreId: 'open-2', storeStatus: 1 }
   ])
 
   assert.deepEqual(result, {
@@ -56,8 +56,8 @@ test('picks the first open store and enables auto query', () => {
 
 test('skips stores without platformStoreId', () => {
   const result = resolveDefaultStoreState([
-    { platformStoreId: '', storeStatus: 0 },
-    { platformStoreId: 'open-2', storeStatus: 0 }
+    { platformStoreId: '', storeStatus: 1 },
+    { platformStoreId: 'open-2', storeStatus: 1 }
   ])
 
   assert.deepEqual(result, {
@@ -68,8 +68,8 @@ test('skips stores without platformStoreId', () => {
 
 test('returns null and disables auto query when there is no open store', () => {
   const result = resolveDefaultStoreState([
-    { platformStoreId: 'closed-1', storeStatus: 1 },
-    { platformStoreId: 'closed-2', storeStatus: 1 }
+    { platformStoreId: 'closed-1', storeStatus: 0 },
+    { platformStoreId: 'closed-2', storeStatus: 0 }
   ])
 
   assert.deepEqual(result, {
@@ -96,7 +96,7 @@ Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../defaultStoreState.mjs'
 - [ ] **Step 3: 写最小实现，让测试描述的规则成立**
 
 ```js
-export const OPEN_STORE_STATUS = 0
+export const OPEN_STORE_STATUS = 1
 
 export function resolveDefaultStoreState(storeList = []) {
   const defaultStore = storeList.find(
@@ -176,8 +176,8 @@ loadStoreList() {
     .then((res) => {
       const list = Array.isArray(res) ? res : []
       this.storeList = list.sort((a, b) => {
-        const aStatus = a.storeStatus ?? 1
-        const bStatus = b.storeStatus ?? 1
+        const aStatus = a.storeStatus ?? 0
+        const bStatus = b.storeStatus ?? 0
         return aStatus - bStatus
       })
 

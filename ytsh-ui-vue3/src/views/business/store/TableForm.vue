@@ -91,7 +91,7 @@ const formData = ref({
   regionCode: undefined,
   address: undefined,
   area: undefined,
-  storeStatus: 0
+  storeStatus: 1
 })
 const formRules = reactive({
 })

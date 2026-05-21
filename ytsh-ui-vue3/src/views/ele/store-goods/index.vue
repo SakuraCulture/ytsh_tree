@@ -397,7 +397,7 @@ const loadStores = async () => {
   try {
     const res = await TableApi.getTableAllSimpleList(1)
     const data = Array.isArray(res) ? res : []
-    storeList.value = data.sort((a, b) => (b.storeStatus ?? 0) - (a.storeStatus ?? 0))
+    storeList.value = data.sort((a, b) => (a.storeStatus ?? 0) - (b.storeStatus ?? 0))
     const firstOpenStore = storeList.value.find((item) => item.storeStatus === 1)
     if (firstOpenStore?.platformStoreId && !queryForm.erpStoreCode) {
       selectedStoreCode.value = firstOpenStore.platformStoreId
