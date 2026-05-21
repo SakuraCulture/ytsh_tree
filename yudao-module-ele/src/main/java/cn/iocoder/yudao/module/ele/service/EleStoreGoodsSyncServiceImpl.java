@@ -509,7 +509,10 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
             }
         }
         if (StrUtil.isNotBlank(upstreamStoreCode)) {
-            List<StorePlatformRespVO> stores = storeService.getPlatformTableListByPlatformStoreId(ELE_PLATFORM_ID, upstreamStoreCode);
+            List<StorePlatformRespVO> stores = storeService.getPlatformTableListByStoreId(upstreamStoreCode).stream()
+                    .filter(store -> Objects.equals(store.getPlatformId(), ELE_PLATFORM_ID))
+                    .filter(store -> store.getStatus() != null && store.getStatus() == 1)
+                    .toList();
             if (CollUtil.isNotEmpty(stores)) {
                 return stores;
             }
