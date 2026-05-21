@@ -41,7 +41,7 @@ public class StoreIdentityValidator {
             return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
                     resolvedPlatformStoreId, resolvedMerchantCode, resolvedErpStoreCode, resolvedStoreId);
         }
-        if (!isCompleteIdentity(normalizedLocalPlatformStoreId, normalizedLocalMerchantCode, normalizedLocalStoreId)) {
+        if (!isCompleteIdentity(resolvedPlatformStoreId, resolvedMerchantCode, resolvedStoreId)) {
             return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
                     resolvedPlatformStoreId, resolvedMerchantCode, resolvedErpStoreCode, resolvedStoreId);
         }
