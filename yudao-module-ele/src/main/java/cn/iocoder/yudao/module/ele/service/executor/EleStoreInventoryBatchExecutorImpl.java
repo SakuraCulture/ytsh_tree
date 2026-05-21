@@ -113,7 +113,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
             }
 
             storeExecutionGuard.runWithStoreLock(StoreExecutionScenario.STORE_INVENTORY,
-                    taskStore.getPlatformStoreId(), () -> executeStoreBatches(task, taskStore, summary));
+                    taskStore.getStoreId(), () -> executeStoreBatches(task, taskStore, summary));
             errorMsg = summary.errorMsg;
             finishStore(taskStore.getId(), resolveStoreStatus(summary, errorMsg), errorMsg, summary);
         } catch (TaskCancelledException ex) {
@@ -157,7 +157,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
     private EleSkuInventoryBatchQueryRespDTO queryStoreInventory(EleStoreInventoryBatchTaskStoreDO taskStore,
                                                                  List<String> skuCodes) {
         EleSkuInventoryBatchQueryReqBO reqBO = new EleSkuInventoryBatchQueryReqBO();
-        reqBO.setPlatformStoreId(taskStore.getPlatformStoreId());
+        reqBO.setPlatformStoreId(taskStore.getStoreId());
         reqBO.setStoreId(taskStore.getStoreId());
         reqBO.setMerchantCode(taskStore.getMerchantCode());
         reqBO.setErpStoreCode(taskStore.getErpStoreCode());

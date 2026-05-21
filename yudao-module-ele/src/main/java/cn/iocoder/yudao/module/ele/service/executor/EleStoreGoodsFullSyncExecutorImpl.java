@@ -116,7 +116,7 @@ public class EleStoreGoodsFullSyncExecutorImpl implements EleStoreGoodsFullSyncE
         }
         try {
             storeExecutionGuard.runWithStoreLock(StoreExecutionScenario.STORE_GOODS,
-                    taskStore.getPlatformStoreId(), () -> syncStorePages(task, taskStore, summary));
+                    taskStore.getStoreId(), () -> syncStorePages(task, taskStore, summary));
             if (!summary.cancelled) {
                 finishStore(taskStore.getId(), STATUS_SUCCESS, null, summary);
                 summary.success = true;
