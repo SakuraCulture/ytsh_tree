@@ -27,17 +27,17 @@ public class StoreIdentityValidator {
         String normalizedUpstreamMerchantCode = normalize(upstreamMerchantCode);
 
         String resolvedPlatformStoreId = firstNonBlank(normalizedPlatformStoreId, normalizedErpStoreCode,
-                normalizedLocalPlatformStoreId, normalizedUpstreamStoreCode);
+                normalizedLocalPlatformStoreId);
         String resolvedMerchantCode = firstNonBlank(normalizedMerchantCode, normalizedLocalMerchantCode,
                 normalizedUpstreamMerchantCode);
-        String resolvedStoreId = firstNonBlank(normalizedStoreId, normalizedLocalStoreId);
+        String resolvedStoreId = firstNonBlank(normalizedStoreId, normalizedLocalStoreId, normalizedUpstreamStoreCode);
         String resolvedErpStoreCode = firstNonBlank(normalizedErpStoreCode, resolvedPlatformStoreId);
 
         if (hasConflict(resolvedPlatformStoreId, normalizedPlatformStoreId, normalizedErpStoreCode,
-                normalizedLocalPlatformStoreId, normalizedUpstreamStoreCode)
+                normalizedLocalPlatformStoreId)
                 || hasConflict(resolvedMerchantCode, normalizedMerchantCode, normalizedLocalMerchantCode,
                 normalizedUpstreamMerchantCode)
-                || hasConflict(resolvedStoreId, normalizedStoreId, normalizedLocalStoreId)) {
+                || hasConflict(resolvedStoreId, normalizedStoreId, normalizedLocalStoreId, normalizedUpstreamStoreCode)) {
             return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
                     resolvedPlatformStoreId, resolvedMerchantCode, resolvedErpStoreCode, resolvedStoreId);
         }
