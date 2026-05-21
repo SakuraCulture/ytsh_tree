@@ -1119,7 +1119,7 @@ public class StoreServiceImpl implements StoreService {
             return Collections.emptyList();
         }
         List<StoreDO> stores = storeMapper.selectList(new LambdaQueryWrapperX<StoreDO>()
-                .eq(StoreDO::getStoreStatus, 0)
+                .eq(StoreDO::getStoreStatus, 1)
                 .orderByAsc(StoreDO::getStoreId));
         if (CollUtil.isEmpty(stores)) {
             return Collections.emptyList();
