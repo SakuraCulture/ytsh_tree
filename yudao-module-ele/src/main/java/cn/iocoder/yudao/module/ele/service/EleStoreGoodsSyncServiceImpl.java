@@ -184,8 +184,8 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         EleStoreGoodsSyncReqBO syncReqBO = new EleStoreGoodsSyncReqBO();
         syncReqBO.setApiCode(STORE_GOODS_QUERY_BATCH_API_CODE);
         syncReqBO.setApiName(STORE_GOODS_QUERY_BATCH_API_NAME);
-        syncReqBO.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
-        syncReqBO.setErpStoreCode(StrUtil.trim(reqBO.getErpStoreCode()));
+        syncReqBO.setMerchantCode(StrUtil.blankToDefault(StrUtil.trim(reqBO.getMerchantCode()), queryResp.getMerchantCode()));
+        syncReqBO.setErpStoreCode(StrUtil.blankToDefault(StrUtil.trim(reqBO.getErpStoreCode()), queryResp.getStoreCode()));
         syncReqBO.setPlatformStoreId(null);
         syncReqBO.setStoreId(null);
         syncReqBO.setUpstreamMerchantCode(StrUtil.blankToDefault(goodsItem.getMerchantCode(), queryResp.getMerchantCode()));
