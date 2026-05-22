@@ -185,10 +185,14 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         syncReqBO.setApiCode(STORE_GOODS_QUERY_BATCH_API_CODE);
         syncReqBO.setApiName(STORE_GOODS_QUERY_BATCH_API_NAME);
         syncReqBO.setMerchantCode(StrUtil.blankToDefault(StrUtil.trim(reqBO.getMerchantCode()), queryResp.getMerchantCode()));
-        syncReqBO.setErpStoreCode(StrUtil.blankToDefault(StrUtil.trim(reqBO.getErpStoreCode()), queryResp.getStoreCode()));
-        syncReqBO.setPlatformStoreId(null);
+        // erpStoreCode 是平台门店ID，必须来自请求参数，不能用 API 返回的 storeCode (本地门店ID) 作为默认值
+        String erpStoreCode = StrUtil.trim(reqBO.getErpStoreCode());
+        syncReqBO.setErpStoreCode(erpStoreCode);
+        // platformStoreId 与 erpStoreCode 语义相同，都是平台门店ID
+        syncReqBO.setPlatformStoreId(erpStoreCode);
         syncReqBO.setStoreId(null);
         syncReqBO.setUpstreamMerchantCode(StrUtil.blankToDefault(goodsItem.getMerchantCode(), queryResp.getMerchantCode()));
+        // upstreamStoreCode 是 API 返回的本地门店ID
         syncReqBO.setUpstreamStoreCode(StrUtil.blankToDefault(goodsItem.getStoreCode(), queryResp.getStoreCode()));
         syncReqBO.setSpuCode(goodsItem.getSpuCode());
         syncReqBO.setTitle(goodsItem.getTitle());
@@ -239,6 +243,8 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         if (CollUtil.isEmpty(stores)) {
             String missingStoreKey = firstNonBlank(platformStoreId, upstreamStoreCode, storeId);
             String errorMsg = "未找到门店映射: " + missingStoreKey;
+            // 写入治理记录，便于后续人工处理
+            createGovernanceRecordForStoreNotFound(reqBO, missingStoreKey, testMode);
             writeFailureLog(reqBO, null, "STORE_NOT_FOUND", appendTestMode(testMode, errorMsg));
             throw new RuntimeException(errorMsg);
         }
@@ -248,6 +254,8 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
             applyIdentityValidation(reqBO, identityValidation);
             StorePlatformRespVO failedStore = stores.get(0);
             String errorMsg = "门店标识冲突，拒绝写入正式表";
+            // 写入治理记录，便于后续人工处理
+            createGovernanceRecordForIdentityMismatch(reqBO, failedStore, testMode);
             writeFailureLog(reqBO, failedStore, StoreIdentityValidator.REASON_CODE_STORE_IDENTITY_MISMATCH,
                     appendTestMode(testMode, errorMsg));
             return SyncOutcome.failureResult(errorMsg);
@@ -274,7 +282,15 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
 
     private StoreIdentityValidationResult validateStoreIdentity(EleStoreGoodsSyncReqBO reqBO, List<StorePlatformRespVO> stores) {
         StoreIdentityValidationResult lastResult = null;
+        String platformStoreId = StrUtil.trim(reqBO.getPlatformStoreId());
+
         for (StorePlatformRespVO store : stores) {
+            // 一店多开时，只验证与 platformStoreId 匹配的 store
+            // platformStoreId 来自请求参数 erpStoreCode，是平台门店ID
+            if (StrUtil.isNotBlank(platformStoreId)
+                    && !StrUtil.equals(platformStoreId, store.getPlatformStoreId())) {
+                continue;
+            }
             StoreIdentityValidationResult result = storeIdentityValidator.validate(
                     reqBO.getPlatformStoreId(),
                     reqBO.getMerchantCode(),
@@ -417,6 +433,45 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         governanceService.create(governancePool);
     }
 
+    private void createGovernanceRecordForStoreNotFound(EleStoreGoodsSyncReqBO reqBO, String missingStoreKey, boolean testMode) {
+        EleStoreGoodsGovernancePoolDO governancePool = new EleStoreGoodsGovernancePoolDO();
+        governancePool.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
+        governancePool.setErpStoreCode(resolveErpStoreCode(reqBO));
+        governancePool.setPlatformId(ELE_PLATFORM_ID);
+        governancePool.setPlatformStoreId(StrUtil.trim(reqBO.getPlatformStoreId()));
+        governancePool.setSkuCode(StrUtil.trim(reqBO.getSkuCode()));
+        governancePool.setSubSkuCode(StrUtil.trim(reqBO.getSubSkuCode()));
+        governancePool.setSpuCode(StrUtil.trim(reqBO.getSpuCode()));
+        governancePool.setGoodsLevel(StrUtil.trim(reqBO.getGoodsLevel()));
+        governancePool.setOperationType(StrUtil.trim(reqBO.getOperationType()));
+        governancePool.setReasonCode("STORE_NOT_FOUND");
+        governancePool.setReasonMsg("未找到门店映射: " + missingStoreKey);
+        governancePool.setProcessStatus("PENDING");
+        governancePool.setRawPayload(StrUtil.blankToDefault(reqBO.getRawPayload(), reqBO.getRequestBody()));
+        governancePool.setRemark(testMode ? TEST_MODE_MARK : null);
+        governanceService.create(governancePool);
+    }
+
+    private void createGovernanceRecordForIdentityMismatch(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, boolean testMode) {
+        EleStoreGoodsGovernancePoolDO governancePool = new EleStoreGoodsGovernancePoolDO();
+        governancePool.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
+        governancePool.setErpStoreCode(resolveErpStoreCode(reqBO));
+        governancePool.setPlatformId(ELE_PLATFORM_ID);
+        governancePool.setStoreId(store == null ? null : store.getStoreId());
+        governancePool.setPlatformStoreId(store == null ? StrUtil.trim(reqBO.getPlatformStoreId()) : store.getPlatformStoreId());
+        governancePool.setSkuCode(StrUtil.trim(reqBO.getSkuCode()));
+        governancePool.setSubSkuCode(StrUtil.trim(reqBO.getSubSkuCode()));
+        governancePool.setSpuCode(StrUtil.trim(reqBO.getSpuCode()));
+        governancePool.setGoodsLevel(StrUtil.trim(reqBO.getGoodsLevel()));
+        governancePool.setOperationType(StrUtil.trim(reqBO.getOperationType()));
+        governancePool.setReasonCode(StoreIdentityValidator.REASON_CODE_STORE_IDENTITY_MISMATCH);
+        governancePool.setReasonMsg("门店标识冲突，拒绝写入正式表");
+        governancePool.setProcessStatus("PENDING");
+        governancePool.setRawPayload(StrUtil.blankToDefault(reqBO.getRawPayload(), reqBO.getRequestBody()));
+        governancePool.setRemark(testMode ? TEST_MODE_MARK : null);
+        governanceService.create(governancePool);
+    }
+
     private void writeSuccessLog(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, boolean testMode) {
         EleStoreGoodsSyncLogDO syncLog = buildSyncLog(reqBO, store);
         syncLog.setSuccess(Boolean.TRUE);
@@ -429,8 +484,24 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         EleStoreGoodsSyncLogDO syncLog = buildSyncLog(reqBO, store);
         syncLog.setSuccess(Boolean.FALSE);
         syncLog.setResultCode(resultCode);
-        syncLog.setResultMsg(resultMsg);
+        // 增强错误消息，包含门店和商品标识，便于追踪
+        String enrichedMsg = enrichFailureMessage(reqBO, store, resultMsg);
+        syncLog.setResultMsg(enrichedMsg);
         syncLogService.create(syncLog);
+    }
+
+    private String enrichFailureMessage(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, String baseMsg) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[门店:");
+        if (store != null) {
+            sb.append("storeId=").append(store.getStoreId())
+              .append(",platformStoreId=").append(store.getPlatformStoreId());
+        } else {
+            sb.append("erpStoreCode=").append(StrUtil.trim(reqBO.getErpStoreCode()));
+        }
+        sb.append("] [商品:skuCode=").append(StrUtil.trim(reqBO.getSkuCode())).append("] ");
+        sb.append(baseMsg);
+        return sb.toString();
     }
 
     private EleStoreGoodsSyncLogDO buildSyncLog(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store) {

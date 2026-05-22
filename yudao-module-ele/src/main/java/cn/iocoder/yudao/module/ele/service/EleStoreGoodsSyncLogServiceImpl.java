@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsSyncLogDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsSyncLogMapper;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -17,7 +18,7 @@ public class EleStoreGoodsSyncLogServiceImpl implements EleStoreGoodsSyncLogServ
     private EleStoreGoodsSyncLogMapper syncLogMapper;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
     public Long create(EleStoreGoodsSyncLogDO syncLog) {
         syncLogMapper.insert(syncLog);
         return syncLog.getId();

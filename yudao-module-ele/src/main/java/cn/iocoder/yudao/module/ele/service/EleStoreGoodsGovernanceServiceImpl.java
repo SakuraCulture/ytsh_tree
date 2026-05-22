@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsGovernancePoolDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsGovernancePoolMapper;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -24,7 +25,7 @@ public class EleStoreGoodsGovernanceServiceImpl implements EleStoreGoodsGovernan
     private EleStoreGoodsGovernancePoolMapper governancePoolMapper;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
     public Long create(EleStoreGoodsGovernancePoolDO governancePool) {
         governancePoolMapper.insert(governancePool);
         return governancePool.getId();

@@ -66,14 +66,14 @@ class EleStoreGoodsSyncServiceImplTest extends BaseMockitoUnitTest {
 
     @Test
     void syncStoreGoodsPage_whenStoreIdentityMismatch_thenOnlyCountFailAndWriteMismatchLog() {
+        // 请求参数 erpStoreCode = "erp-store-request"，用于查询门店
         EleStoreGoodsQueryReqBO reqBO = new EleStoreGoodsQueryReqBO("merchant-1", "erp-store-request", null, 1, 20);
         doReturn(buildQueryResp()).when(syncService).queryStoreGoods(any(EleStoreGoodsQueryReqBO.class));
         when(transactionTemplate.execute(any())).thenAnswer(invocation ->
                 ((TransactionCallback<?>) invocation.getArgument(0)).doInTransaction(null));
-        when(storeService.getPlatformTableListByPlatformStoreId(1L, "erp-store-upstream")).thenReturn(List.of(buildLocalStore("erp-store-local")));
-        doReturn(StoreIdentityValidationResult.reject(StoreIdentityValidator.REASON_CODE_STORE_IDENTITY_MISMATCH,
-                "erp-store-request", "merchant-1", "erp-store-request", "store-local-1"))
-                .when(storeIdentityValidator).validate(any(), any(), any(), any(), any(), any(), any());
+        // 用 erpStoreCode="erp-store-request" 查询门店，返回 platformStoreId="erp-store-local" 的门店
+        // 由于 platformStoreId 过滤器，门店会被跳过，返回 REJECT
+        when(storeService.getPlatformTableListByPlatformStoreId(1L, "erp-store-request")).thenReturn(List.of(buildLocalStore("erp-store-local")));
 
         EleStoreGoodsPageSyncResult result = syncService.syncStoreGoodsPage(reqBO, false);
 
@@ -86,7 +86,9 @@ class EleStoreGoodsSyncServiceImplTest extends BaseMockitoUnitTest {
         verify(syncLogService).create(argThat((EleStoreGoodsSyncLogDO log) ->
                 Boolean.FALSE.equals(log.getSuccess())
                         && "STORE_IDENTITY_MISMATCH".equals(log.getResultCode())));
-        verifyNoInteractions(skuTableMapper, shadowService, governanceService);
+        // 身份冲突场景现在会创建治理记录
+        verify(governanceService).create(any());
+        verifyNoInteractions(skuTableMapper, shadowService);
     }
 
     @Test
