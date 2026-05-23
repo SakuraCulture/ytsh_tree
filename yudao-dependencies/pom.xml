@@ -63,7 +63,7 @@
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <jsch.version>2.27.7</jsch.version>
         <tika-core.version>3.2.3</tika-core.version>
-        <ip2region.version>2.7.0</ip2region.version>
+        <ip2region.version>3.3.7</ip2region.version>
         <bizlog-sdk.version>3.0.6</bizlog-sdk.version>
         <netty.version>4.2.9.Final</netty.version>
         <mqtt.version>1.2.5</mqtt.version>
