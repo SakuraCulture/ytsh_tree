@@ -12,6 +12,12 @@ import java.util.List;
 @Mapper
 public interface EleStoreGoodsGovernancePoolMapper extends BaseMapperX<EleStoreGoodsGovernancePoolDO> {
 
+    default EleStoreGoodsGovernancePoolDO selectByIdAndErpStoreCode(Long id, String erpStoreCode) {
+        return selectOne(new LambdaQueryWrapperX<EleStoreGoodsGovernancePoolDO>()
+                .eq(EleStoreGoodsGovernancePoolDO::getId, id)
+                .eq(EleStoreGoodsGovernancePoolDO::getErpStoreCode, erpStoreCode));
+    }
+
     default List<EleStoreGoodsGovernancePoolDO> selectPendingList() {
         return selectList(new LambdaQueryWrapperX<EleStoreGoodsGovernancePoolDO>()
                 .eq(EleStoreGoodsGovernancePoolDO::getProcessStatus, "PENDING")

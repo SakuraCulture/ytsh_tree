@@ -44,7 +44,7 @@ public class EleStoreGoodsFullSyncController {
     @PostMapping("/all-open")
     @Operation(summary = "创建所有开业门店商品全量同步任务")
     @PreAuthorize("@ss.hasPermission('ele:order:sync')")
-    public CommonResult<Long> createAllOpenStoresFullSync(@RequestBody(required = false) EleStoreGoodsFullSyncAllOpenReqVO reqVO) {
+    public CommonResult<Boolean> createAllOpenStoresFullSync(@RequestBody(required = false) EleStoreGoodsFullSyncAllOpenReqVO reqVO) {
         return CommonResult.success(fullSyncService.createAllOpenStoresFullSync(reqVO));
     }
 

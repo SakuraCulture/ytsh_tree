@@ -25,6 +25,12 @@ public interface EleStoreGoodsShadowMapper extends BaseMapperX<EleStoreGoodsShad
                 .eq(EleStoreGoodsShadowDO::getSkuCode, skuCode));
     }
 
+    default EleStoreGoodsShadowDO selectByIdAndErpStoreCode(Long id, String erpStoreCode) {
+        return selectOne(new LambdaQueryWrapperX<EleStoreGoodsShadowDO>()
+                .eq(EleStoreGoodsShadowDO::getId, id)
+                .eq(EleStoreGoodsShadowDO::getErpStoreCode, erpStoreCode));
+    }
+
     default List<EleStoreGoodsShadowDO> selectActiveList(Collection<String> matchStatuses, String storeId,
                                                          String erpStoreCode, String skuCode, String title) {
         return selectList(new LambdaQueryWrapperX<EleStoreGoodsShadowDO>()

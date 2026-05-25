@@ -350,7 +350,7 @@ export const createCurrentStoreFullSync = async (data: StoreGoodsFullSyncCurrent
 }
 
 export const createAllOpenStoresFullSync = async (data?: StoreGoodsFullSyncAllOpenReqVO) => {
-  return await request.post<number>({ url: '/ele/store-goods/full-sync/all-open', data })
+  return await request.post<boolean>({ url: '/ele/store-goods/full-sync/all-open', data })
 }
 
 export const getFullSyncTaskPage = async (params: StoreGoodsFullSyncTaskReqVO) => {

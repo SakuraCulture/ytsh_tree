@@ -3,8 +3,10 @@ package cn.iocoder.yudao.module.ele.service.guard;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.module.ele.dal.redis.EleOrderLockService;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 public class StoreExecutionGuard {
 
@@ -22,7 +24,12 @@ public class StoreExecutionGuard {
             throw new IllegalArgumentException("action不能为空");
         }
 
+        long lockStart = System.currentTimeMillis();
+        log.info("[门店执行锁] 开始获取: scenario={}, platformStoreId={}, waitSeconds={}, leaseMinutes={}",
+                scenario.getDescription(), platformStoreId, scenario.getWaitSeconds(), scenario.getLeaseMinutes());
         boolean acquired = tryLock(scenario, platformStoreId);
+        log.info("[门店执行锁] 获取结果: scenario={}, platformStoreId={}, acquired={}, 耗时={}ms",
+                scenario.getDescription(), platformStoreId, acquired, System.currentTimeMillis() - lockStart);
         if (!acquired) {
             throw new IllegalStateException(scenario.getDescription() + "获取执行锁失败: " + platformStoreId);
         }
@@ -30,6 +37,8 @@ public class StoreExecutionGuard {
             action.run();
         } finally {
             unlock(scenario, platformStoreId);
+            log.info("[门店执行锁] 已释放: scenario={}, platformStoreId={}",
+                    scenario.getDescription(), platformStoreId);
         }
     }
 

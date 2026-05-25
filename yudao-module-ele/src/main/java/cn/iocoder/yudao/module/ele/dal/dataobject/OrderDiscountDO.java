@@ -34,6 +34,9 @@ public class OrderDiscountDO {
     /** 活动归属订单类型 1-主单 0-子单 */
     private String activityOrderType;
 
+    /** 活动类型 */
+    private String activityType;
+
     /** 优惠类型(FULL_REDUCTION-满减, COUPON-优惠券, NEW_USER-新用户, etc) */
     private String discountType;
 
@@ -57,6 +60,9 @@ public class OrderDiscountDO {
 
     /** 更新时间 */
     private Long updateTime;
+
+    /** 租户编号 */
+    private Long tenantId;
 
     /** 是否删除 0-否 1-是 */
     private Boolean deleted;

@@ -293,8 +293,8 @@ const createAllOpenTask = async () => {
   }
   creatingAllOpen.value = true
   try {
-    const taskId = await createAllOpenStoresFullSync({ testMode: false })
-    ElMessage.success(`已创建任务 ${taskId || ''}`)
+    await createAllOpenStoresFullSync({ testMode: false })
+    ElMessage.success('已提交全量同步任务')
     await loadTasks()
   } catch (error: any) {
     ElMessage.error(error?.message || '创建所有开业门店任务失败')

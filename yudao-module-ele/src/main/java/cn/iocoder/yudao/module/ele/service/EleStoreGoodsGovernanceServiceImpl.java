@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsGovernancePo
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreGoodsGovernancePoolRespVO;
 import cn.iocoder.yudao.module.ele.dal.dataobject.EleStoreGoodsGovernancePoolDO;
 import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsGovernancePoolMapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -62,10 +63,10 @@ public class EleStoreGoodsGovernanceServiceImpl implements EleStoreGoodsGovernan
         if (!STATUS_PENDING.equals(governancePool.getProcessStatus())) {
             throw new RuntimeException("待治理记录不是待处理状态");
         }
-        EleStoreGoodsGovernancePoolDO updateObj = new EleStoreGoodsGovernancePoolDO();
-        updateObj.setId(id);
-        updateObj.setProcessStatus(processStatus);
-        updateObj.setRemark(remark);
-        governancePoolMapper.updateById(updateObj);
+        governancePoolMapper.update(new EleStoreGoodsGovernancePoolDO(), new UpdateWrapper<EleStoreGoodsGovernancePoolDO>()
+                .eq("id", id)
+                .eq("erp_store_code", governancePool.getErpStoreCode())
+                .set("process_status", processStatus)
+                .set("remark", remark));
     }
 }

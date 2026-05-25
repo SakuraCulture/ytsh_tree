@@ -29,9 +29,9 @@
               >
                 <el-option
                   v-for="store in storeList"
-                  :key="store.storeId"
+                  :key="store.platformStoreId || store.storeId"
                   :label="store.storeName"
-                  :value="store.storeId"
+                  :value="store.platformStoreId"
                 />
               </el-select>
             </el-form-item>
@@ -808,7 +808,9 @@ export default {
       TableApi.getTableAllSimpleList()
         .then((res) => {
           const list = Array.isArray(res) ? res : []
-          this.storeList = list.sort((a, b) => {
+          this.storeList = list
+            .filter((store) => store.platformStoreId)
+            .sort((a, b) => {
             const aStatus = a.storeStatus ?? 0
             const bStatus = b.storeStatus ?? 0
             return bStatus - aStatus

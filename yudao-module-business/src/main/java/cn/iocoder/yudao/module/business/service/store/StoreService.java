@@ -371,6 +371,8 @@ public interface StoreService {
 
     List<cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO> getOpenPlatformStores(Long platformId);
 
+    List<cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO> getAllPlatformStores(Long platformId);
+
     /**
      * 获取定时同步使用的平台门店列表
      *

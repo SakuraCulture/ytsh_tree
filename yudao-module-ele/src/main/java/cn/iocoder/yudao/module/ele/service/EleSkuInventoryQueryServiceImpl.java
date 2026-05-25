@@ -21,8 +21,6 @@ import cn.iocoder.yudao.module.ele.service.bo.EleStoreInventoryIngestResultBO;
 import cn.iocoder.yudao.module.ele.service.bo.EleStoreInventoryIngestRowBO;
 import cn.iocoder.yudao.module.ele.service.client.EleOpenApiClient;
 import cn.iocoder.yudao.module.ele.service.dto.EleSkuInventoryBatchQueryRespDTO;
-import cn.iocoder.yudao.module.ele.service.validator.StoreIdentityValidationResult;
-import cn.iocoder.yudao.module.ele.service.validator.StoreIdentityValidator;
 import com.alibaba.ocean.rawsdk.common.BizResultWrapper;
 import lib.ele.retail.param.ErpSkuInventoryResultDTO;
 import lib.ele.retail.param.MeEleRetailSaasSkuStockInventoryBatchQueryReqDto;
@@ -67,7 +65,6 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
     private final EleSkuInventoryShadowService shadowService;
     private final EleSkuInventoryGovernanceService governanceService;
     private final EleStoreInventoryIngestService inventoryIngestService;
-    private final StoreIdentityValidator storeIdentityValidator;
 
     @Autowired
     public EleSkuInventoryQueryServiceImpl(StoreService storeService, EleApiRateLimiter eleApiRateLimiter,
@@ -75,8 +72,7 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
                                            SkuTableMapper skuTableMapper, StoreProductMapper storeProductMapper,
                                            StoreStockMapper storeStockMapper, EleSkuInventoryShadowService shadowService,
                                            EleSkuInventoryGovernanceService governanceService,
-                                           EleStoreInventoryIngestService inventoryIngestService,
-                                           StoreIdentityValidator storeIdentityValidator) {
+                                           EleStoreInventoryIngestService inventoryIngestService) {
         this.storeService = storeService;
         this.eleApiRateLimiter = eleApiRateLimiter;
         this.eleApiConfigMapper = eleApiConfigMapper;
@@ -87,7 +83,6 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
         this.shadowService = shadowService;
         this.governanceService = governanceService;
         this.inventoryIngestService = inventoryIngestService;
-        this.storeIdentityValidator = storeIdentityValidator;
     }
 
     @Override
@@ -144,7 +139,6 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
             EleSkuInventoryBatchQueryRespDTO.InventoryRowDTO row = convertInventoryRow(inventory);
             inventoryRows.add(row);
             if (isInventoryKeyMissing(row)) {
-                addFailureCount(respDTO);
                 addIntegrityError(respDTO, ERROR_INVENTORY_KEY_MISSING);
                 continue;
             }
@@ -157,7 +151,6 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
                 }
             }
             if (duplicateRow) {
-                addFailureCount(respDTO);
                 continue;
             }
             returnedKeys.addAll(rowKeys);
@@ -384,12 +377,7 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
 
     private void addMissingRowError(EleSkuInventoryBatchQueryRespDTO respDTO, String errorDetail) {
         respDTO.setMissingRowCount(respDTO.getMissingRowCount() + 1);
-        addFailureCount(respDTO);
         addIntegrityError(respDTO, errorDetail);
-    }
-
-    private void addFailureCount(EleSkuInventoryBatchQueryRespDTO respDTO) {
-        respDTO.setFailureCount(respDTO.getFailureCount() + 1);
     }
 
     private void addIntegrityError(EleSkuInventoryBatchQueryRespDTO respDTO, String errorDetail) {
@@ -435,29 +423,29 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
         String platformStoreId = normalizeNullable(reqBO == null ? null : reqBO.getPlatformStoreId());
         String merchantCode = normalizeNullable(reqBO == null ? null : reqBO.getMerchantCode());
         String erpStoreCode = normalizeNullable(reqBO == null ? null : reqBO.getErpStoreCode());
-        String storeId = normalizeNullable(reqBO == null ? null : reqBO.getStoreId());
 
-        StorePlatformRespVO storePlatform = StrUtil.isBlank(platformStoreId)
-                ? null
-                : storeService.getPlatformTableByPlatformStoreId(platformStoreId);
-        StoreIdentityValidationResult identityValidation = storeIdentityValidator.validate(
-                platformStoreId,
-                merchantCode,
-                erpStoreCode,
-                storeId,
-                storePlatform == null ? null : new StoreIdentityValidator.StoreIdentityInput(
-                        storePlatform.getStoreId(), storePlatform.getPlatformStoreId(), storePlatform.getSettlementAccount()),
-                null,
-                null);
-        if (identityValidation.getDecision() == StoreIdentityValidationResult.Decision.REJECT) {
-            throw new IllegalArgumentException("门店标识冲突，拒绝执行库存同步");
+        StorePlatformRespVO storePlatform = null;
+        if (StrUtil.isNotBlank(platformStoreId)) {
+            storePlatform = storeService.getPlatformTableByPlatformStoreId(platformStoreId);
+        }
+        if (storePlatform == null && StrUtil.isNotBlank(erpStoreCode)) {
+            storePlatform = storeService.getPlatformTableByPlatformStoreId(erpStoreCode);
+        }
+        if (storePlatform != null && StrUtil.isNotBlank(storePlatform.getPlatformStoreId())) {
+            platformStoreId = StrUtil.trim(storePlatform.getPlatformStoreId());
+            erpStoreCode = platformStoreId;
+            if (StrUtil.isBlank(merchantCode)) {
+                merchantCode = normalizeNullable(storePlatform.getSettlementAccount());
+            }
+        } else if (StrUtil.isBlank(erpStoreCode) && StrUtil.isNotBlank(platformStoreId)) {
+            erpStoreCode = platformStoreId;
         }
 
-        normalizedReq.setPlatformStoreId(identityValidation.getPlatformStoreId());
+        normalizedReq.setPlatformStoreId(platformStoreId);
         normalizedReq.setPlatformId(storePlatform == null ? null : storePlatform.getPlatformId());
-        normalizedReq.setStoreId(identityValidation.getStoreId());
-        normalizedReq.setMerchantCode(identityValidation.getMerchantCode());
-        normalizedReq.setErpStoreCode(identityValidation.getErpStoreCode());
+        normalizedReq.setStoreId(storePlatform == null ? null : normalizeNullable(storePlatform.getStoreId()));
+        normalizedReq.setMerchantCode(merchantCode);
+        normalizedReq.setErpStoreCode(erpStoreCode);
         normalizedReq.setSkuCodes(normalizeCodes(reqBO == null ? null : reqBO.getSkuCodes()));
         normalizedReq.setSubSkuCodes(new ArrayList<>());
         return normalizedReq;

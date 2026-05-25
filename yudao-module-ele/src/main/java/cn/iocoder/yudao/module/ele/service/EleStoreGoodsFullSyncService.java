@@ -12,7 +12,7 @@ public interface EleStoreGoodsFullSyncService {
 
     Long createCurrentStoreFullSync(EleStoreGoodsFullSyncCurrentReqVO reqVO);
 
-    Long createAllOpenStoresFullSync(EleStoreGoodsFullSyncAllOpenReqVO reqVO);
+    Boolean createAllOpenStoresFullSync(EleStoreGoodsFullSyncAllOpenReqVO reqVO);
 
     PageResult<EleStoreGoodsFullSyncTaskRespVO> getTaskPage(EleStoreGoodsFullSyncTaskPageReqVO reqVO);
 

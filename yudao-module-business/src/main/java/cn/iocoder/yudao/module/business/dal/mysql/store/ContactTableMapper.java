@@ -29,4 +29,12 @@ public interface ContactTableMapper extends BaseMapperX<ContactTableDO> {
 	    return deleteBatch(ContactTableDO::getStoreId, storeIds);
 	}
 
+    default List<ContactTableDO> selectListByStoreIds(Collection<String> storeIds) {
+        return selectList(new LambdaQueryWrapperX<ContactTableDO>()
+                .in(ContactTableDO::getStoreId, storeIds)
+                .eq(ContactTableDO::getDeleted, false)
+                .orderByAsc(ContactTableDO::getStoreId)
+                .orderByAsc(ContactTableDO::getContactId));
+    }
+
 }

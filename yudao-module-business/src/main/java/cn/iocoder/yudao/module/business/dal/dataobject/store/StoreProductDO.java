@@ -60,5 +60,9 @@ public class StoreProductDO extends BaseDO {
      * 上架时间
      */
     private LocalDateTime storeProductShelfTime;
+    /**
+     * 商品来源(1门店 0地采)
+     */
+    private Integer goodsSource;
 
 }

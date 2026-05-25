@@ -131,4 +131,22 @@ public class OrderDO {
 
     /** 结算状态(0未结算/1已结算) */
     private Integer settlementStatus;
+
+    /** 地区编码 */
+    private String regionCode;
+
+    /** 期望送达时间 */
+    private java.time.LocalDateTime expectArriveTime;
+
+    /** 结束时间 */
+    private java.time.LocalDateTime endTime;
+
+    /** 最近账单日期 */
+    private java.time.LocalDate lastBillDate;
+
+    /** 最近账单结算金额（分） */
+    private Long lastBillAmount;
+
+    /** 最近账单结算状态(0未结算/1已结算) */
+    private Integer lastBillStatus;
 }

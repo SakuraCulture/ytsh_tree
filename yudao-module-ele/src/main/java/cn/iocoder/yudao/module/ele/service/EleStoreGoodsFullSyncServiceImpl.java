@@ -20,6 +20,7 @@ import cn.iocoder.yudao.module.ele.dal.mysql.EleStoreGoodsFullSyncTaskStoreMappe
 import cn.iocoder.yudao.module.ele.dal.redis.EleOrderLockService;
 import cn.iocoder.yudao.module.ele.service.executor.EleStoreGoodsFullSyncExecutor;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -28,6 +29,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.List;
 
+@Slf4j
 @Service
 public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncService {
 
@@ -69,6 +71,8 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
                     Boolean.TRUE.equals(reqVO.getTestMode()), 1);
             taskMapper.insert(task);
             taskStoreMapper.insert(createCurrentTaskStore(task, merchantCode, erpStoreCode));
+            log.info("【饿了么门店商品全量同步】创建当前门店同步任务: taskId={}, erpStoreCode={}, testMode={}",
+                    task.getId(), erpStoreCode, reqVO.getTestMode());
             submitAndUnlockAfterTransaction(task.getId(), lockKey);
             return task.getId();
         } finally {
@@ -77,32 +81,19 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    public Long createAllOpenStoresFullSync(EleStoreGoodsFullSyncAllOpenReqVO reqVO) {
-        String lockKey = buildAllOpenStoresTaskLockKey();
-        eleOrderLockService.lockStoreGoodsFullSyncTask(lockKey, CREATE_LOCK_WAIT_SECONDS, CREATE_LOCK_LEASE_MINUTES);
-        try {
-            EleStoreGoodsFullSyncTaskDO runningTask = taskMapper.selectRunningAllOpenStores();
-            if (runningTask != null) {
-                return runningTask.getId();
-            }
-
-            List<StorePlatformRespVO> stores = storeService.getOpenPlatformStores(ELE_PLATFORM_ID);
-            if (CollUtil.isEmpty(stores)) {
-                throw new RuntimeException("没有可同步的饿了么开业门店");
-            }
-
-            EleStoreGoodsFullSyncTaskDO task = createTask(SCOPE_ALL_OPEN_STORES, null, null,
-                    reqVO != null && Boolean.TRUE.equals(reqVO.getTestMode()), stores.size());
-            taskMapper.insert(task);
-            for (StorePlatformRespVO store : stores) {
-                taskStoreMapper.insert(createOpenStoreTaskStore(task, store));
-            }
-            submitAndUnlockAfterTransaction(task.getId(), lockKey);
-            return task.getId();
-        } finally {
-            unlockIfNoTransactionSynchronization(lockKey);
+    public Boolean createAllOpenStoresFullSync(EleStoreGoodsFullSyncAllOpenReqVO reqVO) {
+        long totalStart = System.currentTimeMillis();
+        List<StorePlatformRespVO> stores = storeService.getAllPlatformStores(ELE_PLATFORM_ID);
+        log.info("【饿了么门店商品全量同步】查询所有门店完成, 门店数={}, 耗时={}ms",
+                stores.size(), System.currentTimeMillis() - totalStart);
+        if (CollUtil.isEmpty(stores)) {
+            throw new RuntimeException("没有可同步的饿了么门店");
         }
+        Boolean testMode = reqVO != null && Boolean.TRUE.equals(reqVO.getTestMode());
+        log.info("【饿了么门店商品全量同步】提交直接执行, 门店数={}, testMode={}, 耗时={}ms",
+                stores.size(), testMode, System.currentTimeMillis() - totalStart);
+        fullSyncExecutor.submitDirectly(stores, testMode);
+        return true;
     }
 
     @Override
@@ -138,6 +129,7 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
         updateObj.setFinishedAt(cancelledAt);
         taskMapper.updateById(updateObj);
         taskStoreMapper.cancelPendingByTaskId(id, cancelledAt);
+        log.info("【饿了么门店商品全量同步】任务已取消: taskId={}, 原状态={}", id, task.getStatus());
     }
 
     private EleStoreGoodsFullSyncTaskDO createTask(String scope, String merchantCode, String erpStoreCode,
@@ -199,12 +191,14 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
 
     private void submitAndUnlockAfterTransaction(Long taskId, String lockKey) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            log.info("【饿了么门店商品全量同步】提交异步执行: taskId={}", taskId);
             fullSyncExecutor.submit(taskId);
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
+                log.info("【饿了么门店商品全量同步】事务提交后提交异步执行: taskId={}", taskId);
                 fullSyncExecutor.submit(taskId);
             }
 

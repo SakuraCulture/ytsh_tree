@@ -19,14 +19,20 @@ public class OrderItemDO {
     @TableId(type = IdType.AUTO)
     private Long itemId;
 
-    /** 子订单ID */
-    private String subOrderId;
-
     /** 订单ID(关联order_table.order_id) */
     private String orderId;
 
+    /** 子订单ID */
+    private String subOrderId;
+
     /** 商品SKU编码 */
     private String skuCode;
+
+    /** 子SKU编码 */
+    private String subSkuCode;
+
+    /** 本地SKU ID */
+    private Long productSkuId;
 
     /** 商品名称 */
     private String skuName;
@@ -55,14 +61,38 @@ public class OrderItemDO {
     /** 实付金额(元) */
     private BigDecimal payFee;
 
-    /** 商品类型(0-普通/1-组合/2-赠品)，对应翱象goods_type:0单品->0普通,3组合品->1组合 */
+    /** 商品类型(0-普通/1-组合/2-赠品) */
     private Integer productType;
+
+    /** 平台原始商品类型 */
+    private String goodsType;
 
     /** 数量（翱象num字段） */
     private Integer num;
 
+    /** 柜子编码 */
+    private String cabinetCode;
+
+    /** 是否换货 0-否 1-是 */
+    private Boolean exchangeFlag;
+
+    /** 换货金额(元) */
+    private BigDecimal exchangeAmount;
+
+    /** 是否赠品 0-否 1-是 */
+    private Boolean giftFlag;
+
+    /** 出库标志 0-否 1-是 */
+    private Boolean outboundFlag;
+
     /** ERP门店编码 */
     private String erpStoreCode;
+
+    /** 租户ID */
+    private Long tenantId;
+
+    /** ETL时间 */
+    private java.time.LocalDateTime etlTime;
 
     /** 创建者 */
     private String creator;

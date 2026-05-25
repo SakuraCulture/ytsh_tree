@@ -1091,8 +1091,16 @@ public class StoreServiceImpl implements StoreService {
                     .filter(item -> StrUtil.equals(normalizedPlatformStoreId, StrUtil.trim(item.getPlatformStoreId())))
                     .findFirst()
                     .orElse(null);
+            if (cached == null) {
+                cached = cachedList.stream()
+                        .filter(item -> StrUtil.equals(normalizedPlatformStoreId, StrUtil.trim(item.getStoreId())))
+                        .findFirst()
+                        .orElse(null);
+            }
             if (cached != null) {
                 StorePlatformRespVO vo = new StorePlatformRespVO();
+                vo.setStoreId(StrUtil.trim(cached.getStoreId()));
+                vo.setPlatformId(cached.getPlatformId());
                 vo.setPlatformStoreId(StrUtil.trim(cached.getPlatformStoreId()));
                 vo.setPlatformStoreName(cached.getStoreName());
                 return vo;
@@ -1142,6 +1150,41 @@ public class StoreServiceImpl implements StoreService {
         return result;
     }
 
+    @Override
+    public List<StorePlatformRespVO> getAllPlatformStores(Long platformId) {
+        if (platformId == null) {
+            return Collections.emptyList();
+        }
+        List<PlatformTableDO> platformTables = platformTableMapper.selectList(new LambdaQueryWrapperX<PlatformTableDO>()
+                .eq(PlatformTableDO::getPlatformId, platformId)
+                .eq(PlatformTableDO::getStatus, 1)
+                .isNotNull(PlatformTableDO::getPlatformStoreId)
+                .orderByAsc(PlatformTableDO::getStoreId));
+        if (CollUtil.isEmpty(platformTables)) {
+            return Collections.emptyList();
+        }
+        Set<String> storeIds = platformTables.stream()
+                .map(PlatformTableDO::getStoreId)
+                .filter(StrUtil::isNotBlank)
+                .collect(Collectors.toSet());
+        Map<String, StoreDO> storeMap = Collections.emptyMap();
+        if (CollUtil.isNotEmpty(storeIds)) {
+            List<StoreDO> stores = storeMapper.selectList(new LambdaQueryWrapperX<StoreDO>()
+                    .in(StoreDO::getStoreId, storeIds));
+            storeMap = stores.stream()
+                    .filter(store -> StrUtil.isNotBlank(store.getStoreId()))
+                    .collect(Collectors.toMap(StoreDO::getStoreId, store -> store, (left, right) -> left));
+        }
+        List<StorePlatformRespVO> result = convertPlatformTables(platformTables);
+        for (StorePlatformRespVO item : result) {
+            StoreDO store = storeMap.get(item.getStoreId());
+            if (store != null) {
+                item.setPlatformStoreName(store.getStoreName());
+            }
+        }
+        return result;
+    }
+
     private List<StorePlatformRespVO> convertPlatformTables(List<PlatformTableDO> list) {
         if (CollUtil.isEmpty(list)) {
             return Collections.emptyList();
@@ -1152,7 +1195,7 @@ public class StoreServiceImpl implements StoreService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         if (CollUtil.isNotEmpty(platformIds)) {
-            List<PlatformDO> platforms = platformMapper.selectBatchIds(platformIds);
+            List<PlatformDO> platforms = platformMapper.selectByIds(platformIds);
             for (PlatformDO platform : platforms) {
                 platformMap.put(platform.getPlatformId(), platform);
             }

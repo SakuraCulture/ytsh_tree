@@ -65,8 +65,8 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
             return insertOrRetryUpdate(reqBO, matchStatus, matchedProductSkuId, mergedStoreProductId,
                     merchantCode, erpStoreCode, skuCode);
         }
-        updateExisting(exist.getId(), reqBO, matchStatus, matchedProductSkuId, mergedStoreProductId);
-        EleStoreGoodsShadowDO updated = shadowMapper.selectById(exist.getId());
+        updateExisting(exist, reqBO, matchStatus, matchedProductSkuId, mergedStoreProductId);
+        EleStoreGoodsShadowDO updated = shadowMapper.selectByIdAndErpStoreCode(exist.getId(), erpStoreCode);
         return updated == null ? exist : updated;
     }
 
@@ -89,6 +89,7 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
         LocalDateTime now = LocalDateTime.now();
         int updated = shadowMapper.update(new EleStoreGoodsShadowDO(), new UpdateWrapper<EleStoreGoodsShadowDO>()
                 .eq("id", shadowId)
+                .eq("erp_store_code", exist.getErpStoreCode())
                 .eq("match_status", exist.getMatchStatus())
                 .set("match_status", EleStoreGoodsShadowStatus.MERGED)
                 .set("matched_product_sku_id", StrUtil.trim(matchedProductSkuId))
@@ -135,6 +136,7 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
         }
         int updated = shadowMapper.update(new EleStoreGoodsShadowDO(), new UpdateWrapper<EleStoreGoodsShadowDO>()
                 .eq("id", id)
+                .eq("erp_store_code", exist.getErpStoreCode())
                 .eq("match_status", exist.getMatchStatus())
                 .set("match_status", EleStoreGoodsShadowStatus.IGNORED));
         if (updated != 1) {
@@ -176,25 +178,33 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
             if (exist == null) {
                 throw ex;
             }
-            updateExisting(exist.getId(), reqBO, matchStatus, matchedProductSkuId, mergedStoreProductId);
-            EleStoreGoodsShadowDO updated = shadowMapper.selectById(exist.getId());
+            updateExisting(exist, reqBO, matchStatus, matchedProductSkuId, mergedStoreProductId);
+            EleStoreGoodsShadowDO updated = shadowMapper.selectByIdAndErpStoreCode(exist.getId(), erpStoreCode);
             return updated == null ? exist : updated;
         }
     }
 
-    private void updateExisting(Long id, EleStoreGoodsShadowUpsertReqBO reqBO, String matchStatus,
+    private void updateExisting(EleStoreGoodsShadowDO exist, EleStoreGoodsShadowUpsertReqBO reqBO, String matchStatus,
                                 String matchedProductSkuId, String mergedStoreProductId) {
+        Long id = exist.getId();
+        boolean protectMerged = EleStoreGoodsShadowStatus.MERGED.equals(exist.getMatchStatus())
+                && !EleStoreGoodsShadowStatus.MERGED.equals(matchStatus);
+        String effectiveMatchStatus = protectMerged ? exist.getMatchStatus() : matchStatus;
+        String effectiveMatchedProductSkuId = protectMerged ? exist.getMatchedProductSkuId() : StrUtil.trim(matchedProductSkuId);
+        String effectiveMergedStoreProductId = protectMerged ? exist.getMergedStoreProductId() : StrUtil.trim(mergedStoreProductId);
+
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime matchedTime = null;
         LocalDateTime mergedTime = null;
-        if (EleStoreGoodsShadowStatus.MERGED.equals(matchStatus)) {
+        if (EleStoreGoodsShadowStatus.MERGED.equals(effectiveMatchStatus) && !protectMerged) {
             matchedTime = now;
             mergedTime = now;
-        } else if (StrUtil.isNotBlank(matchedProductSkuId)) {
+        } else if (StrUtil.isNotBlank(effectiveMatchedProductSkuId) && !protectMerged) {
             matchedTime = now;
         }
         shadowMapper.update(new EleStoreGoodsShadowDO(), new UpdateWrapper<EleStoreGoodsShadowDO>()
                 .eq("id", id)
+                .eq("erp_store_code", exist.getErpStoreCode())
                 .set("platform_id", reqBO.getPlatformId())
                 .set("merchant_code", StrUtil.trim(reqBO.getMerchantCode()))
                 .set("erp_store_code", StrUtil.trim(reqBO.getErpStoreCode()))
@@ -213,13 +223,14 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
                 .set("pos_status", StrUtil.trim(reqBO.getPosStatus()))
                 .set("is_active", reqBO.getIsActive())
                 .set("raw_payload", reqBO.getRawPayload())
-                .set("match_status", matchStatus)
-                .set("matched_product_sku_id", StrUtil.trim(matchedProductSkuId))
-                .set("merged_store_product_id", StrUtil.trim(mergedStoreProductId))
+                .set("match_status", effectiveMatchStatus)
+                .set("matched_product_sku_id", effectiveMatchedProductSkuId)
+                .set("merged_store_product_id", effectiveMergedStoreProductId)
                 .set("last_sync_time", now)
                 .set("matched_time", matchedTime)
                 .set("merged_time", mergedTime)
-                .set("conflict_reason", null));
+                .set("conflict_reason", null)
+                .set("goods_source", 0));
     }
 
     private void validateUpsert(EleStoreGoodsShadowUpsertReqBO reqBO, String matchStatus) {
@@ -262,6 +273,7 @@ public class EleStoreGoodsShadowServiceImpl implements EleStoreGoodsShadowServic
         row.setPosStatus(StrUtil.trim(reqBO.getPosStatus()));
         row.setIsActive(reqBO.getIsActive());
         row.setRawPayload(reqBO.getRawPayload());
+        row.setGoodsSource(0);
     }
 
     private void fillMatch(EleStoreGoodsShadowDO row, String matchStatus, String matchedProductSkuId,

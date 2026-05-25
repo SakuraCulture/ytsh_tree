@@ -9,6 +9,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -33,6 +34,10 @@ public class AdaptivePoolManager {
     @Qualifier("eleStoreGoodsFullSyncExecutor")
     private ThreadPoolTaskExecutor fullSyncExecutor;
 
+    @Resource
+    @Qualifier("eleStoreGoodsPageExecutor")
+    private ThreadPoolExecutor pageExecutor;
+
     private static final int MIN_CORE_SIZE = 10;
     private static final int MAX_CORE_SIZE = 50;
     private static final int MAX_POOL_SIZE = 80;
@@ -49,8 +54,9 @@ public class AdaptivePoolManager {
 
     @Scheduled(cron = "0 */2 * * * ?")
     public void autoAdjust() {
-        adjustPool("eleOrderSyncExecutor", syncExecutor);
-        adjustPool("eleStoreGoodsFullSyncExecutor", fullSyncExecutor);
+        adjustPool("eleOrderSyncExecutor", syncExecutor.getThreadPoolExecutor());
+        adjustPool("eleStoreGoodsFullSyncExecutor", fullSyncExecutor.getThreadPoolExecutor());
+        adjustPool("eleStoreGoodsPageExecutor", pageExecutor);
     }
 
     public void scaleUp(String poolName, int targetCoreSize) {
@@ -69,26 +75,29 @@ public class AdaptivePoolManager {
         scaleDown("eleOrderSyncExecutor", targetCoreSize);
     }
 
-    private ThreadPoolTaskExecutor resolvePool(String poolName) {
+    private ThreadPoolExecutor resolvePool(String poolName) {
         if ("eleOrderSyncExecutor".equals(poolName)) {
-            return syncExecutor;
+            return syncExecutor.getThreadPoolExecutor();
         }
         if ("eleStoreGoodsFullSyncExecutor".equals(poolName)) {
-            return fullSyncExecutor;
+            return fullSyncExecutor.getThreadPoolExecutor();
+        }
+        if ("eleStoreGoodsPageExecutor".equals(poolName)) {
+            return pageExecutor;
         }
         throw new IllegalArgumentException("不支持的线程池: " + poolName);
     }
 
-    private void adjustPool(String poolName, ThreadPoolTaskExecutor executor) {
-        ThreadPoolExecutor threadPoolExecutor = executor.getThreadPoolExecutor();
-        int queueSize = threadPoolExecutor.getQueue().size();
-        int queueCapacity = executor.getQueueCapacity();
+    private void adjustPool(String poolName, ThreadPoolExecutor executor) {
+        BlockingQueue<?> queue = executor.getQueue();
+        int queueSize = queue.size();
+        int queueCapacity = queue.remainingCapacity() + queueSize;
         double queueUsage = queueCapacity > 0 ? (queueSize * 100.0 / queueCapacity) : 0;
-        int activeCount = threadPoolExecutor.getActiveCount();
-        int poolSize = threadPoolExecutor.getPoolSize();
+        int activeCount = executor.getActiveCount();
+        int poolSize = executor.getPoolSize();
         double activePercent = poolSize > 0 ? (activeCount * 100.0 / poolSize) : 0;
         int currentCoreSize = executor.getCorePoolSize();
-        int currentMaxSize = executor.getMaxPoolSize();
+        int currentMaxSize = executor.getMaximumPoolSize();
 
         log.debug("[自适应线程池] {} 当前状态: coreSize={}, maxSize={}, queueUsage={}%, activePercent={}",
                 poolName,
@@ -103,9 +112,8 @@ public class AdaptivePoolManager {
             if (highLoadCount >= SCALE_THRESHOLD && currentCoreSize < MAX_CORE_SIZE) {
                 int newCoreSize = Math.min(currentCoreSize + SCALE_UP_STEP, MAX_CORE_SIZE);
                 int newMaxSize = Math.min(newCoreSize + SCALE_UP_STEP * 2, MAX_POOL_SIZE);
-                executor.setMaxPoolSize(newMaxSize);
+                executor.setMaximumPoolSize(newMaxSize);
                 executor.setCorePoolSize(newCoreSize);
-                executor.afterPropertiesSet();
                 highLoadCounts.put(poolName, 0);
                 log.warn("[自适应线程池] {} 扩容触发: queueUsage={}%, activePercent={}, coreSize: {}->{}, maxSize: {}->{}",
                         poolName,
@@ -125,9 +133,8 @@ public class AdaptivePoolManager {
             if (lowLoadCount >= SCALE_THRESHOLD && currentCoreSize > MIN_CORE_SIZE) {
                 int newCoreSize = Math.max(currentCoreSize - SCALE_DOWN_STEP, MIN_CORE_SIZE);
                 int newMaxSize = newCoreSize + SCALE_UP_STEP * 2;
-                executor.setMaxPoolSize(newMaxSize);
+                executor.setMaximumPoolSize(newMaxSize);
                 executor.setCorePoolSize(newCoreSize);
-                executor.afterPropertiesSet();
                 lowLoadCounts.put(poolName, 0);
                 log.info("[自适应线程池] {} 缩容触发: queueUsage={}%, activePercent={}, coreSize: {}->{}, maxSize: {}->{}",
                         poolName,
@@ -143,26 +150,24 @@ public class AdaptivePoolManager {
         lowLoadCounts.put(poolName, 0);
     }
 
-    private void scaleUp(ThreadPoolTaskExecutor executor, String poolName, int targetCoreSize) {
+    private void scaleUp(ThreadPoolExecutor executor, String poolName, int targetCoreSize) {
         int currentCoreSize = executor.getCorePoolSize();
-        int currentMaxSize = executor.getMaxPoolSize();
+        int currentMaxSize = executor.getMaximumPoolSize();
         int newCoreSize = Math.min(Math.max(targetCoreSize, currentCoreSize + 1), MAX_CORE_SIZE);
         int newMaxSize = newCoreSize + SCALE_UP_STEP * 2;
-        executor.setMaxPoolSize(newMaxSize);
+        executor.setMaximumPoolSize(newMaxSize);
         executor.setCorePoolSize(newCoreSize);
-        executor.afterPropertiesSet();
         log.info("[自适应线程池] {} 手动扩容: coreSize: {}->{}, maxSize: {}->{}",
                 poolName, currentCoreSize, newCoreSize, currentMaxSize, newMaxSize);
     }
 
-    private void scaleDown(ThreadPoolTaskExecutor executor, String poolName, int targetCoreSize) {
+    private void scaleDown(ThreadPoolExecutor executor, String poolName, int targetCoreSize) {
         int currentCoreSize = executor.getCorePoolSize();
-        int currentMaxSize = executor.getMaxPoolSize();
+        int currentMaxSize = executor.getMaximumPoolSize();
         int newCoreSize = Math.max(targetCoreSize, MIN_CORE_SIZE);
         int newMaxSize = newCoreSize + SCALE_UP_STEP * 2;
-        executor.setMaxPoolSize(newMaxSize);
+        executor.setMaximumPoolSize(newMaxSize);
         executor.setCorePoolSize(newCoreSize);
-        executor.afterPropertiesSet();
         log.info("[自适应线程池] {} 手动缩容: coreSize: {}->{}, maxSize: {}->{}",
                 poolName, currentCoreSize, newCoreSize, currentMaxSize, newMaxSize);
     }

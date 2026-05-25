@@ -4,14 +4,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.CustomizableThreadFactory;
 
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-/**
- * 饿了么订单同步线程池配置
- *
- * @author 优团科技数字化团队
- */
 @Configuration
 public class EleOrderExecutorConfiguration {
 
@@ -49,6 +47,33 @@ public class EleOrderExecutorConfiguration {
             @Value("${ele.store.goods.full-sync.shutdown.await-termination-seconds:120}") int awaitTerminationSeconds) {
         return buildExecutor(coreSize, maxSize, queueCapacity, keepAliveSeconds, awaitTermination,
                 awaitTerminationSeconds, "ele-store-goods-full-sync-");
+    }
+
+    @Bean(name = "eleStoreGoodsPageExecutor")
+    public ThreadPoolExecutor eleStoreGoodsPageExecutor(
+            @Value("${ele.store.goods.page-sync.pool.core-size:8}") int coreSize,
+            @Value("${ele.store.goods.page-sync.pool.max-size:8}") int maxSize,
+            @Value("${ele.store.goods.page-sync.pool.queue-capacity:50}") int queueCapacity,
+            @Value("${ele.store.goods.page-sync.pool.keep-alive-seconds:60}") int keepAliveSeconds,
+            @Value("${ele.store.goods.page-sync.shutdown.await-termination-seconds:120}") int awaitTerminationSeconds) {
+        CustomizableThreadFactory threadFactory = new CustomizableThreadFactory("ele-goods-page-");
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                coreSize, maxSize, keepAliveSeconds, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(queueCapacity),
+                threadFactory,
+                new ThreadPoolExecutor.CallerRunsPolicy());
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(awaitTerminationSeconds, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }, "ele-goods-page-shutdown"));
+        return executor;
     }
 
     @Bean(name = "eleStoreInventoryBatchExecutor", destroyMethod = "shutdown")

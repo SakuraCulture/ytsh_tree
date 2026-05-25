@@ -54,12 +54,14 @@ import cn.iocoder.yudao.module.ele.util.RetryUtil;
 import cn.iocoder.yudao.module.ele.service.executor.EleOrderSyncTaskExecutor;
 import cn.iocoder.yudao.module.ele.exception.EleOrderSyncException;
 import cn.iocoder.yudao.module.ele.service.client.EleOpenApiClient;
+import cn.iocoder.yudao.module.ele.service.support.EleStorePlatformResolver;
 import cn.iocoder.yudao.module.ele.service.traffic.EleTrafficInterceptor;
 import com.alibaba.ocean.rawsdk.ApiExecutor;
 import com.alibaba.ocean.rawsdk.common.BizResultWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.dao.DuplicateKeyException;
 import jakarta.annotation.PostConstruct;
 import org.redisson.RedissonShutdownException;
 import org.slf4j.Logger;
@@ -232,6 +234,8 @@ public class EleOrderServiceImpl implements EleOrderService {
     @Resource
     private StoreService storeService;
     @Resource
+    private EleStorePlatformResolver eleStorePlatformResolver;
+    @Resource
     private OrderMapper orderMapper;
     @Resource
     private OrderPlatformMapper orderPlatformMapper;
@@ -346,11 +350,14 @@ public class EleOrderServiceImpl implements EleOrderService {
     public OrderListRespDTO getOrderList(OrderListReqDTO req) {
         EleApiConfig config = getApiConfig();
 
-        String platformStoreId = StrUtil.trim(req.getPlatformStoreId());
+        EleStorePlatformResolver.Resolved storeCodes = eleStorePlatformResolver.resolve(
+                req.getPlatformStoreId(), req.getErpStoreCode());
+        String platformStoreId = storeCodes.platformStoreId();
+        String erpStoreCode = storeCodes.erpStoreCode();
         String merchantCode = StrUtil.trim(req.getMerchantCode());
-        String erpStoreCode = StrUtil.isNotBlank(platformStoreId)
-                ? platformStoreId
-                : StrUtil.trim(req.getErpStoreCode());
+        if (StrUtil.isBlank(merchantCode) && StrUtil.isNotBlank(storeCodes.merchantCode())) {
+            merchantCode = StrUtil.trim(storeCodes.merchantCode());
+        }
 
         if (StrUtil.isBlank(merchantCode)) {
             merchantCode = StrUtil.trim(config.getMerchantCode());
@@ -1077,8 +1084,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 }
                 existingLog.setTotalPulled(0);
                 existingLog.setPullErrorCode("PULL_SYNC_EXCEPTION");
-                existingLog.setPullErrorDetail(
-                        "{\"exception\":\"" + (errMsg != null ? errMsg.replace("\"", "\\\"") : "unknown") + "\"}");
+                existingLog.setPullErrorDetail(safeToJson(errMsg != null ? errMsg : "unknown"));
                 existingLog.setErrorMsg(errMsg);
                 eleOrderSyncLogMapper.updateById(existingLog);
             } else {
@@ -1098,8 +1104,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 failLog.setFailCount(0);
                 failLog.setStatus(0);
                 failLog.setPullErrorCode("PULL_SYNC_EXCEPTION");
-                failLog.setPullErrorDetail(
-                        "{\"exception\":\"" + (errMsg != null ? errMsg.replace("\"", "\\\"") : "unknown") + "\"}");
+                failLog.setPullErrorDetail(safeToJson(errMsg != null ? errMsg : "unknown"));
                 failLog.setErrorMsg(errMsg);
                 failLog.setCreateTime(System.currentTimeMillis());
                 eleOrderSyncLogMapper.insert(failLog);
@@ -1181,10 +1186,11 @@ public class EleOrderServiceImpl implements EleOrderService {
                     .last("LIMIT 1"))
                     .stream().findFirst().orElse(null);
             if (existingOrder != null && StrUtil.isNotBlank(existingOrder.getStoreCode())) {
-                StorePlatformRespVO platformInfo = storeService
-                        .getPlatformTableByPlatformStoreId(existingOrder.getStoreCode());
-                if (platformInfo != null && StrUtil.isNotBlank(platformInfo.getPlatformStoreId())) {
-                    log.info("【重试补全门店信息】从order_table+storeService补全，orderId={}, storeCode={}, platformStoreId={}",
+                List<StorePlatformRespVO> platformList = storeService
+                        .getPlatformTableListByStoreId(existingOrder.getStoreCode());
+                if (CollUtil.isNotEmpty(platformList)) {
+                    StorePlatformRespVO platformInfo = platformList.get(0);
+                    log.info("【重试补全门店信息】从order_table+storeService补全，orderId={}, storeId={}, platformStoreId={}",
                             record.getOrderId(), existingOrder.getStoreCode(), platformInfo.getPlatformStoreId());
                     record.setPlatformStoreId(platformInfo.getPlatformStoreId());
                     record.setMerchantCode(platformInfo.getSettlementAccount());
@@ -1193,10 +1199,12 @@ public class EleOrderServiceImpl implements EleOrderService {
                 }
             }
             if (!hasStoreInfo) {
-                StorePlatformRespVO platformInfo = storeService
-                        .getPlatformTableByPlatformStoreId(record.getOrderId());
-                if (platformInfo != null && StrUtil.isNotBlank(platformInfo.getPlatformStoreId())) {
-                    log.info("【重试补全门店信息】通过storeService直接补全，orderId={}", record.getOrderId());
+                List<StorePlatformRespVO> platformList = storeService
+                        .getPlatformTableListByStoreId(record.getOrderId());
+                if (CollUtil.isNotEmpty(platformList)) {
+                    StorePlatformRespVO platformInfo = platformList.get(0);
+                    log.info("【重试补全门店信息】通过storeService直接补全，orderId={}, platformStoreId={}",
+                            record.getOrderId(), platformInfo.getPlatformStoreId());
                     record.setPlatformStoreId(platformInfo.getPlatformStoreId());
                     record.setMerchantCode(platformInfo.getSettlementAccount());
                     record.setErpStoreCode(platformInfo.getPlatformStoreId());
@@ -1998,8 +2006,8 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         // 5. 保存子订单和优惠信息
-        replaceItems(orderDetail, erpStoreCode);
-        replaceDiscounts(orderDetail);
+        upsertItems(orderDetail, erpStoreCode);
+        upsertDiscounts(orderDetail);
     }
 
     /**
@@ -2257,12 +2265,11 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    private void replaceItems(OrderListRespDTO.OrderDetail detail, String erpStoreCode) {
-        orderItemMapper.delete(new LambdaQueryWrapperX<OrderItemDO>()
-                .eq(OrderItemDO::getOrderId, detail.getOrderId()));
+    private void upsertItems(OrderListRespDTO.OrderDetail detail, String erpStoreCode) {
         if (detail.getSubOrders() == null || detail.getSubOrders().isEmpty()) {
             return;
         }
+        List<OrderItemDO> items = new ArrayList<>(detail.getSubOrders().size());
         for (int i = 0; i < detail.getSubOrders().size(); i++) {
             OrderDetailRespDTO.SubOrder subOrder = detail.getSubOrders().get(i);
             OrderItemDO item = new OrderItemDO();
@@ -2282,13 +2289,15 @@ public class EleOrderServiceImpl implements EleOrderService {
             item.setTotalFee(fenToYuan(subOrder.getTotalFee()));
             item.setPayFee(fenToYuan(subOrder.getPayFee()));
             item.setProductType(parseProductType(subOrder.getGoodsType()));
+            item.setTenantId(1L);
             item.setCreator("admin_sync");
             item.setCreateTime(System.currentTimeMillis());
             item.setUpdater("admin_sync");
             item.setUpdateTime(System.currentTimeMillis());
             item.setDeleted(false);
-            orderItemMapper.insert(item);
+            items.add(item);
         }
+        orderItemMapper.upsertBatch(items);
     }
 
     private Integer parseProductType(String goodsType) {
@@ -2303,12 +2312,19 @@ public class EleOrderServiceImpl implements EleOrderService {
         };
     }
 
-    private void replaceDiscounts(OrderListRespDTO.OrderDetail detail) {
-        orderDiscountMapper.delete(new LambdaQueryWrapperX<OrderDiscountDO>()
-                .eq(OrderDiscountDO::getOrderId, detail.getOrderId()));
+    private String safeToJson(String msg) {
+        try {
+            return objectMapper.writeValueAsString(java.util.Map.of("exception", msg));
+        } catch (Exception e) {
+            return "{\"exception\":\"JSON serialization failed\"}";
+        }
+    }
+
+    private void upsertDiscounts(OrderListRespDTO.OrderDetail detail) {
         if (detail.getDiscounts() == null || detail.getDiscounts().isEmpty()) {
             return;
         }
+        List<OrderDiscountDO> discounts = new ArrayList<>(detail.getDiscounts().size());
         for (int i = 0; i < detail.getDiscounts().size(); i++) {
             OrderDetailRespDTO.Discount discount = detail.getDiscounts().get(i);
             OrderDiscountDO discountDO = new OrderDiscountDO();
@@ -2322,13 +2338,15 @@ public class EleOrderServiceImpl implements EleOrderService {
             discountDO.setDiscountFee(fenToYuan(discount.getDiscountFee()));
             discountDO.setMerchantFee(fenToYuan(discount.getMerchantFee()));
             discountDO.setPlatformFee(fenToYuan(discount.getPlatformFee()));
+            discountDO.setTenantId(1L);
             discountDO.setCreator("admin_sync");
             discountDO.setCreateTime(System.currentTimeMillis());
             discountDO.setUpdater("admin_sync");
             discountDO.setUpdateTime(System.currentTimeMillis());
             discountDO.setDeleted(false);
-            orderDiscountMapper.insert(discountDO);
+            discounts.add(discountDO);
         }
+        orderDiscountMapper.upsertBatch(discounts);
     }
 
     private Long normalizeEleOrderEpochSecondsForQuery(Long timestamp) {
@@ -2469,12 +2487,28 @@ public class EleOrderServiceImpl implements EleOrderService {
             String message, Object request, Object response, Integer retryCount, String taskId,
             String platformStoreId, String merchantCode, String erpStoreCode) {
         saveFailRecordReturn(orderId, channelOrderId, bizType, failStage, message, request, response, retryCount,
-                taskId, "FAILED", platformStoreId, merchantCode, erpStoreCode);
+                taskId, "FAILED", platformStoreId, merchantCode, erpStoreCode, null, null, null);
+    }
+
+    private void saveFailRecordWithTimeout(String orderId, String channelOrderId, String bizType, String failStage,
+            String message, Object request, Object response, Integer retryCount, String taskId,
+            String platformStoreId, String merchantCode, String erpStoreCode,
+            String timeoutStage, Long timeoutElapsedMs, Long timeoutThresholdMs) {
+        saveFailRecordReturn(orderId, channelOrderId, bizType, failStage, message, request, response, retryCount,
+                taskId, "FAILED", platformStoreId, merchantCode, erpStoreCode, timeoutStage, timeoutElapsedMs, timeoutThresholdMs);
     }
 
     private EleOrderFailRecord saveFailRecordReturn(String orderId, String channelOrderId, String bizType,
             String failStage, String message, Object request, Object response, Integer retryCount, String taskId,
             String processStatus, String platformStoreId, String merchantCode, String erpStoreCode) {
+        return saveFailRecordReturn(orderId, channelOrderId, bizType, failStage, message, request, response, retryCount,
+                taskId, processStatus, platformStoreId, merchantCode, erpStoreCode, null, null, null);
+    }
+
+    private EleOrderFailRecord saveFailRecordReturn(String orderId, String channelOrderId, String bizType,
+            String failStage, String message, Object request, Object response, Integer retryCount, String taskId,
+            String processStatus, String platformStoreId, String merchantCode, String erpStoreCode,
+            String timeoutStage, Long timeoutElapsedMs, Long timeoutThresholdMs) {
         String finalProcessStatus = processStatus != null ? processStatus : "FAILED";
 
         EleOrderFailRecord existRecord = eleOrderFailRecordMapper.selectOne(
@@ -2490,6 +2524,9 @@ public class EleOrderServiceImpl implements EleOrderService {
             existRecord.setFailStage(failStage);
             existRecord
                     .setFailMessage(message != null && message.length() > 1000 ? message.substring(0, 1000) : message);
+            existRecord.setTimeoutStage(timeoutStage);
+            existRecord.setTimeoutElapsedMs(timeoutElapsedMs);
+            existRecord.setTimeoutThresholdMs(timeoutThresholdMs);
             try {
                 existRecord.setRequestParam(request == null ? null : objectMapper.writeValueAsString(request));
                 existRecord.setResponseContent(response == null ? null : objectMapper.writeValueAsString(response));
@@ -2519,6 +2556,9 @@ public class EleOrderServiceImpl implements EleOrderService {
         record.setBizType(bizType);
         record.setFailStage(failStage);
         record.setFailMessage(message != null && message.length() > 1000 ? message.substring(0, 1000) : message);
+        record.setTimeoutStage(timeoutStage);
+        record.setTimeoutElapsedMs(timeoutElapsedMs);
+        record.setTimeoutThresholdMs(timeoutThresholdMs);
         try {
             record.setRequestParam(request == null ? null : objectMapper.writeValueAsString(request));
             record.setResponseContent(response == null ? null : objectMapper.writeValueAsString(response));
@@ -2541,7 +2581,43 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
         record.setCreateTime(System.currentTimeMillis());
         record.setUpdateTime(System.currentTimeMillis());
-        eleOrderFailRecordMapper.insert(record);
+        try {
+            eleOrderFailRecordMapper.insert(record);
+        } catch (DuplicateKeyException e) {
+            log.warn("Duplicate key on saveFailRecordReturn, orderId={}, processStatus={}, fallback to update",
+                    orderId, finalProcessStatus);
+            EleOrderFailRecord conflictRecord = eleOrderFailRecordMapper.selectOne(
+                    new LambdaQueryWrapperX<EleOrderFailRecord>()
+                            .eq(EleOrderFailRecord::getOrderId, orderId)
+                            .eq(EleOrderFailRecord::getProcessStatus, finalProcessStatus)
+                            .orderByDesc(EleOrderFailRecord::getCreateTime)
+                            .last("LIMIT 1"));
+            if (conflictRecord != null) {
+                conflictRecord.setChannelOrderId(channelOrderId);
+                conflictRecord.setBizType(bizType);
+                conflictRecord.setFailStage(failStage);
+                conflictRecord.setFailMessage(message != null && message.length() > 1000 ? message.substring(0, 1000) : message);
+                conflictRecord.setTimeoutStage(timeoutStage);
+                conflictRecord.setTimeoutElapsedMs(timeoutElapsedMs);
+                conflictRecord.setTimeoutThresholdMs(timeoutThresholdMs);
+                try {
+                    conflictRecord.setRequestParam(request == null ? null : objectMapper.writeValueAsString(request));
+                    conflictRecord.setResponseContent(response == null ? null : objectMapper.writeValueAsString(response));
+                } catch (JsonProcessingException ex) {
+                    conflictRecord.setRequestParam(null);
+                    conflictRecord.setResponseContent(null);
+                }
+                conflictRecord.setRetryCount(retryCount == null ? 0 : retryCount);
+                conflictRecord.setMaxRetryCount(3);
+                conflictRecord.setTaskId(taskId);
+                conflictRecord.setPlatformStoreId(platformStoreId);
+                conflictRecord.setMerchantCode(merchantCode);
+                conflictRecord.setErpStoreCode(erpStoreCode);
+                conflictRecord.setUpdateTime(System.currentTimeMillis());
+                eleOrderFailRecordMapper.updateById(conflictRecord);
+                return conflictRecord;
+            }
+        }
         return record;
     }
 
@@ -2869,7 +2945,7 @@ public class EleOrderServiceImpl implements EleOrderService {
             long elapsed = System.currentTimeMillis() - enrichStart;
             long remainTotalMs = totalTimeoutMs - elapsed;
             if (remainTotalMs <= 0) {
-                timeoutCount += cancelRemainingDetailTasks(futures, i, submittedTasks, req, merchantCode, erpStoreCode);
+                timeoutCount += cancelRemainingDetailTasks(futures, i, submittedTasks, req, merchantCode, erpStoreCode, totalTimeoutMs);
                 break;
             }
             try {
@@ -2883,14 +2959,18 @@ public class EleOrderServiceImpl implements EleOrderService {
             } catch (TimeoutException e) {
                 future.cancel(true);
                 timeoutCount++;
-                saveDetailEnrichPendingRecord(task.getSummary(), req, merchantCode, erpStoreCode, "详情补全超时");
+                long taskElapsed = System.currentTimeMillis() - enrichStart;
+                String timeoutStageDesc = (remainTotalMs <= singleTimeoutMs) ? "TOTAL_TIMEOUT" : "SINGLE_TIMEOUT";
+                String timeoutMsg = String.format("详情补全超时[%s]，已耗时%dms，阈值%dms", timeoutStageDesc, taskElapsed, singleTimeoutMs);
+                saveDetailEnrichPendingRecordWithTimeout(task.getSummary(), req, merchantCode, erpStoreCode, timeoutMsg,
+                        timeoutStageDesc, taskElapsed, singleTimeoutMs);
                 if (detailEnrichDegradeOnTimeout && System.currentTimeMillis() - enrichStart >= totalTimeoutMs) {
-                    timeoutCount += cancelRemainingDetailTasks(futures, i + 1, submittedTasks, req, merchantCode, erpStoreCode);
+                    timeoutCount += cancelRemainingDetailTasks(futures, i + 1, submittedTasks, req, merchantCode, erpStoreCode, totalTimeoutMs);
                     break;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                timeoutCount += cancelRemainingDetailTasks(futures, i, submittedTasks, req, merchantCode, erpStoreCode);
+                timeoutCount += cancelRemainingDetailTasks(futures, i, submittedTasks, req, merchantCode, erpStoreCode, totalTimeoutMs);
                 break;
             } catch (ExecutionException e) {
                 failedCount++;
@@ -2957,13 +3037,14 @@ public class EleOrderServiceImpl implements EleOrderService {
     }
 
     private int cancelRemainingDetailTasks(List<Future<DetailEnrichResult>> futures, int startIndex,
-            List<DetailEnrichTask> submittedTasks, OrderListReqDTO req, String merchantCode, String erpStoreCode) {
+            List<DetailEnrichTask> submittedTasks, OrderListReqDTO req, String merchantCode, String erpStoreCode, long totalThresholdMs) {
         int timeoutCount = 0;
         for (int i = startIndex; i < futures.size(); i++) {
             futures.get(i).cancel(true);
             timeoutCount++;
-            saveDetailEnrichPendingRecord(submittedTasks.get(i).getSummary(), req, merchantCode, erpStoreCode,
-                    "详情补全超过本页时间预算，降级后续补偿");
+            String timeoutMsg = String.format("详情补全超过本页时间预算[TOTAL_TIMEOUT]，降级后续补偿，阈值%dms", totalThresholdMs);
+            saveDetailEnrichPendingRecordWithTimeout(submittedTasks.get(i).getSummary(), req, merchantCode, erpStoreCode,
+                    timeoutMsg, "TOTAL_TIMEOUT", null, totalThresholdMs);
         }
         if (timeoutCount > 0) {
             log.warn("【详情补全降级】门店{}本页超过{}秒预算，{}条未完成订单进入后续补偿，本页继续分页",
@@ -2979,6 +3060,17 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
         saveFailRecordReturn(summary.getOrderId(), summary.getChannelOrderId(), "DETAIL", "API",
                 message, summary, null, 0, null, "PENDING_RETRY", req.getPlatformStoreId(), merchantCode, erpStoreCode);
+    }
+
+    private void saveDetailEnrichPendingRecordWithTimeout(OrderListRespDTO.OrderDetail summary, OrderListReqDTO req,
+            String merchantCode, String erpStoreCode, String message,
+            String timeoutStage, Long timeoutElapsedMs, Long timeoutThresholdMs) {
+        if (!detailEnrichFailRecordEnabled || summary == null || StrUtil.isBlank(summary.getOrderId())) {
+            return;
+        }
+        saveFailRecordWithTimeout(summary.getOrderId(), summary.getChannelOrderId(), "DETAIL", "API",
+                message, summary, null, 0, null, req.getPlatformStoreId(), merchantCode, erpStoreCode,
+                timeoutStage, timeoutElapsedMs, timeoutThresholdMs);
     }
 
     private static class DetailEnrichTask {

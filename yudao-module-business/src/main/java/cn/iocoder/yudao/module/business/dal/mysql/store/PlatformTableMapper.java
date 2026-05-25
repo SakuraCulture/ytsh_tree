@@ -40,4 +40,11 @@ public interface PlatformTableMapper extends BaseMapperX<PlatformTableDO> {
                 .orderByAsc(PlatformTableDO::getStoreId));
     }
 
+    default List<PlatformTableDO> selectListByStoreIds(Collection<String> storeIds) {
+        return selectList(new LambdaQueryWrapperX<PlatformTableDO>()
+                .in(PlatformTableDO::getStoreId, storeIds)
+                .eq(PlatformTableDO::getDeleted, false)
+                .orderByAsc(PlatformTableDO::getStoreId));
+    }
+
 }

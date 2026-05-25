@@ -4,7 +4,9 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO;
 import cn.iocoder.yudao.module.business.dal.dataobject.product.SkuTableDO;
+import cn.iocoder.yudao.module.business.dal.dataobject.store.PlatformTableDO;
 import cn.iocoder.yudao.module.business.dal.mysql.product.SkuTableMapper;
+import cn.iocoder.yudao.module.business.dal.mysql.store.PlatformTableMapper;
 import cn.iocoder.yudao.module.business.service.store.StoreProductSyncWriteService;
 import cn.iocoder.yudao.module.business.service.store.StoreService;
 import cn.iocoder.yudao.module.business.service.store.bo.StoreProductSyncUpsertReqBO;
@@ -68,6 +70,8 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
     @Resource
     private SkuTableMapper skuTableMapper;
     @Resource
+    private PlatformTableMapper platformTableMapper;
+    @Resource
     private StoreProductSyncWriteService storeProductSyncWriteService;
     @Resource
     private EleStoreGoodsGovernanceService governanceService;
@@ -126,9 +130,27 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         param.setBody(body);
 
         STORE_GOODS_QUERY_RATE_LIMITER.acquire();
+        // log.info("[Ele商品同步] 调用饿了么API: merchantCode={}, erpStoreCode={}, pageNo={}, pageSize={}, skuCodes={}",
+        //         merchantCode, erpStoreCode, body.getPage_no(), body.getPage_size(),
+        //         body.getSku_code_list() != null ? body.getSku_code_list().length : 0);
+        long apiStartTime = System.currentTimeMillis();
         BizResultWrapper<SaasGoodsStoreQueryBatchResult> wrapper = eleOpenApiClient.sendStoreGoodsQueryBatch(config,
                 param, merchantCode, erpStoreCode, erpStoreCode);
-        return convertQueryResult(wrapper, merchantCode, erpStoreCode);
+        long apiDuration = System.currentTimeMillis() - apiStartTime;
+        EleStoreGoodsQueryRespDTO result = convertQueryResult(wrapper, merchantCode, erpStoreCode);
+        // int skuCount = 0;
+        // if (result != null && CollUtil.isNotEmpty(result.getGoodsList())) {
+        //     for (EleStoreGoodsQueryRespDTO.GoodsItem goods : result.getGoodsList()) {
+        //         if (CollUtil.isNotEmpty(goods.getSkuList())) {
+        //             skuCount += goods.getSkuList().size();
+        //         }
+        //     }
+        // }
+        // log.info("[Ele商品同步] API响应: total={}, 商品数={}, SKU数={}, 耗时={}ms",
+        //         result != null ? result.getTotal() : 0,
+        //         result != null && result.getGoodsList() != null ? result.getGoodsList().size() : 0,
+        //         skuCount, apiDuration);
+        return result;
     }
 
     @Override
@@ -138,6 +160,8 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
 
     @Override
     public EleStoreGoodsPageSyncResult syncStoreGoodsPage(EleStoreGoodsQueryReqBO reqBO, Boolean testMode) {
+        log.info("[Ele商品同步] ===== 分页同步开始: erpStoreCode={}, pageNo={}, pageSize={} =====",
+                reqBO.getErpStoreCode(), reqBO.getPageNo(), reqBO.getPageSize());
         EleStoreGoodsQueryRespDTO queryResp = queryStoreGoods(reqBO);
         EleStoreGoodsPageSyncResult result = new EleStoreGoodsPageSyncResult();
         result.setPageNo(queryResp == null ? normalizePageNo(reqBO.getPageNo()) : queryResp.getPage());
@@ -170,11 +194,15 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
                         result.setFailCount(result.getFailCount() + 1);
                     }
                 } catch (RuntimeException ex) {
-                    log.warn("[Ele商品同步] 分页同步失败，skuCode={}, err={}", syncReqBO.getSkuCode(), ex.getMessage(), ex);
+                    // log.warn("[Ele商品同步] 分页同步失败，skuCode={}, err={}", syncReqBO.getSkuCode(), ex.getMessage(), ex);
                     result.setFailCount(result.getFailCount() + 1);
                 }
             }
         }
+        log.info("[Ele商品同步] ===== 分页同步完成: erpStoreCode={}, pageNo={}, total={}, syncCount={}, success={}, fail={}, governance={}, shadow={} =====",
+                reqBO.getErpStoreCode(), result.getPageNo(), result.getTotal(),
+                result.getSyncCount(), result.getSuccessCount(), result.getFailCount(),
+                result.getGovernanceCount(), result.getShadowCount());
         return result;
     }
 
@@ -243,9 +271,9 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         if (CollUtil.isEmpty(stores)) {
             String missingStoreKey = firstNonBlank(platformStoreId, upstreamStoreCode, storeId);
             String errorMsg = "未找到门店映射: " + missingStoreKey;
-            // 写入治理记录，便于后续人工处理
-            createGovernanceRecordForStoreNotFound(reqBO, missingStoreKey, testMode);
-            writeFailureLog(reqBO, null, "STORE_NOT_FOUND", appendTestMode(testMode, errorMsg));
+            // log.warn("[Ele商品同步] 门店未找到: erpStoreCode={}, skuCode={}, missingKey={}",
+            //         erpStoreCode, skuCode, missingStoreKey);
+            createSyncLogForFailure(reqBO, null, "STORE_NOT_FOUND", errorMsg);
             throw new RuntimeException(errorMsg);
         }
 
@@ -254,28 +282,31 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
             applyIdentityValidation(reqBO, identityValidation);
             StorePlatformRespVO failedStore = stores.get(0);
             String errorMsg = "门店标识冲突，拒绝写入正式表";
-            // 写入治理记录，便于后续人工处理
-            createGovernanceRecordForIdentityMismatch(reqBO, failedStore, testMode);
-            writeFailureLog(reqBO, failedStore, StoreIdentityValidator.REASON_CODE_STORE_IDENTITY_MISMATCH,
-                    appendTestMode(testMode, errorMsg));
+            // log.warn("[Ele商品同步] 门店身份冲突: erpStoreCode={}, skuCode={}, storeId={}, platformStoreId={}, reason={}",
+            //         erpStoreCode, skuCode, failedStore.getStoreId(), failedStore.getPlatformStoreId(),
+            //         identityValidation.getReasonCode());
+            createSyncLogForFailure(reqBO, failedStore, identityValidation.getReasonCode(), errorMsg);
             return SyncOutcome.failureResult(errorMsg);
         }
         applyIdentityValidation(reqBO, identityValidation);
+        
+        if (identityValidation.getDecision() == StoreIdentityValidationResult.Decision.BACKFILL) {
+            backfillStoreIdentity(stores, identityValidation);
+        }
 
         SkuTableDO sku = skuTableMapper.selectByProductSkuCode(skuCode);
         if (sku == null) {
+            // log.warn("[Ele商品同步] SKU未匹配: erpStoreCode={}, skuCode={}, subSkuCode={}, 门店数={}",
+            //         erpStoreCode, skuCode, reqBO.getSubSkuCode(), stores.size());
             for (StorePlatformRespVO store : stores) {
                 shadowService.upsertFromSync(buildShadowReq(reqBO, store), EleStoreGoodsShadowStatus.UNMATCHED, null, null);
-                createGovernanceRecord(reqBO, store, testMode);
-                writeFailureLog(reqBO, store, GOVERNANCE_REASON_SKU_NOT_FOUND,
-                        appendTestMode(testMode, "skuCode未匹配本地SKU，已写入影子门店品: " + skuCode));
+                createSyncLogForFailure(reqBO, store, "SKU_NOT_FOUND", "skuCode未匹配本地SKU");
             }
             return SyncOutcome.shadowedResult();
         }
 
         for (StorePlatformRespVO store : stores) {
             upsertStoreProduct(reqBO, store, sku, testMode);
-            writeSuccessLog(reqBO, store, testMode);
         }
         return SyncOutcome.successResult();
     }
@@ -319,6 +350,52 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         reqBO.setMerchantCode(validationResult.getMerchantCode());
         reqBO.setErpStoreCode(validationResult.getErpStoreCode());
         reqBO.setStoreId(validationResult.getStoreId());
+    }
+
+    private void backfillStoreIdentity(List<StorePlatformRespVO> stores, StoreIdentityValidationResult validationResult) {
+        String resolvedStoreId = validationResult.getStoreId();
+        String resolvedPlatformStoreId = validationResult.getPlatformStoreId();
+        String resolvedMerchantCode = validationResult.getMerchantCode();
+        
+        for (StorePlatformRespVO store : stores) {
+            String currentStoreId = store.getStoreId();
+            String currentPlatformStoreId = store.getPlatformStoreId();
+            String currentSettlementAccount = store.getSettlementAccount();
+            
+            boolean needUpdateStoreId = StrUtil.isBlank(currentStoreId) && StrUtil.isNotBlank(resolvedStoreId);
+            boolean needUpdatePlatformStoreId = StrUtil.isBlank(currentPlatformStoreId) && StrUtil.isNotBlank(resolvedPlatformStoreId);
+            boolean needUpdateSettlementAccount = StrUtil.isBlank(currentSettlementAccount) && StrUtil.isNotBlank(resolvedMerchantCode);
+            
+            if (!needUpdateStoreId && !needUpdatePlatformStoreId && !needUpdateSettlementAccount) {
+                continue;
+            }
+            
+            try {
+                PlatformTableDO updateObj = new PlatformTableDO();
+                updateObj.setStorePlatformId(store.getStorePlatformId());
+                if (needUpdateStoreId) {
+                    updateObj.setStoreId(resolvedStoreId);
+                    log.info("[Ele商品同步] 回填 storeId: storePlatformId={}, from=null, to={}",
+                            store.getStorePlatformId(), resolvedStoreId);
+                }
+                if (needUpdatePlatformStoreId) {
+                    updateObj.setPlatformStoreId(resolvedPlatformStoreId);
+                    log.info("[Ele商品同步] 回填 platformStoreId: storePlatformId={}, from=null, to={}",
+                            store.getStorePlatformId(), resolvedPlatformStoreId);
+                }
+                if (needUpdateSettlementAccount) {
+                    updateObj.setSettlementAccount(resolvedMerchantCode);
+                    log.info("[Ele商品同步] 回填 settlementAccount: storePlatformId={}, from=null, to={}",
+                            store.getStorePlatformId(), resolvedMerchantCode);
+                }
+                
+                platformTableMapper.updateById(updateObj);
+                log.info("[Ele商品同步] 门店身份信息回填成功: storePlatformId={}", store.getStorePlatformId());
+            } catch (Exception e) {
+                log.error("[Ele商品同步] 门店身份信息回填失败: storePlatformId={}, error={}",
+                        store.getStorePlatformId(), e.getMessage(), e);
+            }
+        }
     }
 
     private EleStoreGoodsQueryRespDTO convertQueryResult(BizResultWrapper<SaasGoodsStoreQueryBatchResult> wrapper,
@@ -385,11 +462,16 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
             upsertReqBO.setStoreProductIsActive(reqBO.getStoreProductIsActive() == null ? 1 : reqBO.getStoreProductIsActive());
             upsertReqBO.setStoreProductPosStatus(reqBO.getStoreProductPosStatus());
         }
-        String storeProductId = storeProductSyncWriteService.upsertStoreProduct(upsertReqBO);
+        String storeProductId = null;
+        if (!testMode) {
+            storeProductId = storeProductSyncWriteService.upsertStoreProduct(upsertReqBO);
+        }
         shadowService.upsertFromSync(buildShadowReq(reqBO, store), EleStoreGoodsShadowStatus.MERGED,
                 String.valueOf(sku.getProductSkuId()), storeProductId);
-        log.info("[Ele商品同步] storeId={}, platformStoreId={}, skuCode={}, operationType={}, testMode={}",
-                store.getStoreId(), store.getPlatformStoreId(), reqBO.getSkuCode(), reqBO.getOperationType(), testMode);
+        log.info("[Ele商品同步] SKU写入成功: storeId={}, platformStoreId={}, skuCode={}, productSkuId={}, price={}, isActive={}, posStatus={}, storeProductId={}, testMode={}",
+                store.getStoreId(), store.getPlatformStoreId(), reqBO.getSkuCode(), sku.getProductSkuId(),
+                reqBO.getStoreProductPrice(), upsertReqBO.getStoreProductIsActive(),
+                upsertReqBO.getStoreProductPosStatus(), storeProductId, testMode);
         return storeProductId;
     }
 
@@ -413,103 +495,12 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         return shadowReqBO;
     }
 
-    private void createGovernanceRecord(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, boolean testMode) {
-        EleStoreGoodsGovernancePoolDO governancePool = new EleStoreGoodsGovernancePoolDO();
-        governancePool.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
-        governancePool.setErpStoreCode(resolveErpStoreCode(reqBO));
-        governancePool.setPlatformId(ELE_PLATFORM_ID);
-        governancePool.setStoreId(store == null ? null : store.getStoreId());
-        governancePool.setPlatformStoreId(store == null ? StrUtil.trim(reqBO.getPlatformStoreId()) : store.getPlatformStoreId());
-        governancePool.setSkuCode(StrUtil.trim(reqBO.getSkuCode()));
-        governancePool.setSubSkuCode(StrUtil.trim(reqBO.getSubSkuCode()));
-        governancePool.setSpuCode(StrUtil.trim(reqBO.getSpuCode()));
-        governancePool.setGoodsLevel(StrUtil.trim(reqBO.getGoodsLevel()));
-        governancePool.setOperationType(StrUtil.trim(reqBO.getOperationType()));
-        governancePool.setReasonCode(GOVERNANCE_REASON_SKU_NOT_FOUND);
-        governancePool.setReasonMsg("skuCode未匹配本地SKU");
-        governancePool.setProcessStatus("PENDING");
-        governancePool.setRawPayload(StrUtil.blankToDefault(reqBO.getRawPayload(), reqBO.getRequestBody()));
-        governancePool.setRemark(testMode ? TEST_MODE_MARK : null);
-        governanceService.create(governancePool);
-    }
-
-    private void createGovernanceRecordForStoreNotFound(EleStoreGoodsSyncReqBO reqBO, String missingStoreKey, boolean testMode) {
-        EleStoreGoodsGovernancePoolDO governancePool = new EleStoreGoodsGovernancePoolDO();
-        governancePool.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
-        governancePool.setErpStoreCode(resolveErpStoreCode(reqBO));
-        governancePool.setPlatformId(ELE_PLATFORM_ID);
-        governancePool.setPlatformStoreId(StrUtil.trim(reqBO.getPlatformStoreId()));
-        governancePool.setSkuCode(StrUtil.trim(reqBO.getSkuCode()));
-        governancePool.setSubSkuCode(StrUtil.trim(reqBO.getSubSkuCode()));
-        governancePool.setSpuCode(StrUtil.trim(reqBO.getSpuCode()));
-        governancePool.setGoodsLevel(StrUtil.trim(reqBO.getGoodsLevel()));
-        governancePool.setOperationType(StrUtil.trim(reqBO.getOperationType()));
-        governancePool.setReasonCode("STORE_NOT_FOUND");
-        governancePool.setReasonMsg("未找到门店映射: " + missingStoreKey);
-        governancePool.setProcessStatus("PENDING");
-        governancePool.setRawPayload(StrUtil.blankToDefault(reqBO.getRawPayload(), reqBO.getRequestBody()));
-        governancePool.setRemark(testMode ? TEST_MODE_MARK : null);
-        governanceService.create(governancePool);
-    }
-
-    private void createGovernanceRecordForIdentityMismatch(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, boolean testMode) {
-        EleStoreGoodsGovernancePoolDO governancePool = new EleStoreGoodsGovernancePoolDO();
-        governancePool.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
-        governancePool.setErpStoreCode(resolveErpStoreCode(reqBO));
-        governancePool.setPlatformId(ELE_PLATFORM_ID);
-        governancePool.setStoreId(store == null ? null : store.getStoreId());
-        governancePool.setPlatformStoreId(store == null ? StrUtil.trim(reqBO.getPlatformStoreId()) : store.getPlatformStoreId());
-        governancePool.setSkuCode(StrUtil.trim(reqBO.getSkuCode()));
-        governancePool.setSubSkuCode(StrUtil.trim(reqBO.getSubSkuCode()));
-        governancePool.setSpuCode(StrUtil.trim(reqBO.getSpuCode()));
-        governancePool.setGoodsLevel(StrUtil.trim(reqBO.getGoodsLevel()));
-        governancePool.setOperationType(StrUtil.trim(reqBO.getOperationType()));
-        governancePool.setReasonCode(StoreIdentityValidator.REASON_CODE_STORE_IDENTITY_MISMATCH);
-        governancePool.setReasonMsg("门店标识冲突，拒绝写入正式表");
-        governancePool.setProcessStatus("PENDING");
-        governancePool.setRawPayload(StrUtil.blankToDefault(reqBO.getRawPayload(), reqBO.getRequestBody()));
-        governancePool.setRemark(testMode ? TEST_MODE_MARK : null);
-        governanceService.create(governancePool);
-    }
-
-    private void writeSuccessLog(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, boolean testMode) {
-        EleStoreGoodsSyncLogDO syncLog = buildSyncLog(reqBO, store);
-        syncLog.setSuccess(Boolean.TRUE);
-        syncLog.setResultCode("SUCCESS");
-        syncLog.setResultMsg(appendTestMode(testMode, "处理成功"));
-        syncLogService.create(syncLog);
-    }
-
-    private void writeFailureLog(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, String resultCode, String resultMsg) {
-        EleStoreGoodsSyncLogDO syncLog = buildSyncLog(reqBO, store);
-        syncLog.setSuccess(Boolean.FALSE);
-        syncLog.setResultCode(resultCode);
-        // 增强错误消息，包含门店和商品标识，便于追踪
-        String enrichedMsg = enrichFailureMessage(reqBO, store, resultMsg);
-        syncLog.setResultMsg(enrichedMsg);
-        syncLogService.create(syncLog);
-    }
-
-    private String enrichFailureMessage(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, String baseMsg) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("[门店:");
-        if (store != null) {
-            sb.append("storeId=").append(store.getStoreId())
-              .append(",platformStoreId=").append(store.getPlatformStoreId());
-        } else {
-            sb.append("erpStoreCode=").append(StrUtil.trim(reqBO.getErpStoreCode()));
-        }
-        sb.append("] [商品:skuCode=").append(StrUtil.trim(reqBO.getSkuCode())).append("] ");
-        sb.append(baseMsg);
-        return sb.toString();
-    }
-
-    private EleStoreGoodsSyncLogDO buildSyncLog(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store) {
+    private void createSyncLogForFailure(EleStoreGoodsSyncReqBO reqBO, StorePlatformRespVO store, String resultCode, String resultMsg) {
         EleStoreGoodsSyncLogDO syncLog = new EleStoreGoodsSyncLogDO();
-        syncLog.setTraceId(StrUtil.trim(reqBO.getTraceId()));
-        syncLog.setTicket(StrUtil.trim(reqBO.getTicket()));
-        syncLog.setApiCode(StrUtil.trim(reqBO.getApiCode()));
-        syncLog.setApiName(StrUtil.trim(reqBO.getApiName()));
+        syncLog.setTraceId(reqBO.getTraceId());
+        syncLog.setTicket(reqBO.getTicket());
+        syncLog.setApiCode(reqBO.getApiCode());
+        syncLog.setApiName(reqBO.getApiName());
         syncLog.setMerchantCode(StrUtil.trim(reqBO.getMerchantCode()));
         syncLog.setErpStoreCode(resolveErpStoreCode(reqBO));
         syncLog.setPlatformId(ELE_PLATFORM_ID);
@@ -518,12 +509,12 @@ public class EleStoreGoodsSyncServiceImpl implements EleStoreGoodsSyncService {
         syncLog.setSkuCode(StrUtil.trim(reqBO.getSkuCode()));
         syncLog.setSubSkuCode(StrUtil.trim(reqBO.getSubSkuCode()));
         syncLog.setOperationType(StrUtil.trim(reqBO.getOperationType()));
-        syncLog.setPageNo(reqBO.getPageNo());
-        syncLog.setPageSize(reqBO.getPageSize());
-        syncLog.setDataCount(reqBO.getDataCount());
-        syncLog.setRequestBody(reqBO.getRequestBody());
+        syncLog.setSuccess(false);
+        syncLog.setResultCode(resultCode);
+        syncLog.setResultMsg(resultMsg);
+        syncLog.setRequestBody(StrUtil.blankToDefault(reqBO.getRawPayload(), reqBO.getRequestBody()));
         syncLog.setResponseBody(reqBO.getResponseBody());
-        return syncLog;
+        syncLogService.create(syncLog);
     }
 
     private void validateTestMode(boolean testMode) {

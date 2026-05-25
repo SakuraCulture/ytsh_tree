@@ -46,5 +46,6 @@ public class EleStoreGoodsShadowDO extends TenantBaseDO {
     private LocalDateTime matchedTime;
     private LocalDateTime mergedTime;
     private String conflictReason;
+    private Integer goodsSource;
     private Long uniqueDeleted;
 }
