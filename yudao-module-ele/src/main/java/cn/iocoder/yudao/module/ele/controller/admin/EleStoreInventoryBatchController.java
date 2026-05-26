@@ -5,6 +5,7 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchAllOpenReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchCurrentReqVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchStoresReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskPageReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskRespVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskStorePageReqVO;
@@ -46,6 +47,13 @@ public class EleStoreInventoryBatchController {
     @PreAuthorize("@ss.hasPermission('ele:order:sync')")
     public CommonResult<Long> createAllOpenStoresBatchTask(@RequestBody(required = false) EleStoreInventoryBatchAllOpenReqVO reqVO) {
         return CommonResult.success(inventoryBatchService.createAllOpenStoresBatchTask(reqVO));
+    }
+
+    @PostMapping("/stores")
+    @Operation(summary = "创建指定门店库存批量任务")
+    @PreAuthorize("@ss.hasPermission('ele:order:sync')")
+    public CommonResult<Long> createStoresBatchTask(@Valid @RequestBody EleStoreInventoryBatchStoresReqVO reqVO) {
+        return CommonResult.success(inventoryBatchService.createStoresBatchTask(reqVO));
     }
 
     @GetMapping("/page")
