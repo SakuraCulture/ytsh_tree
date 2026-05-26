@@ -37,8 +37,7 @@ public class EleOrderSyncLogServiceImpl implements EleOrderSyncLogService {
         pageParam.setPageNo(pageNo);
         pageParam.setPageSize(pageSize);
 
-        // 前端传入的是秒级时间戳，create_time存储的是毫秒级，需要转换
-        Long startMs = startTime != null && startTime > 100000000000L ? startTime : startTime != null ? startTime * 1000 : null;
+                Long startMs = startTime != null && startTime > 100000000000L ? startTime : startTime != null ? startTime * 1000 : null;
         Long endMs = endTime != null && endTime > 100000000000L ? endTime : endTime != null ? endTime * 1000 : null;
 
         LambdaQueryWrapperX<EleOrderSyncLog> wrapper = new LambdaQueryWrapperX<>();

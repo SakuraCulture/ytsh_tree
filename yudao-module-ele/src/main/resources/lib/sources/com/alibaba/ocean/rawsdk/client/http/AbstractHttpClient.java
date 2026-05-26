@@ -59,8 +59,7 @@ public class AbstractHttpClient {
             out = conn.getOutputStream();
             out.write(content);
 
-            // 解析请求结果
-            response = parseResponseInfo(request, conn);
+                        response = parseResponseInfo(request, conn);
         } catch (IOException e) {
             logger.warning("doPost请求异常");
             throw e;
@@ -110,8 +109,7 @@ public class AbstractHttpClient {
                 logger.info(" translate InputStream to GZIPInputStream ");
                 istream = new GZIPInputStream(istream);
             }
-            logger.info("Response status code :" + response.getStatusCode());
-            String content = getStreamAsString(istream, response.getCharset());
+                        String content = getStreamAsString(istream, response.getCharset());
             if (response.getStatusCode() >= 200 && response.getStatusCode() <= 399) {
                 Object result = buildResult(content, request.getResponseClass());
                 response.setResult(result);

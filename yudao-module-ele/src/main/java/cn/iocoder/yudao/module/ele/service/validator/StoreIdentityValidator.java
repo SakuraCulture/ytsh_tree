@@ -35,40 +35,19 @@ public class StoreIdentityValidator {
         String resolvedStoreId = firstNonBlank(normalizedStoreId, normalizedLocalStoreId);
         String resolvedErpStoreCode = firstNonBlank(normalizedErpStoreCode, resolvedPlatformStoreId);
 
-        // log.info("[门店身份校验] erpStoreCode={}, 输入: platformStoreId={}, merchantCode={}, storeId={}, local[platformStoreId={}, merchantCode={}, storeId={}, upstream[storeCode={}, merchantCode={}]",
-        //         erpStoreCode, platformStoreId, merchantCode, storeId,
-        //         localMapping != null ? localMapping.getPlatformStoreId() : "null",
-        //         localMapping != null ? localMapping.getMerchantCode() : "null",
-        //         localMapping != null ? localMapping.getStoreId() : "null",
-        //         upstreamStoreCode, upstreamMerchantCode);
-        
-        // log.info("[门店身份校验] erpStoreCode={}, 标准化: platformStoreId={}, merchantCode={}, storeId={}, local[platformStoreId={}, merchantCode={}, storeId={}]",
-        //         erpStoreCode, normalizedPlatformStoreId, normalizedMerchantCode, normalizedStoreId,
-        //         normalizedLocalPlatformStoreId, normalizedLocalMerchantCode, normalizedLocalStoreId);
-        
-        // log.info("[门店身份校验] erpStoreCode={}, 解析: platformStoreId={}, merchantCode={}, storeId={}, erpStoreCode={}",
-        //         erpStoreCode, resolvedPlatformStoreId, resolvedMerchantCode, resolvedStoreId, resolvedErpStoreCode);
-
+                                                        
+                                
+                
         if (hasConflict(resolvedPlatformStoreId, normalizedPlatformStoreId, normalizedErpStoreCode,
                 normalizedLocalPlatformStoreId)
                 || hasConflict(resolvedMerchantCode, normalizedMerchantCode, normalizedLocalMerchantCode,
                 normalizedUpstreamMerchantCode)
                 || hasConflict(resolvedStoreId, normalizedStoreId, normalizedLocalStoreId)) {
-            // log.warn("[门店身份校验] erpStoreCode={}, 字段冲突: resolved[platformStoreId={}, merchantCode={}, storeId={}] vs candidates",
-            //         erpStoreCode, resolvedPlatformStoreId, resolvedMerchantCode, resolvedStoreId);
-            // log.warn("[门店身份校验] erpStoreCode={}, platformStoreId冲突: resolved={}, candidates=[platformStoreId={}, erpStoreCode={}, localPlatformStoreId={}]",
-            //         erpStoreCode, resolvedPlatformStoreId, normalizedPlatformStoreId, normalizedErpStoreCode, normalizedLocalPlatformStoreId);
-            // log.warn("[门店身份校验] erpStoreCode={}, merchantCode冲突: resolved={}, candidates=[merchantCode={}, localMerchantCode={}, upstreamMerchantCode={}]",
-            //         erpStoreCode, resolvedMerchantCode, normalizedMerchantCode, normalizedLocalMerchantCode, normalizedUpstreamMerchantCode);
-            // log.warn("[门店身份校验] erpStoreCode={}, storeId冲突: resolved={}, candidates=[storeId={}, localStoreId={}]",
-            //         erpStoreCode, resolvedStoreId, normalizedStoreId, normalizedLocalStoreId);
-            return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
+                                                                                                            return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
                     resolvedPlatformStoreId, resolvedMerchantCode, resolvedErpStoreCode, resolvedStoreId);
         }
         if (!isCompleteIdentity(normalizedLocalPlatformStoreId, normalizedLocalMerchantCode, normalizedLocalStoreId)) {
-            // log.warn("[门店身份校验] erpStoreCode={}, local映射不完整: platformStoreId={}, merchantCode={}, storeId={}",
-            //         erpStoreCode, normalizedLocalPlatformStoreId, normalizedLocalMerchantCode, normalizedLocalStoreId);
-            return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
+                                    return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
                     resolvedPlatformStoreId, resolvedMerchantCode, resolvedErpStoreCode, resolvedStoreId);
         }
 
@@ -78,12 +57,10 @@ public class StoreIdentityValidator {
                 || StrUtil.isBlank(normalizedStoreId);
         if (requiresBackfill) {
             if (isCompleteIdentity(resolvedPlatformStoreId, resolvedMerchantCode, resolvedStoreId)) {
-                // log.info("[门店身份校验] erpStoreCode={}, 需要回填但解析完整", erpStoreCode);
-                return StoreIdentityValidationResult.backfill(resolvedPlatformStoreId, resolvedMerchantCode,
+                                return StoreIdentityValidationResult.backfill(resolvedPlatformStoreId, resolvedMerchantCode,
                         resolvedErpStoreCode, resolvedStoreId);
             }
-            // log.warn("[门店身份校验] erpStoreCode={}, 需要回填但解析不完整", erpStoreCode);
-            return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
+                        return StoreIdentityValidationResult.reject(REASON_CODE_STORE_IDENTITY_MISMATCH,
                     resolvedPlatformStoreId, resolvedMerchantCode, resolvedErpStoreCode, resolvedStoreId);
         }
         return StoreIdentityValidationResult.pass(resolvedPlatformStoreId, resolvedMerchantCode,

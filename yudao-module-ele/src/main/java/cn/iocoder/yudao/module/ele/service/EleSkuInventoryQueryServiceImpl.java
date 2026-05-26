@@ -1,6 +1,5 @@
 package cn.iocoder.yudao.module.ele.service;
 
-import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformRespVO;
@@ -238,7 +237,6 @@ public class EleSkuInventoryQueryServiceImpl implements EleSkuInventoryQueryServ
         StoreStockDO storeStock = storeStockMapper.selectByStoreProductId(storeProduct.getStoreProductId());
         if (storeStock == null) {
             storeStock = new StoreStockDO();
-            storeStock.setStoreStockId(IdUtil.fastSimpleUUID());
             storeStock.setStoreProductId(storeProduct.getStoreProductId());
             storeStock.setStoreStockOutstockHours(0);
             fillFormalStock(row, storeStock);

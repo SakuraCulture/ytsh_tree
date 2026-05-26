@@ -5,12 +5,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public class MapSortUtil {
-    /**
-     * 使用 Map按key进行排序
-     *
-     * @param map
-     * @return
-     */
+    
     public static Map<String, Object> sortMapByKey(Map<String, Object> map) {
         if (map == null || map.isEmpty()) {
             return null;

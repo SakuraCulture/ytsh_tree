@@ -148,33 +148,24 @@ public class SaasOrderStatusPushConsumer {
             log.info("【订单创建消费】步骤2: 补充完成，merchantCode={}, erpStoreCode={}",
                     message.getMerchantCode(), message.getErpStoreCode());
 
-            log.info("【订单创建消费】步骤3: 调用翱象API拉取订单详情，orderId={}...", orderId);
             OrderDetailRespDTO orderDetail = fetchOrderDetailWithRetry(message);
             if (orderDetail == null) {
                 log.error("【订单创建消费】步骤3: 翱象API返回订单详情为空，orderId={}", orderId);
                 throw new RuntimeException("订单详情不存在，orderId=" + orderId);
             }
-            log.info("【订单创建消费】步骤3: 翱象API返回成功 ✓，orderId={}, status={}, buyerName={}, totalFee={}",
-                    orderDetail.getOrderId(), orderDetail.getStatus(), orderDetail.getBuyerName(),
-                    orderDetail.getTotalFee());
 
-            log.info("【订单创建消费】步骤4: 入库保存订单，orderId={}...", orderId);
             OrderMessage orderMessage = convertToOrderMessage(orderDetail, message);
             orderMessage.setCreateTime(orderDetail.getCreateTime());
             eleOrderService.consumeOrderMessage(orderMessage, true);
-            log.info("【订单创建消费】步骤4: 订单入库成功 ✓，orderId={}", orderId);
 
-            log.info("【订单创建消费】步骤5: 推送WebSocket通知，orderId={}, newStatus={}...", orderId, orderDetail.getStatus());
             orderStatusPushService.pushOrderStatusChange(
                     orderId,
                     null,
                     orderDetail.getStatus(),
                     message.getPlatformStoreId(),
                     orderDetail.getBuyerName());
-            log.info("【订单创建消费】步骤5: WebSocket推送完成 ✓");
 
             acknowledgment.acknowledge();
-            log.info("【订单创建消费】==== 订单创建处理完成 END，orderId={} ====", orderId);
 
         } catch (Exception e) {
             log.error("【SaaS订单创建消费】消费失败，orderId={}, error={}", orderId, e.getMessage(), e);
@@ -190,71 +181,48 @@ public class SaasOrderStatusPushConsumer {
 
         String orderId = message.getOrderId();
         String ticket = message.getTicket();
-        log.info("【状态变更消费】==== 开始处理订单状态变更 ====");
         log.info("【状态变更消费】orderId={}, status={}, ticket={}, partition={}, offset={}",
                 orderId, message.getStatus(), ticket, partition, offset);
 
-        log.info("【状态变更消费】步骤1: 幂等检查，ticket={}", ticket);
         if (!checkIdempotent(ticket)) {
-            log.info("【状态变更消费】步骤1: 幂等检查命中，跳过处理，orderId={}, ticket={}", orderId, ticket);
             acknowledgment.acknowledge();
             return;
         }
-        log.info("【状态变更消费】步骤1: 幂等检查通过 ✓");
 
         try {
-            log.info("【状态变更消费】步骤1.5: 补充merchantCode/erpStoreCode...");
             if (StrUtil.isBlank(message.getMerchantCode())) {
                 EleApiConfig config = eleApiConfigMapper.selectActive();
                 if (config != null) {
                     message.setMerchantCode(config.getMerchantCode());
-                    log.info("【状态变更消费】步骤1.5: 从ele_api_config表补充merchantCode={}", config.getMerchantCode());
                 } else {
                     log.warn("【状态变更消费】步骤1.5: ele_api_config表无启用记录，merchantCode仍为空");
                 }
             }
             if (StrUtil.isBlank(message.getErpStoreCode()) && message.getPlatformStoreId() != null) {
                 message.setErpStoreCode(message.getPlatformStoreId());
-                log.info("【状态变更消费】步骤1.5: 补充erpStoreCode=platformStoreId={}", message.getPlatformStoreId());
             }
-            log.info("【状态变更消费】步骤1.5: 补充完成，merchantCode={}, erpStoreCode={}",
-                    message.getMerchantCode(), message.getErpStoreCode());
 
-            log.info("【状态变更消费】步骤2: 查询本地数据库获取旧状态，orderId={}...", orderId);
             OrderDetailRespDTO existingOrder = eleOrderService.getOrderDetail(
                     null, message.getMerchantCode(), message.getErpStoreCode(), orderId);
             Integer oldStatus = existingOrder != null ? existingOrder.getStatus() : null;
-            log.info("【状态变更消费】步骤2: 本地旧状态={}，orderId={}", oldStatus, orderId);
 
-            log.info("【状态变更消费】步骤3: 调用翱象API拉取最新订单详情，orderId={}...", orderId);
             OrderDetailRespDTO orderDetail = fetchOrderDetailWithRetry(message);
             if (orderDetail == null) {
                 log.error("【状态变更消费】步骤3: 翱象API返回订单详情为空，orderId={}", orderId);
                 throw new RuntimeException("订单详情不存在，orderId=" + orderId);
             }
-            log.info("【状态变更消费】步骤3: 翱象API返回成功 ✓，orderId={}, status={}, buyerName={}",
-                    orderDetail.getOrderId(), orderDetail.getStatus(), orderDetail.getBuyerName());
-
-            log.info("【状态变更消费】步骤4: 更新订单入库，orderId={}, oldStatus={} -> newStatus={}...",
-                    orderId, oldStatus, orderDetail.getStatus());
             OrderMessage orderMessage = convertToOrderMessage(orderDetail, message);
             eleOrderService.consumeOrderMessage(orderMessage, true);
-            log.info("【状态变更消费】步骤4: 订单更新入库成功 ✓，orderId={}", orderId);
 
             Integer finalOldStatus = oldStatus != null ? oldStatus : message.getStatus();
-            log.info("【状态变更消费】步骤5: 推送WebSocket通知，orderId={}, oldStatus={}, newStatus={}...",
-                    orderId, finalOldStatus, orderDetail.getStatus());
             orderStatusPushService.pushOrderStatusChange(
                     orderId,
                     finalOldStatus,
                     orderDetail.getStatus(),
                     message.getErpStoreCode(),
                     orderDetail.getBuyerName());
-            log.info("【状态变更消费】步骤5: WebSocket推送完成 ✓");
 
             acknowledgment.acknowledge();
-            log.info("【状态变更消费】==== 订单状态变更处理完成 END，orderId={}, oldStatus={} -> newStatus={} ====",
-                    orderId, finalOldStatus, orderDetail.getStatus());
 
         } catch (Exception e) {
             log.error("【SaaS推送消费】消费失败，orderId={}, error={}", orderId, e.getMessage(), e);
@@ -270,20 +238,13 @@ public class SaasOrderStatusPushConsumer {
 
         String orderId = message.getOrderId();
         String ticket = message.getTicket();
-        log.info("【催单消费】==== 开始处理催单推送 ====");
-        log.info("【催单消费】orderId={}, ticket={}, partition={}, offset={}",
-                orderId, ticket, partition, offset);
 
-        log.info("【催单消费】步骤1: 幂等检查，ticket={}", ticket);
         if (!checkIdempotent(ticket)) {
-            log.info("【催单消费】步骤1: 幂等检查命中，跳过处理，orderId={}, ticket={}", orderId, ticket);
             acknowledgment.acknowledge();
             return;
         }
-        log.info("【催单消费】步骤1: 幂等检查通过 ✓");
 
         try {
-            log.info("【催单消费】步骤2: 查询本地订单信息，orderId={}...", orderId);
             OrderDetailRespDTO existingOrder = eleOrderService.getOrderDetail(
                     null, message.getMerchantCode(), message.getErpStoreCode(), orderId);
 
@@ -293,20 +254,15 @@ public class SaasOrderStatusPushConsumer {
             if (channelOrderId == null && existingOrder != null) {
                 channelOrderId = existingOrder.getChannelOrderId();
             }
-            log.info("【催单消费】步骤2: 本地订单信息 ✓，orderId={}, buyerName={}, storeName={}",
-                    orderId, buyerName, storeName);
 
-            log.info("【催单消费】步骤3: 推送催单WebSocket通知，orderId={}...", orderId);
             orderStatusPushService.pushOrderRemind(
                     orderId,
                     channelOrderId,
                     storeName,
                     buyerName,
                     1);
-            log.info("【催单消费】步骤3: WebSocket推送完成 ✓");
 
             acknowledgment.acknowledge();
-            log.info("【催单消费】==== 催单推送处理完成 END，orderId={} ====", orderId);
 
         } catch (Exception e) {
             log.error("【催单消费】消费失败，orderId={}, error={}", orderId, e.getMessage(), e);
@@ -322,70 +278,48 @@ public class SaasOrderStatusPushConsumer {
 
         String orderId = message.getOrderId();
         String ticket = message.getTicket();
-        log.info("【配送状态消费】==== 开始处理配送状态变更 ====");
         log.info("【配送状态消费】orderId={}, status={}, ticket={}, partition={}, offset={}",
                 orderId, message.getStatus(), ticket, partition, offset);
 
-        log.info("【配送状态消费】步骤1: 幂等检查，ticket={}", ticket);
         if (!checkIdempotent(ticket)) {
-            log.info("【配送状态消费】步骤1: 幂等检查命中，跳过处理，orderId={}, ticket={}", orderId, ticket);
             acknowledgment.acknowledge();
             return;
         }
-        log.info("【配送状态消费】步骤1: 幂等检查通过 ✓");
 
         try {
-            log.info("【配送状态消费】步骤1.5: 补充merchantCode/erpStoreCode...");
             if (StrUtil.isBlank(message.getMerchantCode())) {
                 EleApiConfig config = eleApiConfigMapper.selectActive();
                 if (config != null) {
                     message.setMerchantCode(config.getMerchantCode());
-                    log.info("【配送状态消费】步骤1.5: 从ele_api_config表补充merchantCode={}", config.getMerchantCode());
                 } else {
                     log.warn("【配送状态消费】步骤1.5: ele_api_config表无启用记录，merchantCode仍为空");
                 }
             }
             if (StrUtil.isBlank(message.getErpStoreCode()) && message.getPlatformStoreId() != null) {
                 message.setErpStoreCode(message.getPlatformStoreId());
-                log.info("【配送状态消费】步骤1.5: 补充erpStoreCode=platformStoreId={}", message.getPlatformStoreId());
             }
-            log.info("【配送状态消费】步骤1.5: 补充完成，merchantCode={}, erpStoreCode={}",
-                    message.getMerchantCode(), message.getErpStoreCode());
 
-            log.info("【配送状态消费】步骤2: 查询本地数据库获取旧状态，orderId={}...", orderId);
             OrderDetailRespDTO existingOrder = eleOrderService.getOrderDetail(
                     null, message.getMerchantCode(), message.getErpStoreCode(), orderId);
             Integer oldDeliveryStatus = existingOrder != null ? existingOrder.getDeliveryStatus() : null;
-            log.info("【配送状态消费】步骤2: 本地旧配送状态={}，orderId={}", oldDeliveryStatus, orderId);
 
-            log.info("【配送状态消费】步骤3: 调用翱象API拉取最新订单详情，orderId={}...", orderId);
             OrderDetailRespDTO orderDetail = fetchOrderDetailWithRetry(message);
             if (orderDetail == null) {
                 log.error("【配送状态消费】步骤3: 翱象API返回订单详情为空，orderId={}", orderId);
                 throw new RuntimeException("订单详情不存在，orderId=" + orderId);
             }
-            log.info("【配送状态消费】步骤3: 翱象API返回成功 ✓，orderId={}, deliveryStatus={}",
-                    orderDetail.getOrderId(), orderDetail.getDeliveryStatus());
 
-            log.info("【配送状态消费】步骤4: 更新订单入库，orderId={}, oldDeliveryStatus={} -> newDeliveryStatus={}...",
-                    orderId, oldDeliveryStatus, orderDetail.getDeliveryStatus());
             OrderMessage orderMessage = convertToOrderMessage(orderDetail, message);
             eleOrderService.consumeOrderMessage(orderMessage, true);
-            log.info("【配送状态消费】步骤4: 订单更新入库成功 ✓，orderId={}", orderId);
 
-            log.info("【配送状态消费】步骤5: 推送WebSocket通知，orderId={}, oldDeliveryStatus={}, newDeliveryStatus={}...",
-                    orderId, oldDeliveryStatus, orderDetail.getDeliveryStatus());
             orderStatusPushService.pushOrderStatusChange(
                     orderId,
                     existingOrder != null ? existingOrder.getStatus() : null,
                     orderDetail.getStatus(),
                     orderDetail.getChannelSourceName(),
                     orderDetail.getBuyerName());
-            log.info("【配送状态消费】步骤5: WebSocket推送完成 ✓");
 
             acknowledgment.acknowledge();
-            log.info("【配送状态消费】==== 配送状态变更处理完成 END，orderId={}, deliveryStatus={} ====",
-                    orderId, orderDetail.getDeliveryStatus());
 
         } catch (Exception e) {
             log.error("【配送状态消费】消费失败，orderId={}, error={}", orderId, e.getMessage(), e);
@@ -401,9 +335,6 @@ public class SaasOrderStatusPushConsumer {
 
         String orderId = message.getOrderId();
         String ticket = message.getTicket();
-        log.info("【供应链消息消费】收到供应链订单消息，orderId={}, ticket={}, partition={}, offset={}",
-                orderId, ticket, partition, offset);
-        log.info("【供应链消息消费】供应链消息目前仅记录，不做入库处理");
 
         acknowledgment.acknowledge();
     }
@@ -416,64 +347,42 @@ public class SaasOrderStatusPushConsumer {
 
         String orderId = message.getOrderId();
         String ticket = message.getTicket();
-        log.info("【逆向订单状态消费】==== 开始处理逆向订单状态变更 ====");
         log.info("【逆向订单状态消费】orderId={}, status={}, ticket={}, partition={}, offset={}",
                 orderId, message.getStatus(), ticket, partition, offset);
 
-        log.info("【逆向订单状态消费】步骤1: 幂等检查，ticket={}", ticket);
         if (!checkIdempotent(ticket)) {
-            log.info("【逆向订单状态消费】步骤1: 幂等检查命中，跳过处理，orderId={}, ticket={}", orderId, ticket);
             acknowledgment.acknowledge();
             return;
         }
-        log.info("【逆向订单状态消费】步骤1: 幂等检查通过 ✓");
 
         try {
-            log.info("【逆向订单状态消费】步骤1.5: 补充merchantCode/erpStoreCode...");
             if (StrUtil.isBlank(message.getMerchantCode())) {
                 EleApiConfig config = eleApiConfigMapper.selectActive();
                 if (config != null) {
                     message.setMerchantCode(config.getMerchantCode());
-                    log.info("【逆向订单状态消费】步骤1.5: 从ele_api_config表补充merchantCode={}", config.getMerchantCode());
                 } else {
                     log.warn("【逆向订单状态消费】步骤1.5: ele_api_config表无启用记录，merchantCode仍为空");
                 }
             }
             if (StrUtil.isBlank(message.getErpStoreCode()) && message.getPlatformStoreId() != null) {
                 message.setErpStoreCode(message.getPlatformStoreId());
-                log.info("【逆向订单状态消费】步骤1.5: 补充erpStoreCode=platformStoreId={}", message.getPlatformStoreId());
             }
-            log.info("【逆向订单状态消费】步骤1.5: 补充完成，merchantCode={}, erpStoreCode={}",
-                    message.getMerchantCode(), message.getErpStoreCode());
 
-            log.info("【逆向订单状态消费】步骤2: 调用翱象API拉取最新订单详情，orderId={}...", orderId);
             OrderDetailRespDTO orderDetail = fetchOrderDetailWithRetry(message);
             if (orderDetail == null) {
                 log.error("【逆向订单状态消费】步骤2: 翱象API返回订单详情为空，orderId={}", orderId);
                 throw new RuntimeException("订单详情不存在，orderId=" + orderId);
             }
-            log.info("【逆向订单状态消费】步骤2: 翱象API返回成功 ✓，orderId={}, status={}",
-                    orderDetail.getOrderId(), orderDetail.getStatus());
-
-            log.info("【逆向订单状态消费】步骤3: 更新订单入库，orderId={}, status={}...",
-                    orderId, orderDetail.getStatus());
             OrderMessage orderMessage = convertToOrderMessage(orderDetail, message);
             eleOrderService.consumeOrderMessage(orderMessage, true);
-            log.info("【逆向订单状态消费】步骤3: 订单更新入库成功 ✓，orderId={}", orderId);
-
-            log.info("【逆向订单状态消费】步骤4: 推送WebSocket通知，orderId={}, status={}...",
-                    orderId, orderDetail.getStatus());
             orderStatusPushService.pushOrderStatusChange(
                     orderId,
                     null,
                     orderDetail.getStatus(),
                     orderDetail.getChannelSourceName(),
                     orderDetail.getBuyerName());
-            log.info("【逆向订单状态消费】步骤4: WebSocket推送完成 ✓");
 
             acknowledgment.acknowledge();
-            log.info("【逆向订单状态消费】==== 逆向订单状态变更处理完成 END，orderId={}, status={} ====",
-                    orderId, orderDetail.getStatus());
 
         } catch (Exception e) {
             log.error("【逆向订单状态消费】消费失败，orderId={}, error={}", orderId, e.getMessage(), e);

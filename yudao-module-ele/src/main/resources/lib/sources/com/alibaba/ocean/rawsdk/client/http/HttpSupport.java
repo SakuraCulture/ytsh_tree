@@ -22,25 +22,17 @@ public final class HttpSupport {
 
     public final static Map<String, String> buildHttpHeader(RequestPolicy clientPolicy) {
         Map<String, String> header = new LinkedHashMap<String, String>();
-        // header.put("Accept", "text/xml,text/javascript,application/json");
-        header.put("Content-type", "application/x-www-form-urlencoded");
+                header.put("Content-type", "application/x-www-form-urlencoded");
         header.put("User-Agent", clientPolicy.getAgent());
         return header;
     }
 
-    /**
-     * 构建query参数
-     *
-     * @param request
-     * @param appKey
-     * @return
-     */
+    
     public static Map<String, Object> buildParams(AbstractAPIRequest request, String appKey) {
         Map<String, Object> serializerMap = AbstractParamRequestSerializer.serialize(request);
         APIId apiId = request.getOceanApiId();
 
-        // 系统参数
-        serializerMap.put(EleConstants.API_NAME, apiId.getName());
+                serializerMap.put(EleConstants.API_NAME, apiId.getName());
         serializerMap.put(EleConstants.TIMESTAMP, String.valueOf(System.currentTimeMillis() / 1000));
         serializerMap.put(EleConstants.VERSION, apiId.getVersion());
         serializerMap.put(EleConstants.APPKEY, appKey);
@@ -53,14 +45,7 @@ public final class HttpSupport {
         return serializerMap;
     }
 
-    /**
-     * 生成签名
-     *
-     * @param parameters
-     * @param appKey
-     * @param secKey
-     * @param policy
-     */
+    
     public static void signature(Map<String, Object> parameters, String appKey, String secKey, RequestPolicy policy) {
         if (!policy.isUseSignture())
             return;
@@ -73,13 +58,7 @@ public final class HttpSupport {
         parameters.put(EleConstants.SIGNATURE, signedContent);
     }
 
-    /**
-     * 根据入参进行签名计算
-     *
-     * @param params
-     * @param signingKey
-     * @return
-     */
+    
     private static String getOpenApiSign(Map<String, Object> params, String signingKey) {
         params.put(EleConstants.SECRET, signingKey);
         Map<String, Object> paramsMap = MapSortUtil.sortMapByKey(params);
@@ -104,11 +83,7 @@ public final class HttpSupport {
         return sign;
     }
 
-    /**
-     * @param params
-     * @return
-     * @throws IOException
-     */
+    
     public static String buildQuery(Map<String, Object> params) throws IOException {
         if (params == null || params.isEmpty()) {
             return "";

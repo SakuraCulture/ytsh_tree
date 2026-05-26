@@ -1,6 +1,5 @@
 package cn.iocoder.yudao.module.ele.service;
 
-import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.module.business.dal.dataobject.product.SkuTableDO;
 import cn.iocoder.yudao.module.business.dal.dataobject.store.StoreProductDO;
@@ -70,7 +69,6 @@ public class EleStoreInventoryIngestServiceImpl implements EleStoreInventoryInge
         StoreStockDO storeStock = storeStockMapper.selectByStoreProductId(storeProduct.getStoreProductId());
         if (storeStock == null) {
             storeStock = new StoreStockDO();
-            storeStock.setStoreStockId(IdUtil.fastSimpleUUID());
             storeStock.setStoreProductId(storeProduct.getStoreProductId());
             storeStock.setStoreStockOutstockHours(0);
             fillFormalStock(row, storeStock);

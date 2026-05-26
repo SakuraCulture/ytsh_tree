@@ -22,8 +22,8 @@ public class StoreStockDO extends BaseDO {
     /**
      * 库存ID
      */
-    @TableId(type = IdType.INPUT)
-    private String storeStockId;
+    @TableId(type = IdType.AUTO)
+    private Long storeStockId;
 
     /**
      * 门店商品ID

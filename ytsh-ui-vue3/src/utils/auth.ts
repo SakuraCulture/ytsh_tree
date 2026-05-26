@@ -9,9 +9,7 @@ const RefreshTokenKey = 'REFRESH_TOKEN'
 
 // 获取token
 export const getAccessToken = () => {
-  // 此处与TokenKey相同，此写法解决初始化时Cookies中不存在TokenKey报错
-  const accessToken = wsCache.get(AccessTokenKey)
-  return accessToken ? accessToken : wsCache.get('ACCESS_TOKEN')
+  return wsCache.get(AccessTokenKey)
 }
 
 // 刷新token

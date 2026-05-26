@@ -10,14 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * 饿了么订单失败重试队列管理服务
- *
- * 负责管理订单落库失败后的重试队列，提供入队、出队、清空等操作。
- * 队列按门店分组，确保同一门店的失败订单集中处理。
- *
- * @author 优团科技数字化团队
- */
+
 @Slf4j
 @Service
 public class EleOrderRetryQueueService {

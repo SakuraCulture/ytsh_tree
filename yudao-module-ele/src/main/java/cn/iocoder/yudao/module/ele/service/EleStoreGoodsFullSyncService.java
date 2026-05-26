@@ -21,4 +21,6 @@ public interface EleStoreGoodsFullSyncService {
     PageResult<EleStoreGoodsFullSyncTaskStoreRespVO> getTaskStorePage(EleStoreGoodsFullSyncTaskStorePageReqVO reqVO);
 
     void cancelTask(Long id);
+
+    String testSingleStoreSync(String erpStoreCode);
 }

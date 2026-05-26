@@ -22,7 +22,7 @@ public interface StoreProductMapper extends BaseMapperX<StoreProductDO> {
     }
 
     default long selectCountForPage(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
-        return selectCount(buildPageQuery(reqVO, productSkuIds));
+        return selectCount(buildBaseQuery(reqVO, productSkuIds));
     }
 
     default List<StoreProductDO> selectListForPage(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
@@ -35,7 +35,7 @@ public interface StoreProductMapper extends BaseMapperX<StoreProductDO> {
                 .last("LIMIT " + offset + ", " + limit));
     }
 
-    private LambdaQueryWrapperX<StoreProductDO> buildPageQuery(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
+    private LambdaQueryWrapperX<StoreProductDO> buildBaseQuery(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
         return new LambdaQueryWrapperX<StoreProductDO>()
                 .likeIfPresent(StoreProductDO::getStoreProductId, reqVO.getStoreProductId())
                 .inIfPresent(StoreProductDO::getStoreProductId, reqVO.getStoreProductIds())
@@ -45,7 +45,11 @@ public interface StoreProductMapper extends BaseMapperX<StoreProductDO> {
                 .eqIfPresent(StoreProductDO::getStoreProductPosStatus,
                         reqVO.getPosStatus() == null ? null : String.valueOf(reqVO.getPosStatus()))
                 .eqIfPresent(StoreProductDO::getStoreProductIsActive, reqVO.getEnterShopStatus())
-                .betweenIfPresent(StoreProductDO::getCreateTime, reqVO.getCreateTime())
+                .betweenIfPresent(StoreProductDO::getCreateTime, reqVO.getCreateTime());
+    }
+
+    private LambdaQueryWrapperX<StoreProductDO> buildPageQuery(StoreProductPageReqVO reqVO, List<String> productSkuIds) {
+        return buildBaseQuery(reqVO, productSkuIds)
                 .orderByDesc(StoreProductDO::getStoreProductId);
     }
 

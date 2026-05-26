@@ -10,106 +10,65 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * 优雅关闭状态管理器
- *
- * 用于管理应用优雅关闭过程中的状态，确保正在执行的任务能够安全完成，
- * 避免在订单同步过程中产生脏数据。
- *
- * @author 优团科技数字化团队
- */
+
 @Slf4j
 @Component
 public class ShutdownStateManager {
 
-    /**
-     * 全局停机状态标志
-     */
+    
     private volatile boolean shuttingDown = false;
 
-    /**
-     * 正在执行的任务数
-     */
+    
     private final AtomicInteger activeTasks = new AtomicInteger(0);
 
-    /**
-     * 记录当前正在处理的订单ID（用于调试和日志）
-     */
+    
     private volatile String currentProcessingOrderId;
 
-    /**
-     * 正在执行批量同步的门店数
-     */
+    
     private final AtomicInteger activeBatchSyncCount = new AtomicInteger(0);
 
-    /**
-     * 标记是否正在处理批量同步任务
-     */
+    
     private volatile boolean syncingBatch = false;
 
-    /**
-     * 当前正在执行的补偿任务数
-     */
+    
     private final AtomicInteger activeCompensateTasks = new AtomicInteger(0);
 
-    /**
-     * 当前正在同步的门店列表
-     */
+    
     private final List<String> syncingStores = new CopyOnWriteArrayList<>();
 
-    /**
-     * 当前正在同步的门店数量（实时）
-     */
+    
     private final AtomicInteger currentSyncingStoreCount = new AtomicInteger(0);
 
-    /**
-     * 批次同步开始时间（毫秒时间戳）
-     */
+    
     private volatile long batchSyncStartTime = 0;
 
-    /**
-     * 同步状态：IDLE(空闲), RUNNING(运行中), COMPLETED(已完成), FAILED(失败)
-     */
+    
     private volatile String syncStatus = "IDLE";
 
-    /**
-     * 总门店数
-     */
+    
     private volatile int totalStoreCount = 0;
 
-    /**
-     * 已完成门店数
-     */
+    
     private final AtomicInteger completedStoreCount = new AtomicInteger(0);
 
-    /**
-     * 成功门店数
-     */
+    
     private final AtomicInteger successStoreCount = new AtomicInteger(0);
 
-    /**
-     * 失败门店数
-     */
+    
     private final AtomicInteger failedStoreCount = new AtomicInteger(0);
 
     private final AtomicInteger totalOrderCount = new AtomicInteger(0);
     private final AtomicInteger successOrderCount = new AtomicInteger(0);
     private final AtomicInteger failOrderCount = new AtomicInteger(0);
 
-    /**
-     * 注册任务开始
-     *
-     * @param orderId 当前处理的订单ID
-     */
+    
     public void taskStarted(String orderId) {
         activeTasks.incrementAndGet();
         currentProcessingOrderId = orderId;
         log.debug("【优雅关闭】任务开始，orderId={}, 当前活跃任务数={}", orderId, activeTasks.get());
     }
 
-    /**
-     * 注册任务结束
-     */
+    
     public void taskFinished() {
         activeTasks.decrementAndGet();
         if (activeTasks.get() == 0) {
@@ -118,30 +77,17 @@ public class ShutdownStateManager {
         log.debug("【优雅关闭】任务结束，当前活跃任务数={}", activeTasks.get());
     }
 
-    /**
-     * 检查是否可以接受新任务
-     *
-     * @return true-可以接受新任务，false-正在关闭，不应接受新任务
-     */
+    
     public boolean canAcceptNewTask() {
         return !shuttingDown;
     }
 
-    /**
-     * 检查是否可以接受新的批量同步任务
-     *
-     * @return true-可以接受新批次，false-正在关闭或已有批次在执行
-     */
+    
     public boolean canAcceptNewBatch() {
         return !shuttingDown && activeBatchSyncCount.get() == 0;
     }
 
-    /**
-     * 标记开始处理批量同步
-     *
-     * @param totalStores 总门店数
-     * @return true-成功标记，false-正在关闭，无法开始新批次
-     */
+    
     public synchronized boolean startBatchSync(int totalStores) {
         if (shuttingDown) {
             log.warn("【优雅关闭】应用正在关闭，拒绝新的批量同步任务");
@@ -167,27 +113,17 @@ public class ShutdownStateManager {
         return true;
     }
 
-    /**
-     * 标记开始处理批量同步（兼容旧接口）
-     *
-     * @return true-成功标记，false-正在关闭，无法开始新批次
-     */
+    
     public synchronized boolean startBatchSync() {
         return startBatchSync(0);
     }
 
-    /**
-     * 标记批量同步完成（默认成功）
-     */
+    
     public synchronized void finishBatchSync() {
         finishBatchSync(true);
     }
 
-    /**
-     * 标记批量同步完成
-     *
-     * @param success 是否成功完成
-     */
+    
     public synchronized void finishBatchSync(boolean success) {
         long elapsed = System.currentTimeMillis() - batchSyncStartTime;
         int syncedCount = currentSyncingStoreCount.get();
@@ -204,12 +140,7 @@ public class ShutdownStateManager {
         return syncingBatch;
     }
 
-    /**
-     * 注册门店开始同步
-     *
-     * @param platformStoreId 平台门店ID
-     * @param storeName 门店名称
-     */
+    
     public void registerStoreSyncStarted(String platformStoreId, String storeName) {
         String label = StrUtil.isNotBlank(storeName) ? storeName + "(" + platformStoreId + ")" : platformStoreId;
         syncingStores.add(label);
@@ -217,21 +148,12 @@ public class ShutdownStateManager {
         log.debug("【同步跟踪】门店开始同步: {}, 当前同步数: {}", label, syncingStores.size());
     }
 
-    /**
-     * 注册门店同步完成
-     *
-     * @param platformStoreId 平台门店ID
-     */
+    
     public void registerStoreSyncFinished(String platformStoreId) {
         registerStoreSyncFinished(platformStoreId, true);
     }
 
-    /**
-     * 注册门店同步完成
-     *
-     * @param platformStoreId 平台门店ID
-     * @param success 是否成功
-     */
+    
     public void registerStoreSyncFinished(String platformStoreId, boolean success) {
         syncingStores.removeIf(s -> s.contains(platformStoreId));
         currentSyncingStoreCount.updateAndGet(count -> Math.max(0, count - 1));
@@ -245,36 +167,22 @@ public class ShutdownStateManager {
                 platformStoreId, success, syncingStores.size());
     }
 
-    /**
-     * 获取当前正在同步的门店列表
-     *
-     * @return 门店名称/ID列表
-     */
+    
     public synchronized List<String> getCurrentSyncingStores() {
         return Collections.unmodifiableList(new ArrayList<>(syncingStores));
     }
 
-    /**
-     * 获取当前同步的门店数量
-     *
-     * @return 门店数量
-     */
+    
     public int getCurrentSyncingStoreCount() {
         return currentSyncingStoreCount.get();
     }
 
-    /**
-     * 获取批次同步开始时间
-     *
-     * @return 毫秒时间戳，0表示未开始
-     */
+    
     public long getBatchSyncStartTime() {
         return batchSyncStartTime;
     }
 
-    /**
-     * 触发停机
-     */
+    
     public void triggerShutdown() {
         if (shuttingDown) {
             log.warn("【优雅关闭】已经触发过停机，忽略重复请求");
@@ -284,39 +192,22 @@ public class ShutdownStateManager {
         log.info("【优雅关闭】触发优雅停止，当前活跃任务数={}", activeTasks.get());
     }
 
-    /**
-     * 检查是否正在关闭
-     *
-     * @return true-正在关闭，false-正常运行
-     */
+    
     public boolean isShuttingDown() {
         return shuttingDown;
     }
 
-    /**
-     * 获取当前活跃任务数
-     *
-     * @return 活跃任务数
-     */
+    
     public int getActiveTaskCount() {
         return activeTasks.get();
     }
 
-    /**
-     * 获取当前正在处理的订单ID
-     *
-     * @return 订单ID
-     */
+    
     public String getCurrentProcessingOrderId() {
         return currentProcessingOrderId;
     }
 
-    /**
-     * 等待所有任务完成
-     *
-     * @param timeoutMs 超时时间（毫秒）
-     * @return true-所有任务在规定时间内完成，false-超时
-     */
+    
     public boolean waitForTasks(long timeoutMs) {
         long start = System.currentTimeMillis();
         int lastCount = activeTasks.get();
@@ -366,13 +257,7 @@ public class ShutdownStateManager {
         return failedStoreCount.get();
     }
 
-    /**
-     * 累加订单同步数量
-     *
-     * @param syncCount 同步订单数
-     * @param successCount 成功订单数
-     * @param failCount 失败订单数
-     */
+    
     public void addOrderCounts(int syncCount, int successCount, int failCount) {
         totalOrderCount.addAndGet(syncCount);
         successOrderCount.addAndGet(successCount);
@@ -392,11 +277,7 @@ public class ShutdownStateManager {
         return failOrderCount.get();
     }
 
-    /**
-     * 获取详细的停机状态信息
-     *
-     * @return 状态信息
-     */
+    
     public String getStatusInfo() {
         return String.format(
                 "shuttingDown=%s, activeTasks=%d, currentOrderId=%s, activeBatchSyncCount=%d",

@@ -1,6 +1,5 @@
-import { CACHE_KEY, useCache } from '@/hooks/web/useCache'
-import {hasPermission} from "@/directives/permission/hasPermi";
-
+import { hasPermission } from '@/directives/permission/hasPermi'
+import { useUserStore } from '@/store/modules/user'
 
 const { t } = useI18n() // 国际化
 
@@ -20,11 +19,10 @@ export function checkPermi(permission: string[]) {
  */
 export function checkRole(value: string[]) {
   if (value && value instanceof Array && value.length > 0) {
-    const { wsCache } = useCache()
     const permissionRoles = value
     const super_admin = 'super_admin'
-    const userInfo = wsCache.get(CACHE_KEY.USER)
-    const roles = userInfo?.roles || []
+    const userStore = useUserStore()
+    const roles = userStore.roles
     const hasRole = roles.some((role: string) => {
       return super_admin === role || permissionRoles.includes(role)
     })

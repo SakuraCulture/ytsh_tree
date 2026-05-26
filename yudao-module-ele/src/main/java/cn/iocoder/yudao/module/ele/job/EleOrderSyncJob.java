@@ -17,13 +17,7 @@ import java.time.temporal.ChronoUnit;
 import java.time.temporal.WeekFields;
 import java.util.Locale;
 
-/**
- * 翱象订单同步定时任务
- *
- * 通过定时任务定期从翱象平台拉取订单数据到本地。
- *
- * @author 优团科技数字化团队
- */
+
 @Slf4j
 @Component
 public class EleOrderSyncJob implements JobHandler {
@@ -63,7 +57,6 @@ public class EleOrderSyncJob implements JobHandler {
                         startTime = yesterday.atTime(execTime).atZone(ZoneId.systemDefault()).toEpochSecond();
                         endTime = today.atTime(execTime).atZone(ZoneId.systemDefault()).toEpochSecond();
                     }
-                    log.info("【按天数同步】执行时间={}, startTime={}, endTime={}", execTime, startTime, endTime);
                 } else if ("weekDay".equals(scheduleType)) {
                     String weekDayTimeStr = paramJson.getStr("weekDayTime", "00:00:00");
                     String[] timeParts = weekDayTimeStr.split(":");
@@ -81,7 +74,6 @@ public class EleOrderSyncJob implements JobHandler {
                         startTime = yesterday.atTime(execTime).atZone(ZoneId.systemDefault()).toEpochSecond();
                         endTime = today.atTime(execTime).atZone(ZoneId.systemDefault()).toEpochSecond();
                     }
-                    log.info("【按周同步】执行时间={}, startTime={}, endTime={}", execTime, startTime, endTime);
                 } else if ("interval".equals(scheduleType)) {
                     String intervalStartTimeStr = paramJson.getStr("intervalStartTime", "00:00:00");
                     Integer intervalHours = paramJson.getInt("intervalHours", 1);
@@ -109,7 +101,6 @@ public class EleOrderSyncJob implements JobHandler {
                     log.info("【按间隔同步】间隔={}小时, 上次执行={}, startTime={}, endTime={}",
                             intervalHours, lastExecLocalTime, startTime, endTime);
                 } else {
-                    log.info("【按时间同步】使用增量同步逻辑");
                 }
             } catch (Exception e) {
                 log.warn("【定时任务】解析参数失败，使用默认增量同步", e);
@@ -117,7 +108,6 @@ public class EleOrderSyncJob implements JobHandler {
         }
 
         if (enabled != null && !enabled) {
-            log.info("【定时任务】任务已禁用，跳过执行");
             return "定时任务已禁用，跳过执行";
         }
 

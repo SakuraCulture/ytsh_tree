@@ -7,105 +7,102 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 
-/**
- * 订单商品项表实体类
- * 表名: order_item_table
- */
+
 @TableName("order_item_table")
 @Data
 public class OrderItemDO {
 
-    /** 明细ID */
+    
     @TableId(type = IdType.AUTO)
     private Long itemId;
 
-    /** 订单ID(关联order_table.order_id) */
+    
     private String orderId;
 
-    /** 子订单ID */
+    
     private String subOrderId;
 
-    /** 商品SKU编码 */
+    
     private String skuCode;
 
-    /** 子SKU编码 */
+    
     private String subSkuCode;
 
-    /** 本地SKU ID */
+    
     private Long productSkuId;
 
-    /** 商品名称 */
+    
     private String skuName;
 
-    /** 条形码 */
+    
     private String barcode;
 
-    /** 规格描述 */
+    
     private String specification;
 
-    /** 重量(kg) */
+    
     private BigDecimal weight;
 
-    /** 总重量(kg) */
+    
     private BigDecimal totalWeight;
 
-    /** 购买数量 */
+    
     private Integer buyAmount;
 
-    /** 单价(元) */
+    
     private BigDecimal price;
 
-    /** 小计金额(元) */
+    
     private BigDecimal totalFee;
 
-    /** 实付金额(元) */
+    
     private BigDecimal payFee;
 
-    /** 商品类型(0-普通/1-组合/2-赠品) */
+    
     private Integer productType;
 
-    /** 平台原始商品类型 */
+    
     private String goodsType;
 
-    /** 数量（翱象num字段） */
+    
     private Integer num;
 
-    /** 柜子编码 */
+    
     private String cabinetCode;
 
-    /** 是否换货 0-否 1-是 */
+    
     private Boolean exchangeFlag;
 
-    /** 换货金额(元) */
+    
     private BigDecimal exchangeAmount;
 
-    /** 是否赠品 0-否 1-是 */
+    
     private Boolean giftFlag;
 
-    /** 出库标志 0-否 1-是 */
+    
     private Boolean outboundFlag;
 
-    /** ERP门店编码 */
+    
     private String erpStoreCode;
 
-    /** 租户ID */
+    
     private Long tenantId;
 
-    /** ETL时间 */
+    
     private java.time.LocalDateTime etlTime;
 
-    /** 创建者 */
+    
     private String creator;
 
-    /** 创建时间 */
+    
     private Long createTime;
 
-    /** 更新人 */
+    
     private String updater;
 
-    /** 更新时间 */
+    
     private Long updateTime;
 
-    /** 是否删除 0-否 1-是 */
+    
     private Boolean deleted;
 }

@@ -23,9 +23,7 @@ public class OrderStatusPushService {
     @Resource
     private WebSocketMessageSender webSocketMessageSender;
 
-    /**
-     * 推送订单状态变更到前端
-     */
+    
     public void pushOrderStatusChange(String orderId, Integer oldStatus, Integer newStatus,
                                        String storeName, String buyerName) {
         try {

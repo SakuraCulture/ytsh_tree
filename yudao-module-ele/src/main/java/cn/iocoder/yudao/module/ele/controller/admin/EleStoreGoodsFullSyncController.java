@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.annotation.security.PermitAll;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -81,5 +82,13 @@ public class EleStoreGoodsFullSyncController {
             @Parameter(description = "任务 ID", required = true) @PathVariable Long id) {
         fullSyncService.cancelTask(id);
         return CommonResult.success(true);
+    }
+
+    @GetMapping("/test-single/{erpStoreCode}")
+    @Operation(summary = "测试单店商品同步（拉取+CK同步）")
+    @PermitAll
+    public CommonResult<String> testSingleStoreSync(
+            @Parameter(description = "ERP门店编码", required = true) @PathVariable String erpStoreCode) {
+        return CommonResult.success(fullSyncService.testSingleStoreSync(erpStoreCode));
     }
 }

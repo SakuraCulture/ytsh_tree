@@ -161,12 +161,13 @@ public interface EleStoreGoodsShadowMapper extends BaseMapperX<EleStoreGoodsShad
     }
 
     default List<String> selectActiveSkuCodesByErpStoreCode(String erpStoreCode) {
-        return selectList(new LambdaQueryWrapperX<EleStoreGoodsShadowDO>()
+        return selectObjs(new LambdaQueryWrapperX<EleStoreGoodsShadowDO>()
                 .eqIfPresent(EleStoreGoodsShadowDO::getErpStoreCode, erpStoreCode)
                 .eq(EleStoreGoodsShadowDO::getIsActive, 1)
-                .orderByDesc(EleStoreGoodsShadowDO::getUpdateTime))
+                .orderByDesc(EleStoreGoodsShadowDO::getUpdateTime)
+                .select(EleStoreGoodsShadowDO::getSkuCode))
                 .stream()
-                .map(EleStoreGoodsShadowDO::getSkuCode)
+                .map(String::valueOf)
                 .filter(StrUtil::isNotBlank)
                 .toList();
     }

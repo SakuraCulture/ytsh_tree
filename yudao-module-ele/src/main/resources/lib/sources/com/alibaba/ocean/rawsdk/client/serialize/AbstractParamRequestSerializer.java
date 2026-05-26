@@ -31,8 +31,7 @@ public class AbstractParamRequestSerializer implements Serializable {
             try {
                 Method method = propertyDescriptor.getReadMethod();
                 if (method == null) {
-                    // 对于Boolean的返回值，也许API生成的isXXX方法，补救一下
-                    if (Boolean.class.isAssignableFrom(propertyDescriptor.getPropertyType())) {
+                                        if (Boolean.class.isAssignableFrom(propertyDescriptor.getPropertyType())) {
                         Method booleanMethod = null;
                         try {
                             booleanMethod = serializer.getClass().getMethod("is" + GenericsUtil.capitalize(name));

@@ -16,18 +16,12 @@ public class SaasOrderListParam extends AbstractAPIRequest<SaasOrderListResult> 
         oceanApiId = new APIId("me.ele.retail", "saas.order.list", 3);
     }
 
-    /**
-     * @return 请求参数
-     */
+    
     public MeEleRetailSaasOrderListReqDto getBody() {
         return body;
     }
 
-    /**
-     * 设置请求参数     *
-     * 参数示例�?pre>见消息体</pre>
-     * 此参数必�?
-     */
+    
     public void setBody(MeEleRetailSaasOrderListReqDto body) {
         this.body = body;
     }

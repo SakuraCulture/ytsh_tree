@@ -210,8 +210,7 @@ public class OrderPushLogService {
             return false;
         }
         if (receiveStatus != null && !receiveStatus.isEmpty()) {
-            // 暂时不实现此过滤
-        }
+                    }
         if (startTime != null && endTime != null) {
             Long timestamp = System.currentTimeMillis();
             if (timestamp < startTime || timestamp > endTime) {

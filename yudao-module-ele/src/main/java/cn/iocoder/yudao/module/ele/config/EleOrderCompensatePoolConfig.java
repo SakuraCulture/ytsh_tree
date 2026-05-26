@@ -7,11 +7,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.ThreadPoolExecutor;
 
-/**
- * 饿了么订单补偿任务线程池配置
- *
- * @author 优团科技数字化团队
- */
+
 @Configuration
 public class EleOrderCompensatePoolConfig {
 

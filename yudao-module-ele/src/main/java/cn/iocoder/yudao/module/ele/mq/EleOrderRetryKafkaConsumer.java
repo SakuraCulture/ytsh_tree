@@ -57,17 +57,13 @@ public class EleOrderRetryKafkaConsumer {
             Acknowledgment acknowledgment) {
 
         String orderId = message.getOrderId();
-        log.info("【重试Kafka】消费重试消息，orderId={}, partition={}, offset={}, retryCount={}",
-                orderId, partition, offset, message.getRetryCount());
 
-        // 分布式锁去重: 防止同一订单被多个Consumer同时处理
-        String lockKey = RETRY_LOCK_PREFIX + orderId;
+                String lockKey = RETRY_LOCK_PREFIX + orderId;
         RLock lock = redissonClient.getLock(lockKey);
         boolean locked = false;
         try {
             locked = lock.tryLock(0, 30, TimeUnit.SECONDS);
             if (!locked) {
-                log.info("【重试消费-去重】订单正在被其他Consumer处理，跳过，orderId={}", orderId);
                 acknowledgment.acknowledge();
                 return;
             }
@@ -124,8 +120,7 @@ public class EleOrderRetryKafkaConsumer {
         log.warn("【死信Kafka】消费死信消息，orderId={}, partition={}, offset={}, retryCount={}",
                 orderId, partition, offset, message.getRetryCount());
 
-        // 分布式锁去重: 防止同一死信订单被多个Consumer同时处理
-        String lockKey = DLQ_LOCK_PREFIX + orderId;
+                String lockKey = DLQ_LOCK_PREFIX + orderId;
         RLock lock = redissonClient.getLock(lockKey);
         boolean locked = false;
         try {

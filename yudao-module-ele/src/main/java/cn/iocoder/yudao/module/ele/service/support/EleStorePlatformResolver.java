@@ -6,9 +6,7 @@ import cn.iocoder.yudao.module.business.service.store.StoreService;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Component;
 
-/**
- * 将请求中的门店标识解析为 Redis/DB 中的 canonical platformStoreId，并作为 erpStoreCode 传给翱象。
- */
+
 @Component
 public class EleStorePlatformResolver {
 

@@ -32,7 +32,6 @@ public class EleOrderRetryTaskSubmitter {
             return successFailRecordIds;
         }
 
-        log.info("【重试Kafka】开始发送重试消息到Kafka，共{}个订单", tasks.size());
 
         int successCount = 0;
         int failCount = 0;

@@ -23,13 +23,7 @@ import java.util.Map;
 
 import lombok.extern.slf4j.Slf4j;
 
-/**
- * 饿了么订单同步管理接口
- *
- * 提供全部门店并行同步、同步状态查询等接口。
- *
- * @author 优团科技数字化团队
- */
+
 @Slf4j
 @Tag(name = "管理后台 - 饿了么订单同步")
 @RestController
@@ -136,8 +130,7 @@ public class EleOrderSyncController {
                 JSONUtil.parse(syncLog.getReconciliationErrorDetail()) : null);
         result.put("reconciliationError", reconError);
 
-        // 对账数据
-        Map<String, Object> reconciliation = new HashMap<>();
+                Map<String, Object> reconciliation = new HashMap<>();
         reconciliation.put("expectedTotal", syncLog.getExpectedTotal());
         reconciliation.put("actualTotal", syncLog.getActualTotal());
         reconciliation.put("savedTotal", syncLog.getSavedTotal());

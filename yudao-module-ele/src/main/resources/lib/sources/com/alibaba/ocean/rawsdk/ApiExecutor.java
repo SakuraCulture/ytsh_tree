@@ -27,29 +27,14 @@ public final class ApiExecutor<TResult> {
         this.secKey = secKey;
     }
 
-    /**
-     * 处理请求，并获取结果
-     *
-     * @param request
-     * @param <TResult>
-     * @return
-     * @throws IOException
-     */
+    
     public final <TResult> BizResultWrapper<TResult> send(AbstractAPIRequest<TResult> request) throws IOException {
-        //组装param
-        Map<String, Object> parameters = buildHttpParams(request);
-        //获取默认策略
-        RequestPolicy policy = buildHttpPolicy(request);
-        //获取签名
-        buildHttpSignature(parameters, policy);
-        //构造url
-        URL postURL = buildUrl(policy);
-        //发送请求，获取结果
-        logger.info("parameters: " + JSON.toJSONString(parameters) + ", request: " + JSON.toJSONString(request));
-        Response response = doAction(request, parameters, postURL);
-        logger.info("response:" + JSON.toJSONString(response));
-        //处理结果
-        if (response.getException() != null) {
+                Map<String, Object> parameters = buildHttpParams(request);
+                RequestPolicy policy = buildHttpPolicy(request);
+                buildHttpSignature(parameters, policy);
+                URL postURL = buildUrl(policy);
+                        Response response = doAction(request, parameters, postURL);
+                        if (response.getException() != null) {
             Throwable responseException = response.getException();
             throw new RuntimeException(responseException);
         }

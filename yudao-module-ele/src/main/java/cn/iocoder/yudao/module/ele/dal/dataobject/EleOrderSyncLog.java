@@ -40,8 +40,7 @@ public class EleOrderSyncLog {
 
     private Integer totalPulled;
 
-    // ============== 新增: 对账相关字段 ==============
-    private Integer expectedTotal;
+        private Integer expectedTotal;
 
     private Integer actualTotal;
 
@@ -59,8 +58,7 @@ public class EleOrderSyncLog {
 
     private String pageCounts;
 
-    // ============== 新增: 错误信息字段 ==============
-    private String pullErrorCode;
+        private String pullErrorCode;
 
     private String pullErrorDetail;
 
@@ -76,8 +74,7 @@ public class EleOrderSyncLog {
 
     private String compensationInfo;
 
-    // ============== 原有字段 ==============
-    private Integer successCount;
+        private Integer successCount;
 
     private Integer failCount;
 

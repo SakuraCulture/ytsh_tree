@@ -3,9 +3,7 @@ package com.alibaba.ocean.rawsdk.common;
 import java.util.TimeZone;
 
 public class EleConstants {
-    /**
-     * 协议
-     */
+    
     public static final String ELE_PROTOCAL_SEPERATE = "_";
 
     public static final String ELE_PROTOCAL_URL = "/router/rest";
@@ -15,21 +13,15 @@ public class EleConstants {
     public static final String ELE_PROTOCAL_ZONE = "GMT+8";
 
     public static final TimeZone ELE_TIMEZONE = TimeZone.getTimeZone(ELE_PROTOCAL_ZONE);
-    /**
-     * 返回的错误格式
-     */
+    
     public static final String ELE_ERROR_RESPONSE = "body";
     public static final String ELE_ERROR_CODE = "errno";
     public static final String ELE_ERROR_MESSAGE = "error";
-    /**
-     * 正确返回格式
-     */
+    
     public static final String ELE_RESPONSE_SUFFIX = ELE_PROTOCAL_SEPERATE + "response";
     public static final String CONTENT_ENCODING_GZIP = "gzip";
     private static final String regularPattern = "\\.";
-    /**
-     * 公共参数
-     */
+    
     public static String API_NAME = "cmd";
     public static String APPKEY = "source";
     public static String TICKET = "ticket";
@@ -37,9 +29,7 @@ public class EleConstants {
     public static String VERSION = "version";
     public static String RESULT_DATA = "data";
     public static String BODY = "body";
-    /**
-     * yyyy-MM-dd
-     */
+    
     public static String TIMESTAMP = "timestamp";
     public static String SIGNATURE = "sign";
     public static String SECRET = "secret";

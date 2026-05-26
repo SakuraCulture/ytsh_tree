@@ -7,10 +7,7 @@ import org.springframework.stereotype.Component;
 
 import jakarta.annotation.Resource;
 
-/**
- * 订单跟踪定时任务
- * 定时扫描未完结订单，对超时订单进行告警
- */
+
 @Slf4j
 @Component
 public class EleOrderTrackingJob {
@@ -18,9 +15,7 @@ public class EleOrderTrackingJob {
     @Resource
     private EleOrderTrackingService eleOrderTrackingService;
 
-    /**
-     * 每10分钟扫描一次超时订单
-     */
+    
     @Scheduled(cron = "0 0/10 * * * ?")
     public void scanTimeoutOrders() {
         log.info("【定时任务】开始执行订单跟踪扫描任务...");

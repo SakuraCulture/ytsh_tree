@@ -5,6 +5,7 @@ import {
   UploadProgressEvent
 } from 'element-plus/es/components/upload/src/upload'
 import axios, { AxiosProgressEvent } from 'axios'
+import { compressImage } from '@/utils/compressImage'
 
 /**
  * 获得上传 URL
@@ -20,6 +21,13 @@ export const useUpload = (directory?: string) => {
   const isClientUpload = UPLOAD_TYPE.CLIENT === import.meta.env.VITE_UPLOAD_TYPE
   // 重写ElUpload上传方法
   const httpRequest = async (options: UploadRequestOptions) => {
+    if (options.file.type.startsWith('image/')) {
+      try {
+        options.file = await compressImage(options.file)
+      } catch (e) {
+        console.warn('图片压缩失败，使用原文件上传', e)
+      }
+    }
     // 文件上传进度监听
     const uploadProgressHandler = (evt: AxiosProgressEvent) => {
       const upEvt: UploadProgressEvent = Object.assign(evt.event)

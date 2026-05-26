@@ -4,9 +4,7 @@ import java.io.Serializable;
 
 public class APIId implements Serializable {
     public static final int DEFAULT_VERSION = 1;
-    /**
-     *
-     */
+    
     private static final long serialVersionUID = 3310099984731564724L;
     private String namespace;
 

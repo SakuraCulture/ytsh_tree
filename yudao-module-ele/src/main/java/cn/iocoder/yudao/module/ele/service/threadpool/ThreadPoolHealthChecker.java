@@ -54,10 +54,7 @@ public class ThreadPoolHealthChecker {
                         queueSize, queueCapacity);
             }
             
-            // 严重告警：队列积压且线程满载，说明处理能力不足
-            // 条件1: 队列使用率 >= 80% 且 活跃率 >= 90% （两者同时满足）
-            // 条件2: 队列使用率 >= 95% （队列即将溢出）
-            boolean criticalByBoth = queueUsage >= 80 && activePercent >= 90;
+                                                boolean criticalByBoth = queueUsage >= 80 && activePercent >= 90;
             boolean criticalByQueue = queueUsage >= 95;
             
             if (criticalByBoth || criticalByQueue) {

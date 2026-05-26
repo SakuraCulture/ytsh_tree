@@ -36,8 +36,7 @@ public class DefaultPropertyUtils {
                             + GenericsUtil.capitalize(field.getName()));
                     simplePropertyDescriptor.setReadMethod(readMethod);
                 } catch (Exception ex) {
-                    // do nothing if readMethod is not support.
-                }
+                                    }
                 descriptors[i] = simplePropertyDescriptor;
             }
         }

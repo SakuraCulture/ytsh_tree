@@ -102,7 +102,6 @@ public class EleStoreGoodsFullSyncJob {
     }
 
     private void triggerCkSync(long totalStart) {
-        log.info("[商品全量同步定时任务] ========== 开始同步 ClickHouse ==========");
         try {
             Object runner = applicationContext.getBean("storeGoodsWideSyncRunner");
             runner.getClass().getMethod("runFullSync").invoke(runner);

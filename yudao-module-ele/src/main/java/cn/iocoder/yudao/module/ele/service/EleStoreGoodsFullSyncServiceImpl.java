@@ -21,6 +21,7 @@ import cn.iocoder.yudao.module.ele.dal.redis.EleOrderLockService;
 import cn.iocoder.yudao.module.ele.service.executor.EleStoreGoodsFullSyncExecutor;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -53,6 +54,8 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
     private EleStoreGoodsFullSyncExecutor fullSyncExecutor;
     @Resource
     private EleOrderLockService eleOrderLockService;
+    @Resource
+    private ApplicationContext applicationContext;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -71,8 +74,6 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
                     Boolean.TRUE.equals(reqVO.getTestMode()), 1);
             taskMapper.insert(task);
             taskStoreMapper.insert(createCurrentTaskStore(task, merchantCode, erpStoreCode));
-            log.info("【饿了么门店商品全量同步】创建当前门店同步任务: taskId={}, erpStoreCode={}, testMode={}",
-                    task.getId(), erpStoreCode, reqVO.getTestMode());
             submitAndUnlockAfterTransaction(task.getId(), lockKey);
             return task.getId();
         } finally {
@@ -84,14 +85,10 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
     public Boolean createAllOpenStoresFullSync(EleStoreGoodsFullSyncAllOpenReqVO reqVO) {
         long totalStart = System.currentTimeMillis();
         List<StorePlatformRespVO> stores = storeService.getAllPlatformStores(ELE_PLATFORM_ID);
-        log.info("【饿了么门店商品全量同步】查询所有门店完成, 门店数={}, 耗时={}ms",
-                stores.size(), System.currentTimeMillis() - totalStart);
         if (CollUtil.isEmpty(stores)) {
             throw new RuntimeException("没有可同步的饿了么门店");
         }
         Boolean testMode = reqVO != null && Boolean.TRUE.equals(reqVO.getTestMode());
-        log.info("【饿了么门店商品全量同步】提交直接执行, 门店数={}, testMode={}, 耗时={}ms",
-                stores.size(), testMode, System.currentTimeMillis() - totalStart);
         fullSyncExecutor.submitDirectly(stores, testMode);
         return true;
     }
@@ -129,7 +126,20 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
         updateObj.setFinishedAt(cancelledAt);
         taskMapper.updateById(updateObj);
         taskStoreMapper.cancelPendingByTaskId(id, cancelledAt);
-        log.info("【饿了么门店商品全量同步】任务已取消: taskId={}, 原状态={}", id, task.getStatus());
+    }
+
+    @Override
+    public String testSingleStoreSync(String erpStoreCode) {
+        long startTime = System.currentTimeMillis();
+        try {
+            Object runner = applicationContext.getBean("storeGoodsWideSyncRunner");
+            runner.getClass().getMethod("runFullSync").invoke(runner);
+            long duration = System.currentTimeMillis() - startTime;
+            return String.format("CK同步完成, 耗时=%dms (%.1fs)", duration, duration / 1000.0);
+        } catch (Exception e) {
+            log.error("【单店测试】ClickHouse 同步失败", e);
+            return "CK同步失败: " + e.getMessage();
+        }
     }
 
     private EleStoreGoodsFullSyncTaskDO createTask(String scope, String merchantCode, String erpStoreCode,
@@ -191,14 +201,12 @@ public class EleStoreGoodsFullSyncServiceImpl implements EleStoreGoodsFullSyncSe
 
     private void submitAndUnlockAfterTransaction(Long taskId, String lockKey) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            log.info("【饿了么门店商品全量同步】提交异步执行: taskId={}", taskId);
             fullSyncExecutor.submit(taskId);
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                log.info("【饿了么门店商品全量同步】事务提交后提交异步执行: taskId={}", taskId);
                 fullSyncExecutor.submit(taskId);
             }
 

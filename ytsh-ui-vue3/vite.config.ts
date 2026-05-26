@@ -30,11 +30,15 @@ export default ({command, mode}: ConfigEnv): UserConfig => {
             open: env.VITE_OPEN === 'true',
             // 本地跨域代理
             proxy: {
-              ['/admin-api']: {
-                target: env.VITE_BASE_URL,
+              '/infra/ws': {
+                target: env.VITE_PROXY_TARGET_URL || env.VITE_BASE_URL || 'http://localhost:8080',
+                ws: true,
+                changeOrigin: true,
+              },
+              '/admin-api': {
+                target: env.VITE_PROXY_TARGET_URL || env.VITE_BASE_URL || 'http://localhost:8080',
                 ws: false,
                 changeOrigin: true,
-                rewrite: (path) => path.replace(new RegExp(`^/admin-api`), ''),
               },
             },
         },

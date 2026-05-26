@@ -43,23 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * 翱象订单管理接口
- * 1. 订单列表查询（本地数据库）
- * 2. 订单列表查询（远程API）
- * 3. 订单详情查询
- * 4. 订单状态日志查询
- * 5. 订单补偿进度查询
- * 6. 订单补偿提交
- * 7. 订单失败记录查询
- * 8. 订单补偿提交
- * 
- * @description 订单补偿提交接口
- * @return 订单补偿提交结果
- * @author SMK
- * @date 2023-08-10
- * 
- */
+
 
 @Tag(name = "管理后台 - 翱象订单")
 @RestController

@@ -716,16 +716,6 @@ const remainingRouter: AppRouteRecordRaw[] = [
     ]
   },
   {
-    path: '/:pathMatch(.*)*',
-    component: () => import('@/views/Error/404.vue'),
-    name: '',
-    meta: {
-      title: '404',
-      hidden: true,
-      breadcrumb: false
-    }
-  },
-  {
     path: '/iot',
     component: Layout,
     name: 'IOT',

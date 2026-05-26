@@ -9,8 +9,7 @@ public class StoreSyncProgress {
     private String batchId;
     private String platformStoreId;
     private String storeName;
-    private String status; // SYNCING/COMPLETED/FAILED
-
+    private String status; 
     private Map<Integer, Long> apiStatusCounts;
     private Long totalApiCount;
 

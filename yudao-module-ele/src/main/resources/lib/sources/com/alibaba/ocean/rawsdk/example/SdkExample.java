@@ -9,35 +9,27 @@ import com.alibaba.ocean.rawsdk.example.param.CommonBusinessCatResult;
 
 import java.util.UUID;
 
-/**
- *
- */
+
 public class SdkExample {
 
     private static final String SUCCESS_FLAG = "0";
 
     public static void main(String[] args) {
-        // 初始化引擎类
-        String appkey = "填写自己的APP ID";
+                String appkey = "填写自己的APP ID";
         String secKey = "填写自己的APP Secret";
         ApiExecutor apiExecutor = new ApiExecutor(appkey, secKey);
 
-        // 组装业务参数，此处的CommonBusinessCatParam需要替换相应的XXXXParam类
-        CommonBusinessCatParam param = new CommonBusinessCatParam();
+                CommonBusinessCatParam param = new CommonBusinessCatParam();
         param.setTicket(UUID.randomUUID().toString().toUpperCase());
 
         Integer category_id = 166;
-        // 此处的CBCRequestBody需要替换为相应的XXXXBody
-        CBCRequestBody body = new CBCRequestBody();
+                CBCRequestBody body = new CBCRequestBody();
         body.setCategory_id(category_id);
         param.setBody(body);
 
-        /**
-         * 调用接口获取结果
-         */
+        
         try {
-            // 此处的CommonBusinessCatResult需要替换相应的XXXXResult
-            BizResultWrapper<CommonBusinessCatResult> result = apiExecutor.send(param);
+                        BizResultWrapper<CommonBusinessCatResult> result = apiExecutor.send(param);
             System.out.println("Result:" + JSON.toJSONString(result));
             if (null == result || null == result.getBody()) {
                 System.out.println("返回数据中对象为空");

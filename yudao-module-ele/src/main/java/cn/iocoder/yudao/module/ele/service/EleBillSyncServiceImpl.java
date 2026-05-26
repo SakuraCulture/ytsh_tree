@@ -162,8 +162,7 @@ public class EleBillSyncServiceImpl implements EleBillSyncService {
                 req.setMerchantCode(merchantCode);
                 req.setErpStoreCode(platformStoreId);
                 req.setBillDate(billDate);
-                // 不传status，拉取全部状态（未结算+已结算）
-                req.setPageNum(pageNum);
+                                req.setPageNum(pageNum);
                 req.setPageSize(pageSize);
 
                 BillListRespDTO resp = fetchBillPageWithRetry(req, platformStoreId, pageNum, maxRetry);
@@ -309,8 +308,7 @@ public class EleBillSyncServiceImpl implements EleBillSyncService {
             detail.setUpdateTime(billDO.getUpdateTime() != null ? formatTimestamp(billDO.getUpdateTime()) : null);
             details.add(detail);
 
-            // 汇总正向单和代运营业务的结算金额
-            if ("正向单".equals(billDO.getBillTypeDesc()) || "代运营业务".equals(billDO.getBillTypeDesc())) {
+                        if ("正向单".equals(billDO.getBillTypeDesc()) || "代运营业务".equals(billDO.getBillTypeDesc())) {
                 if (billDO.getBillAmount() != null) {
                     totalBillAmount += billDO.getBillAmount();
                 }

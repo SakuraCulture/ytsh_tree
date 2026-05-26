@@ -2,42 +2,26 @@ package cn.iocoder.yudao.module.ele.service;
 
 import java.util.List;
 
-/**
- * 翱象 API 接口级全局限流器。
- *
- * <p>所有应用实例共享同一组 Redis 限流器，并按翱象接口维度分别控制 QPS。</p>
- */
+
 public interface EleApiRateLimiter {
 
     String API_ORDER_LIST = "orderList";
     String API_ORDER_GET = "orderGet";
     String API_SKU_STOCK_INVENTORY_BATCH_QUERY = "skuStockInventoryBatchQuery";
 
-    /**
-     * 获取指定接口的全局调用许可；超过接口 QPS 时阻塞排队等待。
-     *
-     * @param apiName 接口名称，可传 orderList / orderGet
-     */
+    
     void acquirePermit(String apiName);
 
-    /**
-     * 当前实例任意接口是否存在等待获取令牌的请求。
-     */
+    
     boolean hasBacklog();
 
-    /**
-     * 当前实例全部接口正在等待令牌的请求数量。
-     */
+    
     int getLocalWaitingCount();
 
-    /**
-     * 兼容旧状态接口：返回全部接口配置 QPS 之和。
-     */
+    
     long getGlobalQps();
 
-    /**
-     * 获取每个接口的限流状态。
-     */
+    
     List<ApiRateLimitStatus> getApiStatuses();
 
     class ApiRateLimitStatus {

@@ -1,15 +1,14 @@
 import type { App } from 'vue'
-import { CACHE_KEY, useCache } from '@/hooks/web/useCache'
+import { useUserStore } from '@/store/modules/user'
 
 const { t } = useI18n() // 国际化
 
 export function hasRole(app: App<Element>) {
   app.directive('hasRole', (el, binding) => {
-    const { wsCache } = useCache()
     const { value } = binding
     const super_admin = 'super_admin'
-    const userInfo = wsCache.get(CACHE_KEY.USER)
-    const roles = userInfo?.roles || []
+    const userStore = useUserStore()
+    const roles = userStore.roles
 
     if (value && value instanceof Array && value.length > 0) {
       const roleFlag = value

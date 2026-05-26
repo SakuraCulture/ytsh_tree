@@ -16,13 +16,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 
-/**
- * 饿了么订单线程池状态监控接口
- *
- * 提供同步、补偿、重试三种线程池的状态监控，以及重试队列信息。
- *
- * @author 优团科技数字化团队
- */
+
 @Tag(name = "管理后台 - 饿了么订单线程池监控")
 @RestController
 @RequestMapping("/ele/order/pool")

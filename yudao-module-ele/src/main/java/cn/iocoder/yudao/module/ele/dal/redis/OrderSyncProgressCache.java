@@ -22,12 +22,8 @@ public class OrderSyncProgressCache {
 
     private static final String PROGRESS_KEY_PREFIX = "order:sync:progress:";
     private static final String BATCH_KEY_PREFIX = "order:sync:batch:";
-    private static final long TEMP_PROTECT_SECONDS = 600; // 10分钟（临时保护）
-    private static final long COMPLETED_EXPIRE_SECONDS = 60; // 完成后过期时间
-
-    /**
-     * 更新门店同步进度（同步进行中）
-     */
+    private static final long TEMP_PROTECT_SECONDS = 600;     private static final long COMPLETED_EXPIRE_SECONDS = 60; 
+    
     public void updateStoreProgress(String batchId, String platformStoreId,
                                      StoreSyncProgress progress) {
         try {
@@ -43,9 +39,7 @@ public class OrderSyncProgressCache {
         }
     }
 
-    /**
-     * 标记门店同步完成并缩短Redis key过期时间
-     */
+    
     public void markStoreCompleted(String batchId, String platformStoreId) {
         try {
             String key = PROGRESS_KEY_PREFIX + batchId + ":" + platformStoreId;
@@ -63,9 +57,7 @@ public class OrderSyncProgressCache {
         }
     }
 
-    /**
-     * 强制删除门店进度key（立即删除）
-     */
+    
     public void removeStoreProgress(String batchId, String platformStoreId) {
         try {
             String key = PROGRESS_KEY_PREFIX + batchId + ":" + platformStoreId;
@@ -83,9 +75,7 @@ public class OrderSyncProgressCache {
         }
     }
 
-    /**
-     * 获取门店同步进度
-     */
+    
     public StoreSyncProgress getStoreProgress(String batchId, String platformStoreId) {
         try {
             String key = PROGRESS_KEY_PREFIX + batchId + ":" + platformStoreId;
@@ -100,9 +90,7 @@ public class OrderSyncProgressCache {
         }
     }
 
-    /**
-     * 获取批次下所有门店进度
-     */
+    
     public List<StoreSyncProgress> getBatchProgress(String batchId) {
         try {
             String storesKey = BATCH_KEY_PREFIX + batchId + ":stores";
@@ -125,9 +113,7 @@ public class OrderSyncProgressCache {
         }
     }
 
-    /**
-     * 清理批次进度数据（立即删除所有相关key）
-     */
+    
     public void cleanBatchProgress(String batchId) {
         try {
             String storesKey = BATCH_KEY_PREFIX + batchId + ":stores";

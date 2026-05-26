@@ -253,9 +253,17 @@ service.interceptors.response.use(
   }
 )
 
+const refreshTokenApi = axios.create({
+  baseURL: base_url,
+  timeout: request_timeout
+})
 const refreshToken = async () => {
-  axios.defaults.headers.common['tenant-id'] = getTenantId()
-  return await axios.post(base_url + '/system/auth/refresh-token?refreshToken=' + getRefreshToken())
+  const tenantId = getTenantId()
+  return await refreshTokenApi.post(
+    '/system/auth/refresh-token?refreshToken=' + getRefreshToken(),
+    null,
+    { headers: tenantId ? { 'tenant-id': tenantId } : {} }
+  )
 }
 const handleAuthorized = () => {
   const { t } = useI18n()

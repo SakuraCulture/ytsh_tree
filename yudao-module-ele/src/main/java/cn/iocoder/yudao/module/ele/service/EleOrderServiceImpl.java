@@ -131,9 +131,7 @@ public class EleOrderServiceImpl implements EleOrderService {
     private static final long[] DEFAULT_COMPENSATION_DELAYS_SECONDS = { 10, 30, 60 };
     private static final double DEFAULT_SEVERE_DISCREPANCY_THRESHOLD = 20.0;
 
-    /**
-     * 拉取结果类，携带订单列表和总数
-     */
+    
     private static class PullResult {
         private final List<OrderListRespDTO.OrderDetail> orders;
         private final long totalCount;
@@ -186,9 +184,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    /**
-     * 保存结果类，携带实际落库数量和同步时间
-     */
+    
     private static class SaveResult {
         private final long savedCount;
         private final Long maxCreateTime;
@@ -407,10 +403,6 @@ public class EleOrderServiceImpl implements EleOrderService {
         param.setEncrypt("aes");
         param.setBody(body);
 
-        log.info(
-                "【翱象订单列表请求】platformStoreId={}, merchantCode={}, erpStoreCode={}, status={}, startTime={}, endTime={}, pageSize={}, scrollId={}",
-                platformStoreId, merchantCode, erpStoreCode, req.getStatus(), startTime, endTime,
-                req.getPageSize() != null ? req.getPageSize() : 20, req.getScrollId());
 
         eleApiRateLimiter.acquirePermit(EleApiRateLimiter.API_ORDER_LIST);
         try {
@@ -420,14 +412,8 @@ public class EleOrderServiceImpl implements EleOrderService {
 
             int orderCount = listResult != null && listResult.getOrderList() != null ? listResult.getOrderList().size()
                     : 0;
-            log.info(
-                    "【翱象订单列表响应】platformStoreId={}, merchantCode={}, erpStoreCode={}, status={}, orderCount={}, scrollId={}",
-                    platformStoreId, merchantCode, erpStoreCode, req.getStatus(), orderCount,
-                    listResult == null ? null : listResult.getScrollId());
 
             if (listResult != null && CollUtil.isNotEmpty(listResult.getOrderList())) {
-                log.info("【翱象API】merchantCode={}, erpStoreCode={}, 查找到{}条订单", merchantCode, erpStoreCode,
-                        listResult.getOrderList().size());
                 for (OrderListRespDTO.OrderDetail order : listResult.getOrderList()) {
                     log.debug("【翱象API】订单完整信息: orderId={}, channelOrderId={}, status={}, deliveryStatus={}, " +
                             "totalFee={}, payFee={}, discountFee={}, deliveryFee={}, packageFee={}, " +
@@ -442,7 +428,6 @@ public class EleOrderServiceImpl implements EleOrderService {
                             order.getCreateTime(), order.getPayTime());
                 }
             } else {
-                log.info("【翱象API】merchantCode={}, erpStoreCode={}, 未查到订单", merchantCode, erpStoreCode);
             }
 
             try {
@@ -471,8 +456,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         return local != null ? local : getOrderDetailRemote(platformStoreId, merchantCode, erpStoreCode, orderId);
     }
 
-    // @Scheduled(cron = "0 */60 * * * ?")
-    public void syncOrdersHourly() {
+        public void syncOrdersHourly() {
         runSyncCycle(null, null);
     }
 
@@ -535,8 +519,7 @@ public class EleOrderServiceImpl implements EleOrderService {
 
             log.info("【定时扫描】发现{}条待重试记录，准备去重提交", pendingRecords.size());
 
-            // 去重: 尝试将状态更新为RETRYING，失败则跳过(已被其他路径处理)
-            List<EleOrderFailRecord> dedupedRecords = new ArrayList<>();
+                        List<EleOrderFailRecord> dedupedRecords = new ArrayList<>();
             for (EleOrderFailRecord record : pendingRecords) {
                 try {
                     EleOrderFailRecord updatedRecord = new EleOrderFailRecord();
@@ -678,12 +661,9 @@ public class EleOrderServiceImpl implements EleOrderService {
         String platformStoreId = StrUtil.trim(store.getPlatformStoreId());
         String merchantCode = StrUtil.trim(store.getSettlementAccount());
 
-        // 如果门店信息中没有merchantCode，从API配置表读取
-        if (StrUtil.isBlank(merchantCode)) {
+                if (StrUtil.isBlank(merchantCode)) {
             EleApiConfig config = getApiConfig();
             merchantCode = StrUtil.trim(config.getMerchantCode());
-            log.info("【门店同步】门店信息中merchantCode为空，从API配置表读取，platformStoreId={}, merchantCode={}", platformStoreId,
-                    merchantCode);
         }
 
         String erpStoreCode = platformStoreId;
@@ -703,7 +683,6 @@ public class EleOrderServiceImpl implements EleOrderService {
                 if (startTime > 100000000000L) {
                     startTime = startTime / 1000;
                 }
-                log.info("【增量同步】门店{}，从上次同步时间继续，startTime={}", platformStoreId, startTime);
             }
             if (startTime == null) {
                 Calendar calendar = Calendar.getInstance();
@@ -713,7 +692,6 @@ public class EleOrderServiceImpl implements EleOrderService {
                 calendar.set(Calendar.SECOND, 0);
                 calendar.set(Calendar.MILLISECOND, 0);
                 startTime = calendar.getTimeInMillis() / 1000;
-                log.info("【首次同步】门店{}无同步记录，从本月1日0点起拉取订单，startTime={}", platformStoreId, startTime);
             }
         }
 
@@ -729,18 +707,13 @@ public class EleOrderServiceImpl implements EleOrderService {
         long originalEndTime = endTime;
         startTime = startTime - TIME_WINDOW_TOLERANCE_MINUTES * 60;
         endTime = endTime + TIME_WINDOW_TOLERANCE_MINUTES * 60;
-        log.info("【时间窗口容差】门店{}，原始时间范围[{}-{}]，容差±{}分钟，扩展后[{}-{}]",
-                platformStoreId, originalStartTime, originalEndTime, TIME_WINDOW_TOLERANCE_MINUTES, startTime, endTime);
 
         try {
-            // 方案v1.6：不再单独调用API获取总数，直接从拉取订单的结果中获取total
-            List<OrderListRespDTO.OrderDetail> allOrders;
+                        List<OrderListRespDTO.OrderDetail> allOrders;
             long totalCount;
             long apiRawTotal;
 
-            // 判断是否需要按时间窗口拆分拉取
-            // 首次试探性拉取1页，根据返回的total决定后续策略
-            PullResult firstPull = pullAllOrders(platformStoreId, merchantCode, erpStoreCode, startTime, endTime);
+                                    PullResult firstPull = pullAllOrders(platformStoreId, merchantCode, erpStoreCode, startTime, endTime);
 
             if (!firstPull.isSuccess()) {
                 log.error("【拉取失败】门店{}，错误: {}，标记同步失败，等待重试",
@@ -768,13 +741,9 @@ public class EleOrderServiceImpl implements EleOrderService {
             totalCount = firstPull.getTotalCount();
 
             if (totalCount >= windowMinCount) {
-                // 数据量较大，按时间窗口拆分拉取
-                int windowCount = calculateWindowCount(totalCount);
-                log.info("【动态窗口】门店{}总数据量{}条，拆分成{}个窗口，API原始总数={}", platformStoreId, totalCount, windowCount,
-                        apiRawTotal);
+                                int windowCount = calculateWindowCount(totalCount);
 
                 if (windowCount > 1) {
-                    log.info("【动态窗口】门店{}数据量>=10条，启动{}个窗口并行拉取", platformStoreId, windowCount);
                     PullResult windowPullResult = pullAllOrdersWithWindows(platformStoreId, merchantCode, erpStoreCode,
                             startTime, endTime,
                             windowCount);
@@ -790,14 +759,10 @@ public class EleOrderServiceImpl implements EleOrderService {
                         totalCount = windowPullResult.getTotalCount();
                     }
                 } else {
-                    // 不拆分，使用首次拉取的结果
-                    log.info("【动态窗口】门店{}数据量<{}条，不拆分，直接串行拉取", platformStoreId, windowMinCount);
-                    allOrders = firstPull.getOrders();
+                                        allOrders = firstPull.getOrders();
                 }
             } else {
-                // 数据量较小，直接使用首次拉取的结果
-                log.info("【动态窗口】门店{}数据量较少，使用首次拉取结果", platformStoreId);
-                allOrders = firstPull.getOrders();
+                                allOrders = firstPull.getOrders();
             }
 
             List<FailedOrderInfo> failedOrders = Collections.synchronizedList(new ArrayList<>());
@@ -822,12 +787,8 @@ public class EleOrderServiceImpl implements EleOrderService {
             long dbSavedTotal = countSavedOrdersFromPulledOrders(allOrders);
             LocalDateTime syncEndTime = LocalDateTime.now();
 
-            log.info("【落库统计】门店{}，API拉取{}条，尝试落库{}条，成功处理{}条，实际落库存在{}条，失败{}条",
-                    platformStoreId, allOrders.size(), totalCountFromSave, savedCount, dbSavedTotal, failedCount);
 
-            // ============== 对账流程 ==============
-            // 方案v1.2: 传入API原始总数、全状态去重拉取数、实际落库存在数，进行三组对比
-            long pulledDistinctTotal = countDistinctOrderIds(allOrders);
+                                    long pulledDistinctTotal = countDistinctOrderIds(allOrders);
             EleOrderReconciliationService.ReconciliationResult reconResult = reconciliationService.reconcile(
                     platformStoreId,
                     apiRawTotal,
@@ -836,9 +797,6 @@ public class EleOrderServiceImpl implements EleOrderService {
                     syncBatchId,
                     null);
 
-            log.info("【对账结果】门店{}，API原始总数={}，拉取={}，落库={}，差异率{}%，完整性级别{}",
-                    platformStoreId, reconResult.getApiRawTotal(), reconResult.getActualTotal(),
-                    reconResult.getSavedTotal(), reconResult.getDiscrepancyRate(), reconResult.getDataIntegrity());
 
             if (highDiscrepancyWindowRetryEnabled && reconResult.getDiscrepancyRate() > severeDiscrepancyThreshold) {
                 PullResult retryPullResult = retryHighDiscrepancyWithWindows(platformStoreId, merchantCode,
@@ -890,8 +848,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 }
             }
 
-            // 为Kafka消息做去重，保留每个订单ID最新的一条
-            Map<String, OrderListRespDTO.OrderDetail> latestOrdersMap = new LinkedHashMap<>();
+                        Map<String, OrderListRespDTO.OrderDetail> latestOrdersMap = new LinkedHashMap<>();
             for (OrderListRespDTO.OrderDetail order : allOrders) {
                 if (order.getStatus() != null && order.getOrderId() != null) {
                     latestOrdersMap.put(order.getOrderId(), order);
@@ -902,8 +859,7 @@ public class EleOrderServiceImpl implements EleOrderService {
             boolean allCompensationSuccess = compResult == null || compResult.isAllSuccess();
             int compensationFailCount = compResult != null ? compResult.getFailedCount() : 0;
 
-            // ============== 严重差异保护 ==============
-            if (reconResult.getDiscrepancyRate() > severeDiscrepancyThreshold) {
+                        if (reconResult.getDiscrepancyRate() > severeDiscrepancyThreshold) {
                 log.error("【对账严重告警】门店{}数据严重不完整，差异率{}%，阈值{}%，已中止同步，不保存数据库",
                         platformStoreId, reconResult.getDiscrepancyRate(), severeDiscrepancyThreshold);
 
@@ -944,8 +900,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 return;
             }
 
-            // ============== 补偿机制触发 ==============
-            Map<String, Object> compInfo = new HashMap<>();
+                        Map<String, Object> compInfo = new HashMap<>();
             if (reconResult.getDiscrepancyRate() > 0) {
                 compInfo = executeCompensationWithRetry(platformStoreId, merchantCode, erpStoreCode,
                         startTime, endTime, reconResult, null, syncBatchId);
@@ -953,8 +908,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 reconResult.setRetryCount((Integer) compInfo.getOrDefault("actualRetries", 0));
             }
 
-            // ============== 保存同步日志 ==============
-            EleOrderSyncLog existingLog = eleOrderSyncLogMapper.selectByStoreId(platformStoreId);
+                        EleOrderSyncLog existingLog = eleOrderSyncLogMapper.selectByStoreId(platformStoreId);
             if (existingLog != null) {
                 existingLog.setSyncBatchId(syncBatchId);
                 existingLog.setMerchantCode(merchantCode);
@@ -1053,8 +1007,6 @@ public class EleOrderServiceImpl implements EleOrderService {
                 eleOrderSyncLogMapper.insert(syncLog);
             }
 
-            log.info("【syncTime推进】门店{}，startTime={}，endTime={}，successProcessed={}，dbSavedTotal={}，finalSyncTime={}",
-                    platformStoreId, startTime, endTime, savedCount, dbSavedTotal, finalSyncTime);
 
             shutdownStateManager.addOrderCounts(allOrders.size(), (int) dbSavedTotal, failedCount);
 
@@ -1360,10 +1312,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         return successCount.get();
     }
 
-    /**
-     * 拉取门店全部订单（翱象API不传status可获取所有状态的订单）
-     * 方案v1.6：从首次API调用中获取total，不再单独调用获取总数
-     */
+    
     private PullResult pullAllOrders(String platformStoreId, String merchantCode,
             String erpStoreCode, Long startTime, Long endTime) {
         List<OrderListRespDTO.OrderDetail> allOrders = new ArrayList<>();
@@ -1372,12 +1321,10 @@ public class EleOrderServiceImpl implements EleOrderService {
         int pageCount = 0;
         boolean pullSuccess = true;
         String errorMessage = null;
-        Long totalCount = null; // 从首次API调用获取
-        String endReason = null;
+        Long totalCount = null;         String endReason = null;
         int lastPageSize = 0;
         String lastScrollId = null;
 
-        log.info("【分页拉取】门店{}，开始拉取全部订单（不传status）", platformStoreId);
 
         while (true) {
             pageCount++;
@@ -1407,8 +1354,7 @@ public class EleOrderServiceImpl implements EleOrderService {
             req.setErpStoreCode(erpStoreCode);
             req.setStartTime(startTime);
             req.setEndTime(endTime);
-            // 不传status参数，翱象API返回所有状态的订单
-            req.setPageSize(pageSize);
+                        req.setPageSize(pageSize);
             req.setScrollId(scrollId);
 
             OrderListRespDTO pageResult = null;
@@ -1438,10 +1384,8 @@ public class EleOrderServiceImpl implements EleOrderService {
                 break;
             }
 
-            // 从第一页获取totalCount
-            if (totalCount == null && pageResult.getTotal() != null) {
+                        if (totalCount == null && pageResult.getTotal() != null) {
                 totalCount = pageResult.getTotal();
-                log.info("【分页拉取】门店{}从第一页获取到API返回的总数={}", platformStoreId, totalCount);
             }
 
             long pageElapsed = System.currentTimeMillis() - pageStartTime;
@@ -1463,13 +1407,7 @@ public class EleOrderServiceImpl implements EleOrderService {
 
             int filteredCount = currentPageSize - validOrders.size();
             if (filteredCount > 0) {
-                log.info("【分页拉取】门店{}，第{}页，本页{}条（过滤{}条无效订单），累计{}条，耗时{}ms",
-                        platformStoreId, pageCount, currentPageSize, filteredCount,
-                        allOrders.size() + validOrders.size(), pageElapsed);
             } else {
-                log.info("【分页拉取】门店{}，第{}页，本页{}条，累计{}条，耗时{}ms",
-                        platformStoreId, pageCount, currentPageSize, allOrders.size() + validOrders.size(),
-                        pageElapsed);
             }
 
             allOrders.addAll(validOrders);
@@ -1479,9 +1417,6 @@ public class EleOrderServiceImpl implements EleOrderService {
 
             if (scrollId == null || scrollId.isEmpty() || currentPageSize < pageSize) {
                 endReason = (scrollId == null || scrollId.isEmpty()) ? "SCROLL_ID_EMPTY" : "LAST_PAGE_NOT_FULL";
-                log.info("【分页拉取】门店{}拉取完成，共{}页{}条，终止条件: endReason={}, scrollId={}, pageSize={}",
-                        platformStoreId, pageCount, allOrders.size(), endReason, scrollId,
-                        currentPageSize < pageSize ? currentPageSize + "<" + pageSize : "complete");
                 break;
             }
         }
@@ -1494,9 +1429,6 @@ public class EleOrderServiceImpl implements EleOrderService {
         List<OrderListRespDTO.OrderDetail> uniqueOrders = deduplicateOrdersByOrderId(allOrders);
         long distinctOrderCount = uniqueOrders.size();
 
-        log.info("【分页拉取】门店{}完成，订单{}条（去重{}条，全状态），API原始总数={}，终止原因={}，最后页条数={}，最后scrollId={}",
-                platformStoreId, allOrders.size(), distinctOrderCount, totalCount, endReason, lastPageSize,
-                lastScrollId);
 
         if (totalCount != null && totalCount > distinctOrderCount &&
                 ("SCROLL_ID_EMPTY".equals(endReason) || "LAST_PAGE_NOT_FULL".equals(endReason)
@@ -1507,13 +1439,10 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         if (allOrders.size() > MAX_TOTAL_ORDERS) {
-            log.error("【安全阀】门店{}最终订单数{}超过限制{}条", platformStoreId, allOrders.size(), MAX_TOTAL_ORDERS);
         }
 
         long apiRawTotal = (totalCount != null) ? totalCount : distinctOrderCount;
 
-        log.info("【拉取订单】platformStoreId={}, 原始订单{}条，去重订单{}条（全状态），API原始总数={}",
-                platformStoreId, allOrders.size(), distinctOrderCount, apiRawTotal);
 
         return new PullResult(uniqueOrders, apiRawTotal);
     }
@@ -1534,7 +1463,6 @@ public class EleOrderServiceImpl implements EleOrderService {
             }
         }
         if (logged) {
-            log.info("【翱象背压】scene={} 排队清空，恢复后续请求生产", scene);
         }
     }
 
@@ -1746,7 +1674,6 @@ public class EleOrderServiceImpl implements EleOrderService {
         int totalCount = allValidOrders.size();
         int threadCount = calculateWriteThreadCount(totalCount);
 
-        log.info("【订单保存】开始保存{}个订单（全状态），动态分配{}线程", totalCount, threadCount);
 
         List<FailedOrderInfo> failedOrders = new ArrayList<>();
         SaveResult saveResult;
@@ -1761,9 +1688,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         return saveResult != null ? saveResult.getMaxCreateTime() : null;
     }
 
-    /**
-     * 根据订单量计算写入线程数
-     */
+    
     int calculateWriteThreadCount(int orderCount) {
         if (orderCount < 100)
             return 1;
@@ -1774,10 +1699,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         return 4;
     }
 
-    /**
-     * 单线程保存订单（小数据量场景）
-     * 失败时：记录到内存列表+提交Kafka重试，不写DB
-     */
+    
     private SaveResult saveOrdersSingleThread(List<OrderListRespDTO.OrderDetail> orders, String platformStoreId,
             String merchantCode, String erpStoreCode, List<FailedOrderInfo> failedOrders) {
         int successCount = 0;
@@ -1835,10 +1757,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         return new SaveResult(successCount, maxCreateTime, minFailedCreateTime, orders.size(), failedOrderIds.size());
     }
 
-    /**
-     * 多线程保存订单（大数据量场景）
-     * 失败时：记录到内存列表+提交Kafka重试，不写DB
-     */
+    
     private SaveResult saveOrdersMultiThread(List<OrderListRespDTO.OrderDetail> orders, String platformStoreId,
             String merchantCode, String erpStoreCode, int threadCount, List<FailedOrderInfo> failedOrders) {
         int totalOrders = orders.size();
@@ -1925,9 +1844,7 @@ public class EleOrderServiceImpl implements EleOrderService {
                 orders.size(), allFailedOrderIds.size());
     }
 
-    /**
-     * 计算 syncTime 推进策略
-     */
+    
     private Long calculateSyncTime(Long maxCreateTime, Long minFailedCreateTime, int successCount, int totalCount) {
         double successRate = (double) successCount / totalCount;
 
@@ -1941,9 +1858,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    /**
-     * 原子操作的Long引用类
-     */
+    
     private static class LongAdderAtomicReference {
         private volatile Long value;
 
@@ -1972,14 +1887,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    /**
-     * UPSERT单个订单（插入或更新）
-     * 
-     * 优势:
-     * 1. 一次SQL完成插入或更新，不需要先查询
-     * 2. 基于唯一索引保证幂等性
-     * 3. 天然支持并发，不需要分布式锁
-     */
+    
     @DataPermission(enable = false)
     void upsertOrder(OrderListRespDTO.OrderDetail orderDetail, String platformStoreId,
             String merchantCode, String erpStoreCode) {
@@ -1990,29 +1898,21 @@ public class EleOrderServiceImpl implements EleOrderService {
             throw new EleOrderSyncException("【订单同步】应用正在关闭，跳过订单处理，orderId=" + orderId);
         }
 
-        // 1. 构建订单DO
-        OrderDO orderDO = buildOrderDO(orderDetail, erpStoreCode);
+                OrderDO orderDO = buildOrderDO(orderDetail, erpStoreCode);
 
-        // 2. UPSERT订单主表（INSERT ... ON DUPLICATE KEY UPDATE）
-        orderMapper.upsertOrder(orderDO);
+                orderMapper.upsertOrder(orderDO);
 
-        // 3. UPSERT平台信息
-        upsertPlatform(orderDetail);
+                upsertPlatform(orderDetail);
 
-        // 4. status为-2的订单，仅保存order_id和status，跳过子订单和优惠信息
-        if (orderDetail.getStatus() != null && orderDetail.getStatus() == -2) {
-            log.info("【跳过详情】订单status为-2，仅保存order_id和status，orderId={}", orderId);
+                if (orderDetail.getStatus() != null && orderDetail.getStatus() == -2) {
             return;
         }
 
-        // 5. 保存子订单和优惠信息
-        upsertItems(orderDetail, erpStoreCode);
+                upsertItems(orderDetail, erpStoreCode);
         upsertDiscounts(orderDetail);
     }
 
-    /**
-     * 更新同步日志（包含失败详情）
-     */
+    
     private void updateSyncLogWithFailedDetails(String platformStoreId, String merchantCode, String erpStoreCode,
             int totalCount, int successCount, List<String> failedOrderIds,
             Long syncTime, Integer threadCount) {
@@ -2633,7 +2533,6 @@ public class EleOrderServiceImpl implements EleOrderService {
             return;
         }
 
-        log.info("【重试Kafka】门店{}同步完成，提交{}个订单到Kafka进行异步重试", platformStoreId, pendingRecords.size());
 
         List<EleOrderRetryTaskSubmitter.RetryTask> tasks = new ArrayList<>();
         for (EleOrderFailRecord record : pendingRecords) {
@@ -2724,14 +2623,11 @@ public class EleOrderServiceImpl implements EleOrderService {
         if (endTime != null && endTime > 100000000000L) {
             endTime = endTime / 1000;
         }
-        log.info("【手动全量同步】开始手动触发全部门店订单同步，startTime={}, endTime={}", startTime, endTime);
         runSyncCycle(startTime, endTime);
-        log.info("【手动全量同步】全部门店订单同步任务已提交完成");
     }
 
     @Override
     public java.util.Map<String, Object> syncAllStoresWithResult() {
-        log.info("【手动全量同步-详细】开始手动触发全部门店订单同步...");
         if (!shutdownStateManager.startBatchSync()) {
             log.warn("【手动全量同步-详细】已有批次在执行或应用正在关闭，跳过本次同步");
             return java.util.Map.of(
@@ -2911,17 +2807,12 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         if (candidates.isEmpty() || maxPerPage == 0) {
-            log.info("【详情补全】门店{}本页无需补全，候选{}条，状态过滤跳过{}条，maxPerPage={}",
-                    req.getPlatformStoreId(), candidates.size(), skippedByStatus, maxPerPage);
             return;
         }
 
         int submitCount = Math.min(candidates.size(), maxPerPage);
         int skippedByLimit = candidates.size() - submitCount;
         List<DetailEnrichTask> submittedTasks = candidates.subList(0, submitCount);
-        log.info("【详情补全】门店{}本页开始，候选{}条，提交{}条，状态过滤跳过{}条，数量限制跳过{}条，并发{}，预算{}秒",
-                req.getPlatformStoreId(), candidates.size(), submitCount, skippedByStatus, skippedByLimit,
-                concurrency, detailEnrichTimeoutSeconds);
 
         List<Future<DetailEnrichResult>> futures = new ArrayList<>();
         Semaphore detailSemaphore = new Semaphore(concurrency);
@@ -2980,9 +2871,6 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
 
         long enrichElapsed = System.currentTimeMillis() - enrichStart;
-        log.info("【详情补全完成】门店{}本页完成，候选{}条，提交{}条，成功{}条，失败{}条，超时{}条，状态跳过{}条，限量跳过{}条，耗时{}ms",
-                req.getPlatformStoreId(), candidates.size(), submitCount, successCount, failedCount, timeoutCount,
-                skippedByStatus, skippedByLimit, enrichElapsed);
     }
 
     private DetailEnrichResult enrichSingleOrderDetail(DetailEnrichTask task, OrderListReqDTO req,
@@ -3283,8 +3171,6 @@ public class EleOrderServiceImpl implements EleOrderService {
     private OrderDetailRespDTO getOrderDetailRemote(String platformStoreId, String merchantCode, String erpStoreCode,
             String orderId) {
         EleApiConfig config = getApiConfig();
-        log.info("【调用翱象订单详情接口】orderId={}, platformStoreId={}, merchantCode={}, erpStoreCode={}, config.appId={}",
-                orderId, platformStoreId, merchantCode, erpStoreCode, config.getAppId());
 
         if (orderId == null || orderId.isEmpty()) {
             throw new RuntimeException("orderId不能为空");
@@ -3303,8 +3189,6 @@ public class EleOrderServiceImpl implements EleOrderService {
                     if (StrUtil.isBlank(finalErpStoreCode)) {
                         finalErpStoreCode = platformStoreId;
                     }
-                    log.info("【门店信息查询成功】platformStoreId={}, settlementAccount={}, finalMerchantCode={}, finalErpStoreCode={}",
-                            platformStoreId, platformInfo.getSettlementAccount(), finalMerchantCode, finalErpStoreCode);
                 } else {
                     log.warn("【门店信息查询失败】未找到门店信息: platformStoreId={}, 使用传入参数", platformStoreId);
                 }
@@ -3338,7 +3222,6 @@ public class EleOrderServiceImpl implements EleOrderService {
         param.setEncrypt("aes");
         param.setBody(body);
 
-        log.info("【请求参数】orderId={}, merchantCode={}, erpStoreCode={}", orderId, finalMerchantCode, finalErpStoreCode);
 
         eleApiRateLimiter.acquirePermit(EleApiRateLimiter.API_ORDER_GET);
         try {
@@ -3418,8 +3301,7 @@ public class EleOrderServiceImpl implements EleOrderService {
             throw new IllegalArgumentException("指定时间点不能为空");
         }
 
-        // 查询所有 FAILED 状态的失败记录（不限时间范围）
-        List<EleOrderFailRecord> records = eleOrderFailRecordMapper.selectList(
+                List<EleOrderFailRecord> records = eleOrderFailRecordMapper.selectList(
                 new LambdaQueryWrapperX<EleOrderFailRecord>()
                         .eq(EleOrderFailRecord::getProcessStatus, "FAILED")
                         .orderByAsc(EleOrderFailRecord::getCreateTime));
@@ -3445,7 +3327,6 @@ public class EleOrderServiceImpl implements EleOrderService {
             });
         }
 
-        log.info("【指定时间点重试】全部 {} 条重试任务已提交到线程池并发执行中", records.size());
         return successCount.get();
     }
 
@@ -3458,23 +3339,15 @@ public class EleOrderServiceImpl implements EleOrderService {
         return config;
     }
 
-    /**
-     * 定时检测中间态订单
-     * 
-     * 检测规则:
-     * 1. 失败记录表: status='FAILED' 且 create_time < 24小时前
-     * 2. 同步日志表: partial_failed=1 且 create_time < 1小时前(未补偿)
-     */
+    
     @Scheduled(cron = "0 0 * * * ?")
     public void detectIntermediateOrders() {
-        log.info("【中间态检测】开始检测中间态订单...");
 
         int fixedCount = 0;
         LocalDateTime oneDayAgo = LocalDateTime.now().minusDays(1);
         Long oneDayAgoTimestamp = oneDayAgo.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() / 1000;
 
-        // 检测1: 失败超过24小时的FAILED记录
-        List<EleOrderFailRecord> failedRecords = eleOrderFailRecordMapper.selectList(
+                List<EleOrderFailRecord> failedRecords = eleOrderFailRecordMapper.selectList(
                 new LambdaQueryWrapperX<EleOrderFailRecord>()
                         .eq(EleOrderFailRecord::getProcessStatus, "FAILED")
                         .lt(EleOrderFailRecord::getCreateTime, oneDayAgoTimestamp));
@@ -3489,8 +3362,7 @@ public class EleOrderServiceImpl implements EleOrderService {
             }
         }
 
-        // 检测2: 部分失败超过1小时的同步日志（未补偿）
-        LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
+                LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
         List<EleOrderSyncLog> partialLogs = eleOrderSyncLogMapper.selectList(
                 new LambdaQueryWrapperX<EleOrderSyncLog>()
                         .eq(EleOrderSyncLog::getPartialFailed, 1)
@@ -3508,12 +3380,9 @@ public class EleOrderServiceImpl implements EleOrderService {
             }
         }
 
-        log.info("【中间态检测】检测完成，共修复{}个中间态订单", fixedCount);
     }
 
-    /**
-     * 重试长期失败的订单
-     */
+    
     private void retryFailedOrder(EleOrderFailRecord record) {
         try {
             record.setRetryCount(record.getRetryCount() + 1);
@@ -3545,9 +3414,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    /**
-     * 补偿部分失败的同步
-     */
+    
     private void compensatePartialFailed(EleOrderSyncLog logEntry) {
         if (StrUtil.isBlank(logEntry.getFailedOrderIds())) {
             return;
@@ -3559,10 +3426,8 @@ public class EleOrderServiceImpl implements EleOrderService {
                     new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {
                     });
 
-            log.info("【补偿任务】门店{}, 补偿{}个失败订单", logEntry.getPlatformStoreId(), failedOrderIds.size());
 
-            // 逐个重试失败订单
-            for (String orderId : failedOrderIds) {
+                        for (String orderId : failedOrderIds) {
                 try {
                     EleOrderFailRecord record = eleOrderFailRecordMapper.selectOne(
                             new LambdaQueryWrapperX<EleOrderFailRecord>()
@@ -3578,15 +3443,12 @@ public class EleOrderServiceImpl implements EleOrderService {
                 }
             }
 
-            log.info("【补偿任务】门店{}补偿完成", logEntry.getPlatformStoreId());
         } catch (Exception e) {
             log.error("【补偿任务】解析失败订单列表失败，syncLogId={}", logEntry.getId());
         }
     }
 
-    /**
-     * 保存订单并跟踪失败订单（新增方法，替代原有saveOrUpdateBatch）
-     */
+    
     private SaveResult saveOrUpdateBatchWithFailureTracking(List<OrderListRespDTO.OrderDetail> orders,
             String platformStoreId,
             String merchantCode, String erpStoreCode, List<FailedOrderInfo> failedOrders) {
@@ -3604,7 +3466,6 @@ public class EleOrderServiceImpl implements EleOrderService {
         int totalCount = validOrders.size();
         int threadCount = calculateWriteThreadCount(totalCount);
 
-        log.info("【订单保存】开始保存{}个去重订单（入参原始{}条，全状态），动态分配{}线程", totalCount, orders.size(), threadCount);
 
         if (threadCount <= 1 || totalCount <= 50) {
             return saveOrdersSingleThread(validOrders, platformStoreId, merchantCode, erpStoreCode, failedOrders);
@@ -3614,17 +3475,13 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    /**
-     * 执行补偿任务（在订单拉取线程结束后调用）
-     */
+    
     private CompensationResult executeCompensationTasks(List<FailedOrderInfo> failedOrders, String platformStoreId,
             String merchantCode, String erpStoreCode) {
         if (failedOrders.isEmpty()) {
-            log.info("【补偿任务】门店{}无失败订单，跳过补偿", platformStoreId);
             return CompensationResult.success();
         }
 
-        log.info("【补偿任务】门店{}开始执行补偿，失败订单数={}", platformStoreId, failedOrders.size());
 
         CompensationResult result = new CompensationResult();
         result.setTotalCount(failedOrders.size());
@@ -3658,15 +3515,11 @@ public class EleOrderServiceImpl implements EleOrderService {
             result.setAllCompleted(false);
         }
 
-        log.info("【补偿任务】门店{}补偿完成，成功={}, 仍失败={}",
-                platformStoreId, result.getSuccessCount(), result.getFailedCount());
 
         return result;
     }
 
-    /**
-     * 补偿单个订单
-     */
+    
     private CompensationTaskResult compensateSingleOrder(FailedOrderInfo failedInfo, String platformStoreId,
             String merchantCode, String erpStoreCode) {
         CompensationTaskResult taskResult = new CompensationTaskResult();
@@ -3707,14 +3560,9 @@ public class EleOrderServiceImpl implements EleOrderService {
         return taskResult;
     }
 
-    /**
-     * 处理补偿结果
-     * - 成功的订单：不处理
-     * - 仍失败的订单：写入失败日志表 + 立即告警
-     */
+    
     private void handleCompensationResults(CompensationResult result) {
         if (result == null || result.getFailedCount() == 0) {
-            log.info("【补偿结果】所有订单补偿成功");
             return;
         }
 
@@ -3744,9 +3592,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    /**
-     * 立即发送告警（只要补偿失败就告警，无阈值）
-     */
+    
     private void sendImmediateAlert(EleOrderFailRecord record, CompensationTaskResult taskResult) {
         try {
             String traceId = TracerUtils.getTraceId();
@@ -3773,12 +3619,9 @@ public class EleOrderServiceImpl implements EleOrderService {
         }
     }
 
-    /**
-     * 手动重试失败记录（使用retryExecutor异步执行）
-     */
+    
     private void retryFailRecordForSingleOrder(EleOrderFailRecord record, boolean overwrite) {
-        // 1. 校验门店是否存在
-        String platformStoreId = record.getPlatformStoreId();
+                String platformStoreId = record.getPlatformStoreId();
         if (StrUtil.isNotBlank(platformStoreId)) {
             StorePlatformRespVO storeInfo = storeService.getPlatformTableByPlatformStoreId(platformStoreId);
             if (storeInfo == null) {
@@ -3791,14 +3634,12 @@ public class EleOrderServiceImpl implements EleOrderService {
             }
         }
 
-        // 2. 更新重试次数和状态
-        record.setRetryCount(record.getRetryCount() == null ? 1 : record.getRetryCount() + 1);
+                record.setRetryCount(record.getRetryCount() == null ? 1 : record.getRetryCount() + 1);
         record.setProcessStatus("RETRYING");
         record.setUpdateTime(System.currentTimeMillis());
         eleOrderFailRecordMapper.updateById(record);
 
-        // 3. 提交到retryExecutor异步执行
-        retryExecutor.execute(() -> {
+                retryExecutor.execute(() -> {
             try {
                 OrderDetailRespDTO detail = getOrderDetailRemote(
                         record.getPlatformStoreId(), record.getMerchantCode(), record.getErpStoreCode(),
@@ -3821,10 +3662,7 @@ public class EleOrderServiceImpl implements EleOrderService {
         });
     }
 
-    /**
-     * 获取门店订单总数（翱象API不传status可获取所有状态的总数）
-     * 方案v1.5：不传status参数，直接获取门店全部订单总数
-     */
+    
     private long getTotalCountByStatus(String platformStoreId, String merchantCode, String erpStoreCode,
             Long startTime, Long endTime) {
         try {
@@ -3834,8 +3672,7 @@ public class EleOrderServiceImpl implements EleOrderService {
             req.setErpStoreCode(erpStoreCode);
             req.setStartTime(startTime);
             req.setEndTime(endTime);
-            // 不传status参数，翱象API返回所有状态的订单总数
-            req.setPageSize(1);
+                        req.setPageSize(1);
             req.setScrollId(null);
 
             eleApiRateLimiter.acquirePermit(EleApiRateLimiter.API_ORDER_LIST);

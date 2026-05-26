@@ -19,10 +19,7 @@ public interface OrderDiscountMapper extends BaseMapperX<OrderDiscountDO> {
                 .eq(OrderDiscountDO::getDeleted, false));
     }
 
-    /**
-     * UPSERT 批量插入/更新
-     * 基于 (order_id, activity_id) 唯一索引，存在则 UPDATE，不存在则 INSERT
-     */
+    
     @Insert("<script>" +
             "INSERT INTO order_discount_table (order_id, sub_order_id, activity_id, activity_name, " +
             "activity_order_type, discount_type, discount_fee, merchant_fee, platform_fee, " +

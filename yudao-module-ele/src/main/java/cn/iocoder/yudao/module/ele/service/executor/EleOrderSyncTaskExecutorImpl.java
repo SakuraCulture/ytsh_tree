@@ -19,14 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-/**
- * 饿了么订单同步执行器实现
- *
- * 通过 ThreadPoolTaskExecutor 统一管理线程池，解决手动创建 ExecutorService 导致的资源泄漏问题。
- * 采用分批提交策略，避免一次性提交过多任务导致线程池满载。
- *
- * @author 优团科技数字化团队
- */
+
 @Slf4j
 @Service
 public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
@@ -41,7 +34,7 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
     @Resource
     private EleApiRateLimiter eleApiRateLimiter;
 
-    /** 每批提交的门店数量 */
+    
     @Value("${ele.order.sync.batch-size:20}")
     private int batchSize;
 
@@ -104,8 +97,7 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
                     elapsed, failedStores, true);
         }
 
-        // 分批提交任务
-        int concurrentBatchSize = Math.max(1, Math.min(batchSize, storeConcurrency));
+                int concurrentBatchSize = Math.max(1, Math.min(batchSize, storeConcurrency));
         int totalBatches = (storeCount + concurrentBatchSize - 1) / concurrentBatchSize;
         for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
             if (shutdownStateManager.isShuttingDown()) {
@@ -141,8 +133,7 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
                 });
             }
 
-            // 等待当前批次完成（动态超时：每店预估30秒，最少5分钟）
-            try {
+                        try {
                 long timeoutMinutes = Math.max(5, (batchStores.size() * 30L) / 60);
                 boolean completed = batchLatch.await(timeoutMinutes, TimeUnit.MINUTES);
                 if (!completed) {
@@ -166,12 +157,7 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
                 elapsed, failedStores, true);
     }
 
-    /**
-     * 实际执行单店同步的占位方法，由外部注入实现
-     * <p>
-     * 此处通过 {@link StoreSyncDelegate} 委托给 EleOrderServiceImpl 执行具体逻辑，
-     * 避免 EleOrderSyncTaskExecutorImpl 直接依赖业务实现类，实现解耦。
-     */
+    
     private StoreSyncDelegate syncDelegate;
 
     public void setSyncDelegate(StoreSyncDelegate delegate) {
@@ -189,14 +175,8 @@ public class EleOrderSyncTaskExecutorImpl implements EleOrderSyncTaskExecutor {
                 break;
             }
             waitForApiBacklogDrainedBeforeSubmit();
-            log.info("【门店串行同步】开始同步第{}/{}个门店，platformStoreId={}",
-                    i + 1, total, store.getPlatformStoreId());
             long storeStart = System.currentTimeMillis();
             syncAction.accept(store);
-            log.info("【门店串行同步】第{}/{}个门店处理结束，platformStoreId={}，耗时{}秒，累计成功{}家，失败{}家",
-                    i + 1, total, store.getPlatformStoreId(),
-                    (System.currentTimeMillis() - storeStart) / 1000,
-                    successCount.get(), failCount.get());
         }
     }
 

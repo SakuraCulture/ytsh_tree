@@ -17,11 +17,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 
-/**
- * 饿了么订单补偿任务线程池管理接口
- *
- * @author 优团科技数字化团队
- */
+
 @Tag(name = "管理后台 - 饿了么补偿任务线程池")
 @RestController
 @RequestMapping("/ele/compensate/pool")

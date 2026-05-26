@@ -117,11 +117,7 @@ public interface OrderMapper extends BaseMapperX<OrderDO> {
                 .eq(OrderDO::getDeleted, false));
     }
 
-    /**
-     * 批量查询已存在的订单ID（用于批量插入前判断）
-     * @param orderIds 订单ID列表
-     * @return 已存在的订单ID列表
-     */
+    
     default List<String> selectExistingOrderIds(Collection<String> orderIds) {
         if (orderIds == null || orderIds.isEmpty()) {
             return List.of();
@@ -140,25 +136,7 @@ public interface OrderMapper extends BaseMapperX<OrderDO> {
                 .eq(OrderDO::getStoreCode, platformStoreId));
     }
 
-    /**
-     * 按订单状态分组统计
-     * @param platformStoreId 平台门店ID（可选）
-     * @param startTime 开始时间（秒级时间戳）
-     * @param endTime 结束时间（秒级时间戳）
-     * @param orderId 订单ID/订单小号（可选）
-     * @param channelOrderId 渠道订单号（可选）
-     * @param buyerName 收货人（可选）
-     * @param buyerPhoneSuffix 手机号后缀（可选）
-     * @param skuName 商品名称（可选）
-     * @param channelType 渠道类型（可选）
-     * @param arriveType 订单类型/到达类型（可选）
-     * @param exceptionType 订单异常（可选）
-     * @param deliveryMode 配送类型（可选）
-     * @param orderIdsBySkuName 根据商品名称筛选的订单ID列表
-     * @param orderIdsByPlatform 根据渠道和配送方式筛选的订单ID列表
-     * @param address 收货地址（可选）
-     * @return 状态码为key，数量为value的Map
-     */
+    
     default Map<Integer, Long> selectCountGroupByStatus(
             String platformStoreId,
             Long startTime,

@@ -19,10 +19,7 @@ public interface OrderItemMapper extends BaseMapperX<OrderItemDO> {
                 .eq(OrderItemDO::getDeleted, false));
     }
 
-    /**
-     * UPSERT 批量插入/更新
-     * 基于 subOrderId 唯一索引，存在则 UPDATE，不存在则 INSERT
-     */
+    
     @Insert("<script>" +
             "INSERT INTO order_item_table (sub_order_id, order_id, sku_code, sub_sku_code, product_sku_id, " +
             "sku_name, barcode, specification, weight, total_weight, buy_amount, price, total_fee, pay_fee, " +

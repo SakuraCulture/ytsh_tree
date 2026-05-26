@@ -11,8 +11,8 @@ import * as ConfigApi from '@/api/infra/config'
 defineOptions({ name: 'InfraSwagger' })
 
 const loading = ref(true) // 是否加载中
-const src = ref(import.meta.env.VITE_BASE_URL + '/doc.html') // Knife4j UI
-// const src = ref(import.meta.env.VITE_BASE_URL + '/swagger-ui') // Swagger UI
+const src = ref(import.meta.env.VITE_BACKEND_URL + '/doc.html') // Knife4j UI
+// const src = ref(import.meta.env.VITE_BACKEND_URL + '/swagger-ui') // Swagger UI
 
 /** 初始化 */
 onMounted(async () => {

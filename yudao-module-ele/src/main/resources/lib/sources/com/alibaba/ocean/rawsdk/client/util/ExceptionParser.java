@@ -7,13 +7,7 @@ import com.alibaba.ocean.rawsdk.client.exception.OceanException;
 
 public class ExceptionParser {
 
-    /**
-     * for Protocol.Json2
-     *
-     * @param exption
-     * @return the new exception
-     * @throws IOException
-     */
+    
     @SuppressWarnings("unchecked")
     public static Throwable buildException4Json2(Map exption) {
         Map<String, Object> m = exption;
@@ -29,8 +23,7 @@ public class ExceptionParser {
             errorMesage = (String) m.get("errorMessage");
         }
 
-        // if null ,then just return the result
-        if (null != errorMesage && errorMesage != "") {
+                if (null != errorMesage && errorMesage != "") {
             errorMesage = "Unknow message defined in response.";
         }
         return buildException(errorCodeStr, errorMesage);

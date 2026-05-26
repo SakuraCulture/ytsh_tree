@@ -30,13 +30,13 @@ public class EleOrderFailRecord {
 
     private String failMessage;
 
-    /** 超时阶段：REDIS_QUERY/STORE_INFO_QUERY/API_CALL/RATE_LIMIT_WAIT/TOTAL_TIMEOUT/SINGLE_TIMEOUT */
+    
     private String timeoutStage;
 
-    /** 超时用时（毫秒） */
+    
     private Long timeoutElapsedMs;
 
-    /** 超时阈值（毫秒） */
+    
     private Long timeoutThresholdMs;
 
     private String requestParam;

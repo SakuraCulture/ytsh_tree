@@ -35,7 +35,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
     private static final String STATUS_PARTIAL_FAIL = "PARTIAL_FAIL";
     private static final String STATUS_CANCELLED = "CANCELLED";
     private static final int SKU_BATCH_SIZE = 50;
-    private static final int MAX_ERROR_MSG_LENGTH = 4000;
+    private static final int MAX_ERROR_MSG_LENGTH = 1000;
 
     @Resource
     private EleStoreInventoryBatchTaskMapper taskMapper;
@@ -224,7 +224,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
     }
 
     private void markTaskFailed(Long taskId, String errorMsg) {
-        taskMapper.markFailedIfRunning(taskId, truncateErrorMsg(errorMsg), LocalDateTime.now());
+        taskMapper.markFailedIfRunning(taskId, errorMsg, LocalDateTime.now());
     }
 
     private void finishTask(Long taskId) {

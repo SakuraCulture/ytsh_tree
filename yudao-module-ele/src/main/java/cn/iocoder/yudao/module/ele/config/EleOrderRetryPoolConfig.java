@@ -7,13 +7,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.ThreadPoolExecutor;
 
-/**
- * 饿了么订单失败重试任务线程池配置
- *
- * 用于异步重试失败的订单落库任务，与主同步线程池隔离，避免重试任务占用同步资源。
- *
- * @author 优团科技数字化团队
- */
+
 @Configuration
 public class EleOrderRetryPoolConfig {
 

@@ -13,14 +13,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
-/**
- * 自适应线程池管理器
- *
- * 根据队列使用率和活跃率动态调整线程池大小,避免队列积压和线程满载。
- * 适用于饿了么订单同步等IO密集型任务。
- *
- * @author 优团科技数字化团队
- */
+
 @Component
 public class AdaptivePoolManager {
 

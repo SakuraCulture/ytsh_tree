@@ -22,10 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * 订单同步对账服务
- * 负责对比API拉取数量与落库数量，触发二次拉取，记录对账结果
- */
+
 @Slf4j
 @Service
 public class EleOrderReconciliationService {
@@ -39,20 +36,11 @@ public class EleOrderReconciliationService {
     @Resource
     private OrderSyncProgressCache progressCache;
 
-    /**
-     * 对账结果 - 方案v1.2：三组数据对比（API原始总数、过滤后拉取数、实际落库数）
-     */
+    
     @Data
     public static class ReconciliationResult {
         private boolean consistent;
-        private long apiRawTotal;        // API原始总数（包含所有状态）
-        private long pulledTotal;        // 过滤后拉取数（7个目标状态）
-        private long savedTotal;         // 实际落库总数
-        private long pullDiscrepancy;    // 拉取差异（API总数 vs 拉取数）
-        private long saveDiscrepancy;    // 保存差异（拉取数 vs 落库数）
-        private double discrepancyRate;  // 差异率
-        private int dataIntegrity;       // 1完整 2不完整
-        private Map<Integer, Long> apiStatusCounts;
+        private long apiRawTotal;                private long pulledTotal;                private long savedTotal;                 private long pullDiscrepancy;            private long saveDiscrepancy;            private double discrepancyRate;          private int dataIntegrity;               private Map<Integer, Long> apiStatusCounts;
         private Map<Integer, Long> savedStatusCounts;
         private Map<Integer, Integer> pageCounts;
         private List<SyncErrorDTO> reconciliationErrors;
@@ -68,17 +56,7 @@ public class EleOrderReconciliationService {
         }
     }
 
-    /**
-     * 执行对账 - 方案v1.2：三组数据对比
-     *
-     * @param platformStoreId 门店ID
-     * @param apiRawTotal     API原始总数（包含所有状态）
-     * @param pulledTotal     全状态拉取订单数（按 orderId 去重后）
-     * @param savedTotal      实际落库总数
-     * @param batchId         同步批次ID
-     * @param syncLog         同步日志对象
-     * @return 对账结果
-     */
+    
     public ReconciliationResult reconcile(String platformStoreId, long apiRawTotal,
                                            long pulledTotal,
                                            long savedTotal,
@@ -87,9 +65,7 @@ public class EleOrderReconciliationService {
         return reconcile(platformStoreId, apiRawTotal, null, pulledTotal, savedTotal, batchId, syncLog);
     }
 
-    /**
-     * 执行对账 - 兼容旧接口
-     */
+    
     public ReconciliationResult reconcile(String platformStoreId, long apiRawTotal,
                                            Map<Integer, Long> apiStatusCounts,
                                            long pulledTotal,
@@ -150,16 +126,11 @@ public class EleOrderReconciliationService {
         detail.put("integrityLevel", result.getDataIntegrity());
         result.setReconciliationDetailJson(JSONUtil.toJsonStr(detail));
 
-        log.info("【对账完成】门店={}, API原始={}, 拉取={}, 落库={}, 拉取差异={}, 落库差异={}, 差异率={}%, 一致={}",
-                platformStoreId, apiRawTotal, pulledTotal, savedTotal, pullDiscrepancy, saveDiscrepancy,
-                discrepancyRate, result.isConsistent());
 
         return result;
     }
 
-    /**
-     * 更新同步日志的对账字段 - 方案v1.2：记录三组对比数据
-     */
+    
     public void updateSyncLogWithReconciliation(EleOrderSyncLog syncLog, ReconciliationResult result) {
         syncLog.setExpectedTotal((int) result.getApiRawTotal());
         syncLog.setActualTotal((int) result.getPulledTotal());
@@ -182,9 +153,7 @@ public class EleOrderReconciliationService {
         syncLog.setPageCounts(null);
     }
 
-    /**
-     * 更新Redis进度中的对账数据 - 方案v1.2：使用三组对比数据
-     */
+    
     public void updateRedisProgress(String batchId, String platformStoreId,
                                      StoreSyncProgress progress, ReconciliationResult result) {
         if (progress == null) {
@@ -202,9 +171,7 @@ public class EleOrderReconciliationService {
         progressCache.updateStoreProgress(batchId, platformStoreId, progress);
     }
 
-    /**
-     * 标记门店同步完成并清理Redis
-     */
+    
     public void markStoreCompleted(String batchId, String platformStoreId) {
         progressCache.markStoreCompleted(batchId, platformStoreId);
     }

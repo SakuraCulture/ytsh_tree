@@ -68,7 +68,6 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
         RLock lock = getCompensateLock(taskId);
         boolean acquired = acquireLock(lock, waitSeconds, leaseMinutes, "补偿任务", taskId);
         if (acquired) {
-            log.info("【分布式锁】补偿任务{}锁获取成功", taskId);
         } else {
             log.warn("【分布式锁】补偿任务{}锁获取失败，任务正在执行", taskId);
         }
@@ -80,7 +79,6 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
         RLock lock = getSyncLock(platformStoreId);
         if (lock.isHeldByCurrentThread()) {
             lock.unlock();
-            log.info("【分布式锁】门店{}同步锁释放成功", platformStoreId);
         }
     }
 
@@ -89,7 +87,6 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
         RLock lock = getCompensateLock(taskId);
         if (lock.isHeldByCurrentThread()) {
             lock.unlock();
-            log.info("【分布式锁】补偿任务{}锁释放成功", taskId);
         }
     }
 
@@ -124,7 +121,6 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
         RLock lock = getOrderLock(orderId);
         if (lock.isHeldByCurrentThread()) {
             lock.unlock();
-            log.info("【分布式锁】订单{}锁释放成功", orderId);
         }
     }
 
@@ -139,7 +135,6 @@ public class EleOrderLockServiceImpl implements EleOrderLockService {
         try {
             boolean acquired = lock.tryLock(waitSeconds, TimeUnit.SECONDS);
             if (acquired) {
-                log.info("【分布式锁】订单{}锁获取成功（看门狗模式）", orderId);
             } else {
                 log.warn("【分布式锁】订单{}锁获取失败，订单正在处理中", orderId);
             }
