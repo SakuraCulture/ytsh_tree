@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.business.controller.admin.store.vo.StorePlatformR
 import cn.iocoder.yudao.module.business.service.store.StoreService;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchAllOpenReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchCurrentReqVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchStoresReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskPageReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskRespVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskStorePageReqVO;
@@ -26,7 +27,9 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class EleStoreInventoryBatchServiceImpl implements EleStoreInventoryBatchService {
@@ -36,6 +39,7 @@ public class EleStoreInventoryBatchServiceImpl implements EleStoreInventoryBatch
     private static final String SOURCE_TYPE_SCHEDULED = "SCHEDULED";
     private static final String SCOPE_CURRENT_STORE = "CURRENT_STORE";
     private static final String SCOPE_ALL_OPEN_STORES = "ALL_OPEN_STORES";
+    private static final String SCOPE_SELECTED_STORES = "SELECTED_STORES";
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_RUNNING = "RUNNING";
     private static final String STATUS_CANCELLED = "CANCELLED";
@@ -91,6 +95,46 @@ public class EleStoreInventoryBatchServiceImpl implements EleStoreInventoryBatch
     @Transactional(rollbackFor = Exception.class)
     public Long createScheduledAllOpenStoresBatchTask() {
         return createAllOpenStoresBatchTask(SOURCE_TYPE_SCHEDULED);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long createStoresBatchTask(EleStoreInventoryBatchStoresReqVO reqVO) {
+        List<String> platformStoreIds = reqVO.getPlatformStoreIds().stream()
+                .map(StrUtil::trim)
+                .filter(StrUtil::isNotBlank)
+                .distinct()
+                .collect(Collectors.toList());
+
+        if (CollUtil.isEmpty(platformStoreIds)) {
+            throw new IllegalArgumentException("platformStoreIds 不能为空");
+        }
+
+        String lockKey = buildSelectedStoresTaskLockKey();
+        eleOrderLockService.lockStoreInventoryBatchTask(lockKey, CREATE_LOCK_WAIT_SECONDS, CREATE_LOCK_LEASE_MINUTES);
+        try {
+            List<StorePlatformRespVO> validStores = new ArrayList<>();
+            for (String platformStoreId : platformStoreIds) {
+                StorePlatformRespVO store = storeService.getPlatformTableByPlatformStoreId(platformStoreId);
+                if (store != null) {
+                    validStores.add(store);
+                }
+            }
+
+            if (CollUtil.isEmpty(validStores)) {
+                throw new RuntimeException("没有可拉取库存的有效门店");
+            }
+
+            EleStoreInventoryBatchTaskDO task = createTask(SOURCE_TYPE_MANUAL, SCOPE_SELECTED_STORES, validStores.size());
+            taskMapper.insert(task);
+            for (StorePlatformRespVO store : validStores) {
+                taskStoreMapper.insert(createSelectedTaskStore(task, store));
+            }
+            submitAndUnlockAfterTransaction(task.getId(), lockKey);
+            return task.getId();
+        } finally {
+            unlockIfNoTransactionSynchronization(lockKey);
+        }
     }
 
     @Override
@@ -200,6 +244,18 @@ public class EleStoreInventoryBatchServiceImpl implements EleStoreInventoryBatch
         return taskStore;
     }
 
+    private EleStoreInventoryBatchTaskStoreDO createSelectedTaskStore(EleStoreInventoryBatchTaskDO task,
+                                                                       StorePlatformRespVO store) {
+        String platformStoreId = StrUtil.trim(store.getPlatformStoreId());
+        EleStoreInventoryBatchTaskStoreDO taskStore = createTaskStore(task);
+        taskStore.setStoreId(store.getStoreId());
+        taskStore.setStoreName(store.getPlatformStoreName());
+        taskStore.setMerchantCode(StrUtil.trim(store.getSettlementAccount()));
+        taskStore.setErpStoreCode(platformStoreId);
+        taskStore.setPlatformStoreId(platformStoreId);
+        return taskStore;
+    }
+
     private EleStoreInventoryBatchTaskStoreDO createTaskStore(EleStoreInventoryBatchTaskDO task) {
         EleStoreInventoryBatchTaskStoreDO taskStore = new EleStoreInventoryBatchTaskStoreDO();
         taskStore.setTaskId(task.getId());
@@ -246,5 +302,9 @@ public class EleStoreInventoryBatchServiceImpl implements EleStoreInventoryBatch
 
     private String buildAllOpenStoresTaskLockKey() {
         return SCOPE_ALL_OPEN_STORES;
+    }
+
+    private String buildSelectedStoresTaskLockKey() {
+        return SCOPE_SELECTED_STORES;
     }
 }
