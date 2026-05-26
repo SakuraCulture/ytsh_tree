@@ -250,7 +250,7 @@ public class EleStoreInventoryBatchServiceImpl implements EleStoreInventoryBatch
         EleStoreInventoryBatchTaskStoreDO taskStore = createTaskStore(task);
         taskStore.setStoreId(store.getStoreId());
         taskStore.setStoreName(store.getPlatformStoreName());
-        taskStore.setMerchantCode(StrUtil.trim(store.getSettlementAccount()));
+        taskStore.setMerchantCode(StrUtil.blankToDefault(StrUtil.trim(store.getSettlementAccount()), "LY_TT_QQD"));
         taskStore.setErpStoreCode(platformStoreId);
         taskStore.setPlatformStoreId(platformStoreId);
         return taskStore;
