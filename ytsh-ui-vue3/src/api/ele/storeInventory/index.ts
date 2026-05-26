@@ -141,6 +141,10 @@ export const createAllOpenInventoryTask = async () => {
   return await request.post<number>({ url: '/ele/store-inventory/batch/all-open', data: {} })
 }
 
+export const createStoresInventoryTask = async (platformStoreIds: string[]) => {
+  return await request.post<number>({ url: '/ele/store-inventory/batch/stores', data: { platformStoreIds } })
+}
+
 export const getInventoryTaskPage = async (params: EleStoreInventoryBatchTaskPageReqVO) => {
   return await request.get<EleStoreInventoryBatchTaskPageRespVO>({ url: '/ele/store-inventory/batch/page', params })
 }
