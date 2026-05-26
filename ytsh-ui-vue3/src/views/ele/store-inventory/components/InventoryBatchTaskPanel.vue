@@ -13,6 +13,9 @@
           <el-button type="success" :loading="creatingAllOpen" @click="createAllOpenTask">
             所有开业门店库存拉取
           </el-button>
+          <el-button type="primary" :loading="creatingSelected" @click="openStoresDialog()">
+            指定门店拉取
+          </el-button>
           <el-button @click="loadTasks()">刷新</el-button>
         </div>
       </div>
@@ -117,17 +120,62 @@
         <el-table-column prop="errorMsg" label="错误原因" min-width="180" show-overflow-tooltip />
       </el-table>
     </el-dialog>
+
+    <el-dialog v-model="storeSelectVisible" title="选择门店进行库存拉取" width="720px" destroy-on-close>
+      <div class="store-select-header">
+        <el-input
+          v-model="storeSearchKeyword"
+          placeholder="搜索门店名称或编码"
+          clearable
+          style="width: 260px"
+        />
+        <span class="selected-count">已选 {{ selectedStoreIds.length }} 个门店</span>
+      </div>
+      <el-table
+        ref="storeTableRef"
+        :data="filteredStoreList"
+        v-loading="storeDialogLoading"
+        border
+        stripe
+        max-height="420"
+        style="width: 100%"
+        @selection-change="handleStoreSelectionChange"
+      >
+        <el-table-column type="selection" width="50" />
+        <el-table-column prop="platformStoreId" label="平台门店ID" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="storeName" label="门店名称" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="storeStatus" label="状态" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.storeStatus === 1 ? 'success' : 'info'">
+              {{ row.storeStatus === 1 ? '开业' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="storeSelectVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="creatingSelected"
+          :disabled="selectedStoreIds.length === 0"
+          @click="createStoresTask"
+        >
+          确认拉取 ({{ selectedStoreIds.length }})
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import Pagination from '@/components/Pagination/index.vue'
 import {
   cancelInventoryTask,
   createAllOpenInventoryTask,
+  createStoresInventoryTask,
   getInventoryTask,
   getInventoryTaskPage,
   getInventoryTaskStores,
@@ -135,9 +183,17 @@ import {
   type EleStoreInventoryBatchTaskRespVO,
   type EleStoreInventoryBatchTaskStoreRespVO
 } from '@/api/ele/storeInventory'
+import { TableApi } from '@/api/business/store'
 
 const loading = ref(false)
 const creatingAllOpen = ref(false)
+const creatingSelected = ref(false)
+const storeSelectVisible = ref(false)
+const storeDialogLoading = ref(false)
+const storeAllList = ref<any[]>([])
+const storeSearchKeyword = ref('')
+const selectedStoreIds = ref<string[]>([])
+const storeTableRef = ref()
 const taskList = ref<EleStoreInventoryBatchTaskRespVO[]>([])
 const total = ref(0)
 const currentTask = ref<EleStoreInventoryBatchTaskRespVO>()
@@ -153,6 +209,16 @@ const queryParams = reactive<EleStoreInventoryBatchTaskPageReqVO>({
   pageSize: 10,
   status: '',
   scope: ''
+})
+
+const filteredStoreList = computed(() => {
+  if (!storeSearchKeyword.value) return storeAllList.value
+  const kw = storeSearchKeyword.value.toLowerCase()
+  return storeAllList.value.filter(
+    (s: any) =>
+      (s.storeName || '').toLowerCase().includes(kw) ||
+      (s.platformStoreId || '').toLowerCase().includes(kw)
+  )
 })
 
 const clearPollTimer = () => {
@@ -263,6 +329,52 @@ const createAllOpenTask = async () => {
   }
 }
 
+const openStoresDialog = async () => {
+  storeSelectVisible.value = true
+  storeSearchKeyword.value = ''
+  selectedStoreIds.value = []
+  storeDialogLoading.value = true
+  try {
+    const data = await TableApi.getTableAllSimpleList(1)
+    storeAllList.value = Array.isArray(data) ? data : []
+  } catch (error: any) {
+    ElMessage.error(error?.message || '加载门店列表失败')
+  } finally {
+    storeDialogLoading.value = false
+  }
+}
+
+const handleStoreSelectionChange = (rows: any[]) => {
+  selectedStoreIds.value = rows.map((r) => r.platformStoreId || '').filter(Boolean)
+}
+
+const createStoresTask = async () => {
+  if (selectedStoreIds.value.length === 0) {
+    ElMessage.warning('请至少选择一个门店')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定对已选的 ${selectedStoreIds.value.length} 个门店创建库存拉取任务吗？`,
+      '确认创建',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  creatingSelected.value = true
+  try {
+    const taskId = await createStoresInventoryTask(selectedStoreIds.value)
+    ElMessage.success(`已创建任务 ${taskId || ''}`)
+    storeSelectVisible.value = false
+    await loadTasks()
+  } catch (error: any) {
+    ElMessage.error(error?.message || '创建任务失败')
+  } finally {
+    creatingSelected.value = false
+  }
+}
+
 const normalizeTaskId = (id?: number | string) => {
   const normalized = typeof id === 'number' ? id : Number(id)
   if (!Number.isInteger(normalized) || normalized <= 0) {
@@ -308,6 +420,7 @@ const cancelTask = async (id?: number | string) => {
 const formatScope = (scope?: string) => {
   if (scope === 'CURRENT_STORE') return '当前门店'
   if (scope === 'ALL_OPEN_STORES') return '所有开业门店'
+  if (scope === 'SELECTED_STORES') return '指定门店'
   return scope || '--'
 }
 
@@ -414,6 +527,18 @@ onUnmounted(() => {
 .detail-tip {
   font-size: 12px;
   font-weight: 400;
+  color: #64748b;
+}
+
+.store-select-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.selected-count {
+  font-size: 13px;
   color: #64748b;
 }
 </style>

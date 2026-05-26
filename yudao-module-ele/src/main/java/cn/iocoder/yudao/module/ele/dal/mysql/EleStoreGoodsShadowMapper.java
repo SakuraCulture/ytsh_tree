@@ -164,7 +164,6 @@ public interface EleStoreGoodsShadowMapper extends BaseMapperX<EleStoreGoodsShad
         return selectList(new LambdaQueryWrapperX<EleStoreGoodsShadowDO>()
                 .eqIfPresent(EleStoreGoodsShadowDO::getErpStoreCode, erpStoreCode)
                 .eq(EleStoreGoodsShadowDO::getIsActive, 1)
-                .ne(EleStoreGoodsShadowDO::getMatchStatus, EleStoreGoodsShadowStatus.UNMATCHED)
                 .orderByDesc(EleStoreGoodsShadowDO::getUpdateTime))
                 .stream()
                 .map(EleStoreGoodsShadowDO::getSkuCode)

@@ -38,9 +38,10 @@ public interface EleStoreInventoryBatchTaskStoreMapper extends BaseMapperX<EleSt
     }
 
     default int failUnfinishedByTaskId(Long taskId, String errorMsg, LocalDateTime finishedAt) {
+        String truncated = cn.hutool.core.util.StrUtil.subPre(errorMsg, 4000);
         return update(new LambdaUpdateWrapper<EleStoreInventoryBatchTaskStoreDO>()
                 .set(EleStoreInventoryBatchTaskStoreDO::getStatus, "FAILED")
-                .set(EleStoreInventoryBatchTaskStoreDO::getErrorMsg, errorMsg)
+                .set(EleStoreInventoryBatchTaskStoreDO::getErrorMsg, truncated)
                 .set(EleStoreInventoryBatchTaskStoreDO::getFinishedAt, finishedAt)
                 .eq(EleStoreInventoryBatchTaskStoreDO::getTaskId, taskId)
                 .in(EleStoreInventoryBatchTaskStoreDO::getStatus, "PENDING", "RUNNING"));

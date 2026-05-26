@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.ele.service;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchAllOpenReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchCurrentReqVO;
+import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchStoresReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskPageReqVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskRespVO;
 import cn.iocoder.yudao.module.ele.controller.admin.vo.EleStoreInventoryBatchTaskStorePageReqVO;
@@ -15,6 +16,8 @@ public interface EleStoreInventoryBatchService {
     Long createAllOpenStoresBatchTask(EleStoreInventoryBatchAllOpenReqVO reqVO);
 
     Long createScheduledAllOpenStoresBatchTask();
+
+    Long createStoresBatchTask(EleStoreInventoryBatchStoresReqVO reqVO);
 
     PageResult<EleStoreInventoryBatchTaskRespVO> getTaskPage(EleStoreInventoryBatchTaskPageReqVO reqVO);
 

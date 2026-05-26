@@ -35,6 +35,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
     private static final String STATUS_PARTIAL_FAIL = "PARTIAL_FAIL";
     private static final String STATUS_CANCELLED = "CANCELLED";
     private static final int SKU_BATCH_SIZE = 50;
+    private static final int MAX_ERROR_MSG_LENGTH = 4000;
 
     @Resource
     private EleStoreInventoryBatchTaskMapper taskMapper;
@@ -223,7 +224,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
     }
 
     private void markTaskFailed(Long taskId, String errorMsg) {
-        taskMapper.markFailedIfRunning(taskId, errorMsg, LocalDateTime.now());
+        taskMapper.markFailedIfRunning(taskId, truncateErrorMsg(errorMsg), LocalDateTime.now());
     }
 
     private void finishTask(Long taskId) {
@@ -238,7 +239,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         updateObj.setShadowSuccessCount(aggregate.shadowSuccessCount);
         updateObj.setGovernanceCount(aggregate.governanceCount);
         updateObj.setFailureCount(aggregate.failureCount);
-        updateObj.setErrorMsg(aggregate.joinedErrorMsg());
+        updateObj.setErrorMsg(truncateErrorMsg(aggregate.joinedErrorMsg()));
         updateObj.setFinishedAt(LocalDateTime.now());
         taskMapper.finishIfRunning(taskId, aggregate.failedStoreCount == 0 ? STATUS_SUCCESS : STATUS_PARTIAL_FAIL, updateObj);
     }
@@ -257,7 +258,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         updateObj.setShadowSuccessCount(summary.shadowSuccessCount);
         updateObj.setGovernanceCount(summary.governanceCount);
         updateObj.setFailureCount(summary.failureCount);
-        updateObj.setErrorMsg(errorMsg);
+        updateObj.setErrorMsg(truncateErrorMsg(errorMsg));
         updateObj.setFinishedAt(LocalDateTime.now());
         taskStoreMapper.finishIfRunning(taskStoreId, status, updateObj);
     }
@@ -274,7 +275,7 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
         updateObj.setShadowSuccessCount(aggregate.shadowSuccessCount);
         updateObj.setGovernanceCount(aggregate.governanceCount);
         updateObj.setFailureCount(aggregate.failureCount);
-        updateObj.setErrorMsg(aggregate.joinedErrorMsg());
+        updateObj.setErrorMsg(truncateErrorMsg(aggregate.joinedErrorMsg()));
         taskMapper.refreshAggregateIfRunning(taskId, updateObj);
     }
 
@@ -314,6 +315,13 @@ public class EleStoreInventoryBatchExecutorImpl implements EleStoreInventoryBatc
 
     private int valueOf(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private String truncateErrorMsg(String msg) {
+        if (StrUtil.isBlank(msg) || msg.length() <= MAX_ERROR_MSG_LENGTH) {
+            return msg;
+        }
+        return msg.substring(0, MAX_ERROR_MSG_LENGTH) + "...(truncated)";
     }
 
     private static class StoreTaskSummary {

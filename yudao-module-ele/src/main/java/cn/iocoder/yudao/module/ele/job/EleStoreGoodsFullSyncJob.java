@@ -33,7 +33,7 @@ public class EleStoreGoodsFullSyncJob {
     @Resource
     private ApplicationContext applicationContext;
 
-    private TaskScheduler taskScheduler;
+    private ThreadPoolTaskScheduler taskScheduler;
     private ScheduledFuture<?> scheduleTask;
 
     @PostConstruct
